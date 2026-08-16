@@ -1,0 +1,153 @@
+require('dotenv').config();
+process.env.TZ = process.env.TZ || 'Asia/Jakarta';
+
+const express = require('express');
+const path = require('path');
+const session = require('express-session');
+const MySQLStoreFactory = require('express-mysql-session');
+const expressLayouts = require('express-ejs-layouts');
+const bcrypt = require('bcryptjs');
+const cron = require('node-cron');
+const db = require('./config/db');
+const csrf = require('./middleware/csrf');
+const commonLocals = require('./middleware/common');
+const paymentProofUpload = require('./middleware/paymentProofUpload');
+const customerExcelUpload = require('./middleware/customerExcelUpload');
+const { requireAuth } = require('./middleware/auth');
+const { generateMonthlyInvoices } = require('./services/invoiceService');
+const { runAutoIsolation } = require('./services/networkService');
+
+const app = express();
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(expressLayouts);
+app.set('layout', 'partials/layout');
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.set('trust proxy', 1);
+
+// Baseline security headers for an internal admin application behind Cloudflare.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
+const MySQLStore = MySQLStoreFactory(session);
+const sessionStore = new MySQLStore({
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || 'inkamnet',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'inkamnet',
+  createDatabaseTable: true
+});
+
+app.use(session({
+  name: 'inkamnet.sid',
+  secret: process.env.SESSION_SECRET || 'change-this-secret-now',
+  store: sessionStore,
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === 'true', maxAge: 1000*60*60*12 }
+}));
+app.use(commonLocals);
+// Parse multipart payment-proof forms before CSRF validation so the hidden token is available.
+app.use('/customers/import', (req, res, next) => {
+  if (req.method === 'POST' && req.is('multipart/form-data')) {
+    return customerExcelUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'File Excel maksimal 8 MB.' : err.message };
+        return res.redirect('/customers');
+      }
+      next();
+    });
+  }
+  next();
+});
+app.use('/payments', (req, res, next) => {
+  if (['POST','PUT','PATCH'].includes(req.method) && req.is('multipart/form-data')) {
+    return paymentProofUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'Bukti pembayaran maksimal 6 MB.' : err.message };
+        return res.redirect('/payments');
+      }
+      next();
+    });
+  }
+  next();
+});
+app.use(csrf);
+
+// Lightweight health endpoint used by Docker/operations monitoring.
+app.get('/healthz', async (req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.status(200).json({ status: 'ok', service: 'inkamnet-control-center' });
+  } catch (err) {
+    res.status(503).json({ status: 'error' });
+  }
+});
+
+app.use(require('./routes/auth'));
+app.use('/', requireAuth, require('./routes/dashboard'));
+app.use('/customers', requireAuth, require('./routes/customers'));
+app.use('/packages', requireAuth, require('./routes/packages'));
+app.use('/invoices', requireAuth, require('./routes/invoices'));
+app.use('/payments', requireAuth, require('./routes/payments'));
+app.use('/reports', requireAuth, require('./routes/reports'));
+app.use('/routers', requireAuth, require('./routes/routers'));
+app.use('/network', requireAuth, require('./routes/network'));
+app.use('/settings', requireAuth, require('./routes/settings'));
+app.use('/clusters', requireAuth, require('./routes/clusters'));
+app.use('/tickets', requireAuth, require('./routes/tickets'));
+app.use('/schedules', requireAuth, require('./routes/schedules'));
+app.use('/server-duty', requireAuth, require('./routes/serverDuty'));
+app.use('/inventory', requireAuth, require('./routes/inventory'));
+app.use('/sites', requireAuth, require('./routes/sites'));
+app.use('/custom-invoices', requireAuth, require('./routes/customInvoices'));
+app.use('/logs', requireAuth, require('./routes/logs'));
+app.use('/', requireAuth, require('./routes/finance'));
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).send(`Terjadi error: ${process.env.NODE_ENV === 'production' ? 'cek log server' : err.message}`);
+});
+
+async function bootstrap() {
+  if (process.env.NODE_ENV === 'production') {
+    const secret = String(process.env.SESSION_SECRET || '');
+    const routerKey = String(process.env.ROUTER_CREDENTIAL_KEY || '');
+    const adminPassword = String(process.env.DEFAULT_ADMIN_PASSWORD || '');
+    if (secret.length < 32 || secret.includes('GANTI_') || secret === 'change-this-secret-now') throw new Error('SESSION_SECRET wajib random minimal 32 karakter.');
+    if (routerKey.length < 32 || routerKey.includes('GANTI_')) throw new Error('ROUTER_CREDENTIAL_KEY wajib random minimal 32 karakter.');
+    if (!process.env.DB_PASSWORD || String(process.env.DB_PASSWORD).includes('GANTI_')) throw new Error('DB_PASSWORD belum dikonfigurasi.');
+    if (!process.env.DB_ROOT_PASSWORD || String(process.env.DB_ROOT_PASSWORD).includes('GANTI_')) throw new Error('DB_ROOT_PASSWORD belum dikonfigurasi.');
+    if (!adminPassword || adminPassword.includes('GantiPassword')) throw new Error('DEFAULT_ADMIN_PASSWORD wajib diganti sebelum startup production.');
+  }
+  await db.query('SELECT 1');
+  const [rows] = await db.query('SELECT COUNT(*) total FROM users');
+  if (Number(rows[0].total) === 0) {
+    const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
+    const password = process.env.DEFAULT_ADMIN_PASSWORD || 'Admin123!';
+    const name = process.env.DEFAULT_ADMIN_NAME || 'Administrator';
+    const hash = await bcrypt.hash(password, 12);
+    await db.execute(`INSERT INTO users (name,username,password_hash,role,is_active) VALUES (?,?,?,'admin',1)`, [name, username, hash]);
+    console.log(`Admin awal dibuat: ${username}`);
+  }
+
+  cron.schedule('10 0 * * *', async () => {
+    try {
+      console.log('Cron invoice:', await generateMonthlyInvoices(new Date(), false, null));
+      console.log('Cron isolasi:', await runAutoIsolation());
+    } catch (err) { console.error('Cron billing/network gagal:', err.message); }
+  }, { timezone: 'Asia/Jakarta' });
+
+  const port = Number(process.env.PORT || 3000);
+  app.listen(port, '0.0.0.0', () => console.log(`INKAMNET Billing berjalan di port ${port}`));
+}
+
+bootstrap().catch(err => { console.error('Startup gagal:', err); process.exit(1); });

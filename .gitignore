@@ -1,0 +1,35 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Database / backup
+backups/
+*.sql
+*.sql.gz
+*.dump
+
+# Payment proof / private uploads
+storage/payment-proofs/*
+!storage/payment-proofs/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# Docker runtime
+docker-data/

@@ -1,0 +1,260 @@
+<% const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; %>
+
+<section class="ink-dashboard">
+  <div class="ink-dashboard-head">
+    <div>
+      <div class="ink-eyebrow"><span class="ink-live-dot"></span> INKAMNET CONTROL CENTER</div>
+      <h1>Dasbor Operasional</h1>
+      <p>Ringkasan billing, pelanggan, jaringan, dan operasional per site dalam satu layar.</p>
+    </div>
+    <div class="ink-head-actions">
+      <form class="ink-period-filter" method="get" action="/">
+        <label>
+          <span>Site / POP</span>
+          <select name="site" onchange="this.form.submit()">
+            <option value="">Semua Site</option>
+            <% siteOptions.forEach(site => { %><option value="<%= site.code %>" <%= selectedSiteCode===site.code?'selected':'' %>><%= site.code %> · <%= site.name %></option><% }) %>
+          </select>
+        </label>
+        <label>
+          <span>Bulan</span>
+          <select name="month" onchange="this.form.submit()">
+            <% monthNames.forEach((name, index) => { %>
+              <option value="<%= index + 1 %>" <%= selectedMonth === index + 1 ? 'selected' : '' %>><%= name %></option>
+            <% }) %>
+          </select>
+        </label>
+        <label>
+          <span>Tahun</span>
+          <select name="year" onchange="this.form.submit()">
+            <% years.forEach(year => { %>
+              <option value="<%= year %>" <%= selectedYear === year ? 'selected' : '' %>><%= year %></option>
+            <% }) %>
+          </select>
+        </label>
+      </form>
+      <a href="/customers/new" class="ink-primary-action"><i class="bi bi-person-plus-fill"></i><span>Tambah Pelanggan</span></a>
+    </div>
+  </div>
+
+  <div class="ink-kpi-grid">
+    <article class="ink-kpi ink-kpi-green">
+      <div class="ink-kpi-top"><span class="ink-kpi-icon"><i class="bi bi-check2-circle"></i></span><span class="ink-kpi-label">Pembayaran diterima</span></div>
+      <strong><%= formatRupiah(revenue.total) %></strong>
+      <small><%= monthNames[selectedMonth - 1] %> <%= selectedYear %></small>
+      <span class="ink-kpi-glow"></span>
+    </article>
+
+    <article class="ink-kpi ink-kpi-red">
+      <div class="ink-kpi-top"><span class="ink-kpi-icon"><i class="bi bi-exclamation-circle"></i></span><span class="ink-kpi-label">Tagihan belum dibayar</span></div>
+      <strong><%= formatRupiah(unpaid.total) %></strong>
+      <small><%= unpaid.count %> invoice perlu follow-up</small>
+      <span class="ink-kpi-glow"></span>
+    </article>
+
+    <article class="ink-kpi ink-kpi-purple">
+      <div class="ink-kpi-top"><span class="ink-kpi-icon"><i class="bi bi-people"></i></span><span class="ink-kpi-label">Pelanggan aktif</span></div>
+      <strong><%= customer.total %></strong>
+      <small><%= selectedSiteCode ? selectedSiteCode+' · subscriber aktif' : 'Semua site · subscriber aktif' %></small>
+      <span class="ink-kpi-glow"></span>
+    </article>
+
+    <article class="ink-kpi ink-kpi-blue">
+      <div class="ink-kpi-top"><span class="ink-kpi-icon"><i class="bi bi-person-plus"></i></span><span class="ink-kpi-label">Pelanggan baru</span></div>
+      <strong><%= newCustomers.total %></strong>
+      <small>Aktivasi bulan ini</small>
+      <span class="ink-kpi-glow"></span>
+    </article>
+  </div>
+
+  <div class="ink-summary-grid">
+    <article class="ink-summary-card">
+      <div><span>Total tertagih</span><strong><%= formatRupiah(billed.total) %></strong></div>
+      <span class="ink-round-icon"><i class="bi bi-receipt-cutoff"></i></span>
+    </article>
+    <article class="ink-summary-card">
+      <div><span>Outstanding</span><strong><%= formatRupiah(unpaid.total) %></strong></div>
+      <span class="ink-round-icon red"><i class="bi bi-hourglass-split"></i></span>
+    </article>
+    <article class="ink-summary-card collection-card">
+      <div><span>Collection rate</span><strong><%= collectionRate %>%</strong></div>
+      <div class="ink-progress-ring" style="--progress:<%= collectionRate %>"><span><%= collectionRate %>%</span></div>
+    </article>
+    <article class="ink-summary-card network-card">
+      <div><span>Status jaringan pelanggan</span><strong><%= Number(network.online || 0) %> online</strong></div>
+      <div class="ink-network-badges">
+        <span class="online"><i></i><%= Number(network.online || 0) %></span>
+        <span class="offline"><i></i><%= Number(network.offline || 0) %></span>
+        <span class="isolated"><i></i><%= Number(network.isolated || 0) %></span>
+      </div>
+    </article>
+  </div>
+
+  <div class="metric-grid" style="margin-bottom:12px">
+    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Router Health</span><span class="metric-icon"><i class="bi bi-router-fill"></i></span></div><strong><%= Number(noc.routers_online||0) %>/<%= Number(noc.routers_total||0) %></strong><small>Router online berdasarkan health check</small></article>
+    <article class="metric-card <%= Number(noc.tickets_open||0)>0?'orange':'green' %>"><div class="metric-top"><span class="metric-label">Open Ticket</span><span class="metric-icon"><i class="bi bi-life-preserver"></i></span></div><strong><%= Number(noc.tickets_open||0) %></strong><small>Open · progress · pending</small></article>
+    <article class="metric-card <%= Number(noc.low_stock||0)>0?'red':'green' %>"><div class="metric-top"><span class="metric-label">Low Stock Alert</span><span class="metric-icon"><i class="bi bi-box-seam-fill"></i></span></div><strong><%= Number(noc.low_stock||0) %></strong><small>Item mencapai minimum stock</small></article>
+    <article class="metric-card <%= Number(cashflow.balance||0)>=0?'green':'red' %>"><div class="metric-top"><span class="metric-label">Cash Balance</span><span class="metric-icon"><i class="bi bi-wallet2"></i></span></div><strong><%= formatRupiah(cashflow.balance||0) %></strong><small>Arus kas bulan terpilih</small></article>
+  </div>
+
+  <div class="ops-alert-rail">
+    <a href="/payments/reconciliation" class="ops-alert-item <%= Number(noc.cash_held||0)>0?'attention':'ok' %>"><i class="bi bi-person-vcard"></i><div><span>Cash di Tim</span><strong><%= formatRupiah(noc.cash_held||0) %></strong></div><em><%= Number(noc.cash_held||0)>0?'RECONCILE':'CLEAR' %></em></a>
+    <a href="/invoices" class="ops-alert-item <%= Number(noc.overdue_customers||0)>0?'danger':'ok' %>"><i class="bi bi-exclamation-diamond"></i><div><span>Customer Overdue</span><strong><%= Number(noc.overdue_customers||0) %> pelanggan</strong></div><em><%= Number(noc.overdue_customers||0)>0?'FOLLOW UP':'CLEAR' %></em></a>
+    <a href="/network/monitor" class="ops-alert-item <%= Number(noc.routers_total||0)>Number(noc.routers_online||0)?'danger':'ok' %>"><i class="bi bi-router"></i><div><span>Router Offline</span><strong><%= Math.max(0,Number(noc.routers_total||0)-Number(noc.routers_online||0)) %></strong></div><em>NETWORK</em></a>
+    <a href="/inventory" class="ops-alert-item <%= Number(noc.low_stock||0)>0?'attention':'ok' %>"><i class="bi bi-box-seam"></i><div><span>Low Stock</span><strong><%= Number(noc.low_stock||0) %> item</strong></div><em>WAREHOUSE</em></a>
+  </div>
+
+  <div class="ink-main-grid">
+    <article class="ink-panel ink-chart-panel">
+      <div class="ink-panel-head">
+        <div><span class="ink-panel-kicker">FINANCIAL TREND</span><h3>Arus Billing Tahun <%= selectedYear %></h3></div>
+        <div class="ink-chart-legend"><span><i class="invoice"></i>Tagihan</span><span><i class="payment"></i>Pembayaran</span></div>
+      </div>
+      <div class="ink-chart-wrap ink-chart-lg"><canvas id="yearChart"></canvas></div>
+    </article>
+
+    <article class="ink-panel ink-site-panel">
+      <div class="ink-panel-head">
+        <div><span class="ink-panel-kicker">POP DISTRIBUTION</span><h3>Lokasi Pelanggan</h3></div>
+        <span class="ink-panel-icon"><i class="bi bi-geo-alt"></i></span>
+      </div>
+      <div class="ink-site-list">
+        <% sites.forEach((site, index) => { const pct = Math.round((Number(site.customers || 0) / maxSiteCustomers) * 100); %>
+          <div class="ink-site-row">
+            <div class="ink-site-meta"><span class="ink-site-rank"><%= String(index + 1).padStart(2,'0') %></span><div><strong><%= site.code %></strong><small><%= site.name %></small></div><b><%= site.customers %></b></div>
+            <div class="ink-site-bar"><span style="width:<%= pct %>%"></span></div>
+          </div>
+        <% }) %>
+        <% if (!sites.length) { %><div class="ink-empty">Belum ada data site.</div><% } %>
+      </div>
+    </article>
+  </div>
+
+  <div class="customer-growth-grid">
+    <article class="ink-panel ink-chart-panel customer-growth-panel">
+      <div class="ink-panel-head">
+        <div><span class="ink-panel-kicker">SUBSCRIBER GROWTH</span><h3>Pelanggan & PSB per Bulan — <%= selectedYear %></h3></div>
+        <div class="ink-chart-legend"><span><i class="psb"></i>PSB Bulanan</span><span><i class="base"></i>Total Base</span></div>
+      </div>
+      <div class="ink-chart-wrap ink-chart-lg"><canvas id="customerGrowthChart"></canvas></div>
+    </article>
+
+    <aside class="growth-insight-stack">
+      <article class="growth-insight-card purple">
+        <span class="growth-insight-icon"><i class="bi bi-person-plus-fill"></i></span>
+        <div><small>PSB YTD <%= selectedYear %></small><strong><%= psbStats.ytd %></strong><em><%= selectedSiteName %></em></div>
+      </article>
+      <article class="growth-insight-card red">
+        <span class="growth-insight-icon"><i class="bi bi-graph-up-arrow"></i></span>
+        <div><small>Bulan Terbaik</small><strong><%= psbStats.peakValue %> PSB</strong><em><%= psbStats.peakMonth %> <%= selectedYear %></em></div>
+      </article>
+      <article class="growth-insight-card blue">
+        <span class="growth-insight-icon"><i class="bi bi-bar-chart-fill"></i></span>
+        <div><small>Rata-rata PSB</small><strong><%= psbStats.average %>/bln</strong><em>Kecepatan akuisisi</em></div>
+      </article>
+      <article class="growth-insight-card green">
+        <span class="growth-insight-icon"><i class="bi bi-people-fill"></i></span>
+        <div><small>Pelanggan Aktif</small><strong><%= customer.total %></strong><em>Base aktif saat ini</em></div>
+      </article>
+    </aside>
+  </div>
+
+  <div class="ink-main-grid ink-lower-grid">
+    <article class="ink-panel ink-chart-panel">
+      <div class="ink-panel-head">
+        <div><span class="ink-panel-kicker">DAILY FLOW</span><h3>Aktivitas Harian — <%= monthNames[selectedMonth - 1] %></h3></div>
+      </div>
+      <div class="ink-chart-wrap ink-chart-md"><canvas id="dailyChart"></canvas></div>
+    </article>
+
+    <article class="ink-panel ink-recent-panel">
+      <div class="ink-panel-head">
+        <div><span class="ink-panel-kicker">LATEST ACTIVITY</span><h3>Invoice Terbaru</h3></div>
+        <a href="/invoices" class="ink-text-link">Lihat semua <i class="bi bi-arrow-right"></i></a>
+      </div>
+      <div class="ink-recent-list">
+        <% recent.forEach(invoice => { %>
+          <a class="ink-recent-row" href="/invoices">
+            <span class="ink-recent-icon"><i class="bi bi-receipt"></i></span>
+            <span class="ink-recent-copy"><strong><%= invoice.customer_name %></strong><small><%= invoice.site_code %> · <%= invoice.invoice_number %></small></span>
+            <span class="ink-recent-value"><strong><%= formatRupiah(invoice.total) %></strong><small class="status-<%= invoice.status %>"><%= invoice.status %></small></span>
+          </a>
+        <% }) %>
+        <% if (!recent.length) { %><div class="ink-empty"><i class="bi bi-inbox"></i> Belum ada invoice.</div><% } %>
+      </div>
+    </article>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+(() => {
+  const money = value => 'Rp' + new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(value || 0);
+  const grid = 'rgba(148, 163, 184, .10)';
+  const tick = '#8f9bb2';
+  const purple = '#603aea';
+  const red = '#ff433e';
+
+  Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+  Chart.defaults.color = tick;
+
+  const monthly = <%- JSON.stringify(monthly) %>;
+  const yctx = document.getElementById('yearChart');
+  if (yctx) {
+    const g1 = yctx.getContext('2d').createLinearGradient(0, 0, 0, 300);
+    g1.addColorStop(0, 'rgba(96,58,234,.42)');
+    g1.addColorStop(1, 'rgba(96,58,234,0)');
+    const g2 = yctx.getContext('2d').createLinearGradient(0, 0, 0, 300);
+    g2.addColorStop(0, 'rgba(255,67,62,.28)');
+    g2.addColorStop(1, 'rgba(255,67,62,0)');
+    new Chart(yctx, {
+      type: 'line',
+      data: { labels: monthly.labels, datasets: [
+        { label: 'Tagihan', data: monthly.invoices, borderColor: purple, backgroundColor: g1, fill: true, tension: .42, borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 4 },
+        { label: 'Pembayaran', data: monthly.payments, borderColor: red, backgroundColor: g2, fill: true, tension: .42, borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 4 }
+      ]},
+      options: { responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' }, animation: { duration: 850 }, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#111827', borderColor: 'rgba(255,255,255,.10)', borderWidth: 1, padding: 12, callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { grid: { display: false }, ticks: { color: tick } }, y: { beginAtZero: true, grid: { color: grid }, border: { display: false }, ticks: { color: tick, callback: v => money(v) } } } }
+    });
+  }
+
+  const growth = <%- JSON.stringify(customerGrowth) %>;
+  const gctx = document.getElementById('customerGrowthChart');
+  if (gctx) {
+    const ctx = gctx.getContext('2d');
+    const growthFill = ctx.createLinearGradient(0, 0, 0, 300);
+    growthFill.addColorStop(0, 'rgba(96,58,234,.34)');
+    growthFill.addColorStop(1, 'rgba(96,58,234,0)');
+    new Chart(gctx, {
+      data: {
+        labels: growth.labels,
+        datasets: [
+          { type:'bar', label:'PSB', data:growth.psb, backgroundColor:'rgba(255,67,62,.78)', borderColor:'rgba(255,67,62,1)', borderWidth:1, borderRadius:7, maxBarThickness:18, yAxisID:'yPsb' },
+          { type:'line', label:'Total Base', data:growth.base, borderColor:'#603aea', backgroundColor:growthFill, fill:true, tension:.42, borderWidth:2.4, pointRadius:0, pointHoverRadius:4, yAxisID:'yBase' }
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false, interaction:{intersect:false,mode:'index'}, animation:{duration:900},
+        plugins:{ legend:{display:false}, tooltip:{backgroundColor:'#111827',borderColor:'rgba(255,255,255,.10)',borderWidth:1,padding:12,callbacks:{label:c=>c.dataset.label==='PSB'?`PSB: ${c.raw} pelanggan`:`Total Base: ${c.raw} pelanggan`}}},
+        scales:{
+          x:{grid:{display:false},ticks:{color:tick}},
+          yPsb:{position:'left',beginAtZero:true,grid:{color:grid},border:{display:false},ticks:{color:tick,precision:0}},
+          yBase:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false},border:{display:false},ticks:{color:tick,precision:0}}
+        }
+      }
+    });
+  }
+
+  const daily = <%- JSON.stringify(daily) %>;
+  const dctx = document.getElementById('dailyChart');
+  if (dctx) {
+    new Chart(dctx, {
+      type: 'bar',
+      data: { labels: daily.labels, datasets: [
+        { label: 'Tagihan', data: daily.invoices, backgroundColor: 'rgba(96,58,234,.78)', borderRadius: 6, maxBarThickness: 14 },
+        { label: 'Pembayaran', data: daily.payments, backgroundColor: 'rgba(255,67,62,.78)', borderRadius: 6, maxBarThickness: 14 }
+      ]},
+      options: { responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' }, animation: { duration: 700 }, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#111827', padding: 12, callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { stacked: false, grid: { display: false }, ticks: { color: tick, maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } }, y: { beginAtZero: true, grid: { color: grid }, border: { display: false }, ticks: { color: tick, callback: v => money(v) } } } }
+    });
+  }
+})();
+</script>

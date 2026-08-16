@@ -1,0 +1,43 @@
+<section>
+  <div class="module-head">
+    <div><div class="module-kicker">CUSTOMER EXPERIENCE</div><h1>Manajemen Pelanggan</h1><p>Kelola pelanggan, paket, site, status billing, dan kondisi jaringan dari satu layar.</p></div>
+    <div class="module-actions customer-actions"><a class="btn-tech" href="/customers/template.xlsx"><i class="bi bi-file-earmark-spreadsheet"></i>Template XLSX</a><% if(user?.role==='admin'){ %><button class="btn-tech" type="button" data-bs-toggle="modal" data-bs-target="#customerImportModal"><i class="bi bi-cloud-arrow-up-fill"></i>Import XLSX</button><% } %><a class="btn-tech" href="/customers/export.xlsx?q=<%= encodeURIComponent(filters.q) %>&site=<%= encodeURIComponent(filters.site) %>&status=<%= encodeURIComponent(filters.status) %>"><i class="bi bi-download"></i>Export XLSX</a><a class="btn-tech primary" href="/customers/new"><i class="bi bi-person-plus-fill"></i>Tambah Pelanggan</a></div>
+  </div>
+
+  <div class="metric-grid">
+    <article class="metric-card"><div class="metric-top"><span class="metric-label">Total Pelanggan</span><span class="metric-icon"><i class="bi bi-people-fill"></i></span></div><strong><%= Number(stats.total||0) %></strong><small>Seluruh data pelanggan</small></article>
+    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pelanggan Aktif</span><span class="metric-icon"><i class="bi bi-person-check-fill"></i></span></div><strong><%= Number(stats.active||0) %></strong><small>Service aktif</small></article>
+    <article class="metric-card orange"><div class="metric-top"><span class="metric-label">Suspended</span><span class="metric-icon"><i class="bi bi-pause-circle-fill"></i></span></div><strong><%= Number(stats.suspended||0) %></strong><small>Nonaktif sementara</small></article>
+    <article class="metric-card red"><div class="metric-top"><span class="metric-label">Terisolir</span><span class="metric-icon"><i class="bi bi-wifi-off"></i></span></div><strong><%= Number(stats.isolated||0) %></strong><small>Network isolation</small></article>
+  </div>
+
+  <form class="filter-card" method="get">
+    <div class="filter-grid">
+      <div class="filter-group"><label>PENCARIAN</label><input class="form-control" name="q" value="<%= filters.q %>" placeholder="ID, nama, telepon, alamat..."></div>
+      <div class="filter-group"><label>SITE / POP</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
+      <div class="filter-group"><label>STATUS PELANGGAN</label><select class="form-select" name="status"><option value="">Semua Status</option><option value="active" <%= filters.status==='active'?'selected':'' %>>Aktif</option><option value="suspended" <%= filters.status==='suspended'?'selected':'' %>>Suspended</option><option value="terminated" <%= filters.status==='terminated'?'selected':'' %>>Berhenti</option></select></div>
+      <div class="filter-group d-flex align-items-end gap-2"><button class="btn-tech primary flex-fill"><i class="bi bi-funnel-fill"></i>Terapkan Filter</button><a class="btn-tech" href="/customers"><i class="bi bi-arrow-counterclockwise"></i></a></div>
+    </div>
+  </form>
+
+  <div class="data-card">
+    <div class="data-card-head"><div><h3>Database Pelanggan</h3><small><%= customers.length %> data ditemukan</small></div><div class="toolbar-right"><span class="status-badge purple"><%= customers.length %> rows</span></div></div>
+    <div class="table-responsive">
+      <table class="app-table"><thead><tr><th>Customer</th><th>Site / Cluster</th><th>Paket</th><th>PPPoE</th><th>Billing</th><th>Network</th><th>Kontak</th><th></th></tr></thead><tbody>
+      <% customers.forEach(c=>{ %><tr>
+        <td><a class="cell-main text-decoration-none" href="/customers/<%= c.id %>"><%= c.name %></a><span class="cell-sub"><%= c.customer_code %></span></td>
+        <td><span class="cell-main"><%= c.site_code %></span><span class="cell-sub"><%= c.cluster_name || 'Belum di-cluster' %></span></td>
+        <td><span class="cell-main"><%= c.package_name %></span><span class="cell-sub"><%= formatRupiah(c.package_price) %></span></td>
+        <td><span class="cell-main"><%= c.pppoe_username || '-' %></span><span class="cell-sub">Router link</span></td>
+        <td><span class="status-badge <%= c.billing_status==='paid'?'green':c.billing_status==='overdue'?'red':'orange' %>"><%= c.billing_status %></span></td>
+        <td><span class="status-badge <%= c.network_status==='online'?'green':c.network_status==='isolated'?'red':'gray' %>"><%= c.network_status %></span></td>
+        <td><span class="cell-main"><%= c.phone || '-' %></span><span class="cell-sub"><%= c.address || '-' %></span></td>
+        <td><a class="action-menu text-decoration-none" href="/customers/<%= c.id %>/edit"><i class="bi bi-pencil-square"></i></a></td>
+      </tr><% }) %>
+      <% if(!customers.length){ %><tr><td colspan="8"><div class="empty-state"><i class="bi bi-people"></i><strong>Data pelanggan tidak ditemukan</strong><small>Coba ubah filter atau tambahkan pelanggan baru.</small></div></td></tr><% } %>
+      </tbody></table>
+    </div>
+  </div>
+</section>
+
+<div class="modal fade" id="customerImportModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered"><form class="modal-content" method="post" action="/customers/import" enctype="multipart/form-data"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><div class="modal-header"><div><div class="module-kicker">BULK CUSTOMER ONBOARDING</div><h5 class="modal-title">Import Pelanggan dari Excel</h5></div><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="excel-import-intro"><span class="excel-icon"><i class="bi bi-file-earmark-spreadsheet-fill"></i></span><div><strong>Gunakan template INKAMNET agar data terbaca otomatis.</strong><small>Format .xlsx · maksimal 8 MB · seluruh file divalidasi sebelum data dimasukkan.</small></div><a class="btn-tech" href="/customers/template.xlsx"><i class="bi bi-download"></i>Download Template</a></div><label class="proof-dropzone large mt-3"><input type="file" name="customer_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required><span class="proof-drop-icon"><i class="bi bi-cloud-arrow-up-fill"></i></span><span><strong>Pilih file pelanggan .xlsx</strong><small>Klik atau drag file Excel ke area ini</small><em data-file-label>Belum ada file dipilih</em></span></label><div class="mt-3"><label class="form-label">Jika customer_code sudah ada</label><div class="import-mode-grid"><label><input type="radio" name="import_mode" value="skip" checked><span><b>Lewati</b><small>Data lama tetap aman, hanya tambah pelanggan baru.</small></span></label><label><input type="radio" name="import_mode" value="update"><span><b>Update</b><small>Perbarui data lama berdasarkan customer_code.</small></span></label></div></div><div class="secure-file-note"><i class="bi bi-shield-check"></i><span>Jika ada site, paket, router, cluster, tanggal, atau format lain yang salah, import dibatalkan seluruhnya agar database tidak setengah masuk.</span></div></div><div class="modal-footer"><button class="btn-tech" type="button" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-stars"></i>Validasi & Import</button></div></form></div></div>

@@ -1,0 +1,228 @@
+<section>
+  <div class="module-head">
+    <div>
+      <div class="module-kicker">PAYMENT COLLECTION</div>
+      <h1>Pembayaran Pelanggan</h1>
+      <p>Kelola transfer, bukti pembayaran, cash ke tim, verifikasi, dan auto-unisolate dalam satu flow.</p>
+    </div>
+    <div class="module-actions">
+      <a class="btn-tech" href="/payments/reconciliation"><i class="bi bi-arrow-left-right"></i>Rekonsiliasi Cash</a>
+      <button class="btn-tech primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg"></i>Catat Pembayaran</button>
+    </div>
+  </div>
+
+  <div class="metric-grid">
+    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pembayaran Terkonfirmasi</span><span class="metric-icon"><i class="bi bi-patch-check-fill"></i></span></div><strong><%= formatRupiah(summary.confirmed_total||0) %></strong><small>Bulan berjalan</small></article>
+    <article class="metric-card orange"><div class="metric-top"><span class="metric-label">Cash di Tim</span><span class="metric-icon"><i class="bi bi-person-badge-fill"></i></span></div><strong><%= formatRupiah(summary.cash_held||0) %></strong><small>Belum disetor ke kas perusahaan</small></article>
+    <article class="metric-card red"><div class="metric-top"><span class="metric-label">Transfer Pending</span><span class="metric-icon"><i class="bi bi-bank2"></i></span></div><strong><%= formatRupiah(summary.transfer_pending||0) %></strong><small>Perlu cek bukti + verifikasi admin</small></article>
+    <article class="metric-card"><div class="metric-top"><span class="metric-label">Invoice Terbuka</span><span class="metric-icon"><i class="bi bi-hourglass-split"></i></span></div><strong><%= openInvoices.length %></strong><small>Siap menerima pembayaran</small></article>
+  </div>
+
+  <div class="data-card">
+    <div class="data-card-head">
+      <div><h3>Riwayat Pembayaran</h3><small>Bukti transfer tersimpan privat dan hanya dapat dibuka setelah login.</small></div>
+      <div class="legend-inline"><span><i class="dot success"></i>Confirmed</span><span><i class="dot warning"></i>Pending</span><span><i class="dot brand"></i>Cash di staff</span></div>
+    </div>
+    <div class="table-responsive">
+      <table class="app-table">
+        <thead><tr><th>Pelanggan</th><th>Site</th><th>Invoice</th><th>Nominal</th><th>Metode</th><th>Bukti</th><th>Diterima Oleh</th><th>Status Dana</th><th>Waktu</th><th>Aksi</th></tr></thead>
+        <tbody>
+          <% payments.forEach(p=>{ %>
+          <tr>
+            <td><span class="cell-main"><%= p.customer_name %></span><span class="cell-sub"><%= p.customer_code %></span></td>
+            <td><span class="status-badge purple"><%= p.site_code %></span></td>
+            <td><span class="cell-main"><%= p.invoice_number %></span><span class="cell-sub"><%= p.reference||'-' %></span></td>
+            <td class="money"><%= formatRupiah(p.amount) %></td>
+            <td><span class="payment-method <%= p.method %>"><i class="bi <%= p.method==='cash'?'bi-cash-coin':p.method==='transfer'?'bi-bank':'bi-wallet2' %>"></i><%= String(p.method).toUpperCase() %></span></td>
+            <td>
+              <% if(p.proof_path){ %>
+                <button type="button" class="proof-chip proof-view-btn" data-bs-toggle="modal" data-bs-target="#proofViewerModal"
+                  data-proof-url="/payments/<%= p.id %>/proof"
+                  data-proof-mime="<%= p.proof_mime||'' %>"
+                  data-customer="<%= p.customer_name %>"
+                  data-customer-code="<%= p.customer_code %>"
+                  data-invoice="<%= p.invoice_number %>"
+                  data-amount="<%= formatRupiah(p.amount) %>"
+                  data-bank="<%= p.bank_name||'-' %>"
+                  data-reference="<%= p.reference||'-' %>"
+                  data-uploader="<%= p.proof_uploader_name||'-' %>"
+                  data-uploaded="<%= p.proof_uploaded_at?new Date(p.proof_uploaded_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'}):'-' %>"
+                  data-status="<%= p.status %>">
+                  <span class="proof-chip-icon"><i class="bi <%= p.proof_mime==='application/pdf'?'bi-file-earmark-pdf-fill':'bi-image-fill' %>"></i></span>
+                  <span><strong>Lihat Bukti</strong><small><%= p.proof_mime==='application/pdf'?'PDF':'Image' %></small></span>
+                </button>
+              <% } else if(p.method==='transfer'){ %>
+                <span class="proof-missing"><i class="bi bi-exclamation-triangle"></i>Belum ada</span>
+              <% } else { %><span class="text-secondary small">—</span><% } %>
+            </td>
+            <td><%= p.collector_name||'-' %></td>
+            <td>
+              <% if(p.status==='pending'){ %><span class="status-badge orange">pending verification</span>
+              <% } else if(p.method==='cash' && p.settlement_status==='held_by_staff'){ %><span class="status-badge purple">cash di staff</span>
+              <% } else if(p.method==='cash' && p.settlement_status==='settled'){ %><span class="status-badge green">sudah disetor</span>
+              <% } else { %><span class="status-badge green">confirmed</span><% } %>
+            </td>
+            <td><span class="cell-main"><%= new Date(p.paid_at).toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'}) %></span><span class="cell-sub"><%= new Date(p.paid_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jakarta'}) %></span></td>
+            <td>
+              <div class="payment-actions">
+                <% if(p.status==='pending' && user.role==='admin'){ %>
+                <form method="post" action="/payments/<%= p.id %>/verify" class="d-inline"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="action-pill success" title="Verifikasi pembayaran"><i class="bi bi-check2-circle"></i></button></form>
+                <% } %>
+                <% if(user.role==='admin' && p.method!=='cash'){ %>
+                <button type="button" class="action-pill proof-upload-btn" title="<%= p.proof_path?'Ganti bukti':'Upload bukti' %>" data-bs-toggle="modal" data-bs-target="#proofUploadModal" data-payment-id="<%= p.id %>" data-customer="<%= p.customer_name %>" data-invoice="<%= p.invoice_number %>"><i class="bi bi-cloud-arrow-up"></i></button>
+                <% } %>
+                <% if(p.proof_path){ %><a class="action-pill" href="/payments/<%= p.id %>/proof" target="_blank" rel="noopener" title="Buka bukti di tab baru"><i class="bi bi-box-arrow-up-right"></i></a><% } %>
+              </div>
+            </td>
+          </tr>
+          <% }) %>
+          <% if(!payments.length){ %><tr><td colspan="10"><div class="empty-state"><i class="bi bi-wallet2"></i><strong>Belum ada pembayaran</strong><small>Catat pembayaran transfer atau cash pelanggan dari tombol di atas.</small></div></td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="modal fade" id="paymentModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form method="post" action="/payments" enctype="multipart/form-data" class="modal-content" id="paymentForm">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="modal-header"><div><div class="module-kicker">NEW PAYMENT</div><h5 class="modal-title">Catat Pembayaran Pelanggan</h5></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="payment-mode-picker mb-4">
+          <label><input type="radio" name="method" value="transfer" checked><span><i class="bi bi-bank2"></i><strong>Transfer</strong><small>Upload bukti transfer</small></span></label>
+          <label><input type="radio" name="method" value="cash"><span><i class="bi bi-cash-stack"></i><strong>Cash ke Tim</strong><small>Uang fisik diterima staff</small></span></label>
+          <label><input type="radio" name="method" value="qris"><span><i class="bi bi-qr-code"></i><strong>QRIS</strong><small>Pembayaran QR</small></span></label>
+        </div>
+        <div class="row g-3">
+          <div class="col-12"><label class="form-label">Invoice</label><select class="form-select" name="invoice_id" required><option value="">Pilih invoice...</option><% openInvoices.forEach(i=>{ %><option value="<%= i.id %>"><%= i.site_code %> · <%= i.customer_code %> · <%= i.customer_name %> · Sisa <%= formatRupiah(i.outstanding) %></option><% }) %></select></div>
+          <div class="col-md-5"><label class="form-label">Nominal</label><input class="form-control" type="number" min="1" name="amount" required></div>
+          <div class="col-md-7 transfer-fields"><label class="form-label">Bank Tujuan</label><input class="form-control" name="bank_name" placeholder="BCA / BRI / Mandiri / lainnya"></div>
+          <div class="col-md-6 cash-fields d-none"><label class="form-label">Cash Diterima Oleh</label><% if(user.role==='admin'){ %><select class="form-select" name="collector_user_id"><% staff.forEach(u=>{ %><option value="<%= u.id %>" <%= Number(u.id)===Number(user.id)?'selected':'' %>><%= u.name %> · <%= u.role %></option><% }) %></select><% } else { %><input type="hidden" name="collector_user_id" value="<%= user.id %>"><div class="collector-self"><i class="bi bi-person-check-fill"></i><span><strong><%= user.name %></strong><small>Cash otomatis tercatat atas nama akun yang sedang login.</small></span></div><% } %><div class="form-help">Invoice langsung dianggap bayar, tetapi uang tetap berstatus <b>Cash di Staff</b> sampai disetor admin.</div></div>
+          <div class="col-md-6 transfer-fields"><label class="form-label">Status Transfer</label><% if(user.role==='admin'){ %><select class="form-select" name="payment_status"><option value="pending" selected>Menunggu verifikasi</option><option value="confirmed">Verifikasi langsung sebagai Admin</option></select><% } else { %><input type="hidden" name="payment_status" value="pending"><div class="verification-locked"><i class="bi bi-shield-lock-fill"></i><span><strong>Menunggu verifikasi Admin</strong><small>Staff tidak dapat mengesahkan transfer sendiri.</small></span></div><% } %></div>
+          <div class="col-md-6"><label class="form-label">No. Referensi Transaksi</label><input class="form-control" name="reference" placeholder="TRX-123 / nomor referensi bank"></div>
+          <div class="col-md-6 proof-upload-field">
+            <label class="form-label">Bukti Pembayaran <span class="transfer-required-mark">*</span></label>
+            <label class="proof-dropzone" for="proof_file">
+              <input id="proof_file" type="file" name="proof_file" accept="image/jpeg,image/png,image/webp,application/pdf">
+              <span class="proof-drop-icon"><i class="bi bi-cloud-arrow-up"></i></span>
+              <span><strong>Upload bukti transfer</strong><small>JPG, PNG, WEBP, PDF · Maks. 6 MB</small><em id="proofFileName">Klik untuk pilih file</em></span>
+            </label>
+          </div>
+          <div class="col-12"><label class="form-label">Catatan</label><textarea class="form-control" name="notes" rows="3" placeholder="Catatan pembayaran..."></textarea></div>
+        </div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-shield-check"></i>Simpan Pembayaran</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="proofViewerModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content proof-viewer-modal">
+      <div class="modal-header">
+        <div><div class="module-kicker">PAYMENT EVIDENCE</div><h5 class="modal-title">Bukti Pembayaran</h5></div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body proof-viewer-grid">
+        <div class="proof-stage">
+          <div class="proof-stage-grid"></div>
+          <img id="proofViewerImage" alt="Bukti pembayaran" class="d-none">
+          <iframe id="proofViewerPdf" title="Bukti pembayaran PDF" class="d-none"></iframe>
+          <div id="proofViewerLoading" class="proof-loading"><span class="proof-scan"></span><i class="bi bi-shield-lock-fill"></i><strong>Secure Payment Evidence</strong><small>Memuat bukti pembayaran...</small></div>
+        </div>
+        <aside class="proof-meta-panel">
+          <div class="proof-verified-seal" id="proofStatusSeal"><i class="bi bi-patch-check-fill"></i><span>PAYMENT</span><strong>CONFIRMED</strong></div>
+          <div class="proof-meta-list">
+            <div><span>Pelanggan</span><strong id="proofMetaCustomer">-</strong><small id="proofMetaCode">-</small></div>
+            <div><span>Invoice</span><strong id="proofMetaInvoice">-</strong></div>
+            <div><span>Nominal</span><strong id="proofMetaAmount">-</strong></div>
+            <div><span>Bank</span><strong id="proofMetaBank">-</strong></div>
+            <div><span>Referensi</span><strong id="proofMetaReference">-</strong></div>
+            <div><span>Diupload Oleh</span><strong id="proofMetaUploader">-</strong><small id="proofMetaUploaded">-</small></div>
+          </div>
+          <a id="proofOpenNew" class="btn-tech w-100 justify-content-center" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i>Buka File Asli</a>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="proofUploadModal" tabindex="-1">
+  <div class="modal-dialog modal-md modal-dialog-centered">
+    <form method="post" enctype="multipart/form-data" class="modal-content" id="proofReplaceForm">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="modal-header"><div><div class="module-kicker">SECURE UPLOAD</div><h5 class="modal-title">Upload / Ganti Bukti</h5></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="proof-payment-context"><i class="bi bi-receipt-cutoff"></i><div><strong id="proofUploadCustomer">-</strong><small id="proofUploadInvoice">-</small></div></div>
+        <label class="proof-dropzone large" for="replacement_proof_file">
+          <input id="replacement_proof_file" type="file" name="proof_file" accept="image/jpeg,image/png,image/webp,application/pdf" required>
+          <span class="proof-drop-icon"><i class="bi bi-cloud-arrow-up-fill"></i></span>
+          <span><strong>Pilih bukti pembayaran</strong><small>JPG, PNG, WEBP, PDF · Maks. 6 MB</small><em id="replacementProofFileName">Klik untuk pilih file</em></span>
+        </label>
+        <div class="secure-file-note"><i class="bi bi-shield-lock"></i><span>File disimpan di private storage dan tidak dapat dibuka tanpa login ke INKAMNET Control Center.</span></div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-cloud-check"></i>Simpan Bukti</button></div>
+    </form>
+  </div>
+</div>
+
+<script>
+(()=>{
+  const form=document.getElementById('paymentForm');
+  const proofInput=document.getElementById('proof_file');
+  const proofFileName=document.getElementById('proofFileName');
+  if(form){
+    const sync=()=>{
+      const m=form.querySelector('input[name="method"]:checked')?.value;
+      form.querySelectorAll('.cash-fields').forEach(x=>x.classList.toggle('d-none',m!=='cash'));
+      form.querySelectorAll('.transfer-fields').forEach(x=>x.classList.toggle('d-none',m==='cash'||m==='qris'));
+      form.querySelectorAll('.proof-upload-field').forEach(x=>x.classList.toggle('d-none',m==='cash'));
+      if(proofInput) proofInput.required=m==='transfer';
+    };
+    form.querySelectorAll('input[name="method"]').forEach(x=>x.addEventListener('change',sync));sync();
+  }
+  if(proofInput) proofInput.addEventListener('change',()=>{proofFileName.textContent=proofInput.files?.[0]?.name||'Klik untuk pilih file';});
+
+  const replaceInput=document.getElementById('replacement_proof_file');
+  const replaceName=document.getElementById('replacementProofFileName');
+  if(replaceInput) replaceInput.addEventListener('change',()=>{replaceName.textContent=replaceInput.files?.[0]?.name||'Klik untuk pilih file';});
+  document.querySelectorAll('.proof-upload-btn').forEach(btn=>btn.addEventListener('click',()=>{
+    const replaceForm=document.getElementById('proofReplaceForm');
+    replaceForm.action=`/payments/${btn.dataset.paymentId}/proof`;
+    document.getElementById('proofUploadCustomer').textContent=btn.dataset.customer||'-';
+    document.getElementById('proofUploadInvoice').textContent=btn.dataset.invoice||'-';
+    if(replaceInput){replaceInput.value='';replaceName.textContent='Klik untuk pilih file';}
+  }));
+
+  const img=document.getElementById('proofViewerImage');
+  const pdf=document.getElementById('proofViewerPdf');
+  const loading=document.getElementById('proofViewerLoading');
+  document.querySelectorAll('.proof-view-btn').forEach(btn=>btn.addEventListener('click',()=>{
+    const url=btn.dataset.proofUrl;
+    const mime=btn.dataset.proofMime||'';
+    img.classList.add('d-none'); pdf.classList.add('d-none'); loading.classList.remove('d-none');
+    img.removeAttribute('src'); pdf.removeAttribute('src');
+    document.getElementById('proofMetaCustomer').textContent=btn.dataset.customer||'-';
+    document.getElementById('proofMetaCode').textContent=btn.dataset.customerCode||'-';
+    document.getElementById('proofMetaInvoice').textContent=btn.dataset.invoice||'-';
+    document.getElementById('proofMetaAmount').textContent=btn.dataset.amount||'-';
+    document.getElementById('proofMetaBank').textContent=btn.dataset.bank||'-';
+    document.getElementById('proofMetaReference').textContent=btn.dataset.reference||'-';
+    document.getElementById('proofMetaUploader').textContent=btn.dataset.uploader||'-';
+    document.getElementById('proofMetaUploaded').textContent=btn.dataset.uploaded||'-';
+    document.getElementById('proofOpenNew').href=url;
+    const seal=document.getElementById('proofStatusSeal');
+    const confirmed=btn.dataset.status==='confirmed';
+    seal.classList.toggle('pending',!confirmed);
+    seal.querySelector('strong').textContent=confirmed?'CONFIRMED':'PENDING';
+    if(mime==='application/pdf'){
+      pdf.src=url; pdf.classList.remove('d-none'); setTimeout(()=>loading.classList.add('d-none'),450);
+    }else{
+      img.onload=()=>loading.classList.add('d-none');
+      img.onerror=()=>{loading.querySelector('small').textContent='Bukti gagal dimuat. Coba buka file asli.';};
+      img.src=url; img.classList.remove('d-none');
+    }
+  }));
+})();
+</script>

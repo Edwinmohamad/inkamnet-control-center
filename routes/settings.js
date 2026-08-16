@@ -1,0 +1,13 @@
+const express=require('express');
+const bcrypt=require('bcryptjs');
+const db=require('../config/db');
+const { requireAdmin }=require('../middleware/auth');
+const router=express.Router();
+router.use(requireAdmin);
+router.get('/',async(req,res)=>{const [[settings]]=await db.query(`SELECT * FROM settings WHERE id=1`);const [sites]=await db.query(`SELECT * FROM sites ORDER BY code`);const [users]=await db.query(`SELECT id,name,username,role,is_active,created_at FROM users ORDER BY is_active DESC,name`);res.render('settings/index',{title:'Pengaturan',settings,sites,users});});
+router.post('/',async(req,res)=>{const b=req.body;await db.execute(`UPDATE settings SET company_name=?,company_address=?,company_phone=?,company_email=?,company_website=?,company_tagline=?,default_due_day=?,default_grace_days=?,invoice_generate_days=?,auto_isolate=?,default_theme=? WHERE id=1`,[b.company_name,b.company_address||null,b.company_phone||null,b.company_email||null,b.company_website||null,b.company_tagline||'From the Village, Online Everywhere',b.default_due_day,b.default_grace_days,b.invoice_generate_days,b.auto_isolate?1:0,b.default_theme||'dark']);req.session.flash={type:'success',message:'Pengaturan perusahaan disimpan.'};res.redirect('/settings');});
+router.post('/sites/:id',async(req,res)=>{const b=req.body;await db.execute(`UPDATE sites SET name=?,default_due_day=?,default_grace_days=?,invoice_generate_days=? WHERE id=?`,[b.name,b.default_due_day||null,b.default_grace_days||null,b.invoice_generate_days||null,req.params.id]);req.session.flash={type:'success',message:'Default site diperbarui.'};res.redirect('/settings');});
+router.post('/users',async(req,res)=>{const b=req.body;const hash=await bcrypt.hash(b.password,12);await db.execute(`INSERT INTO users(name,username,password_hash,role,is_active) VALUES(?,?,?,?,1)`,[b.name,b.username,hash,b.role||'staff']);req.session.flash={type:'success',message:'Akun staff dibuat.'};res.redirect('/settings#users');});
+router.post('/users/:id/toggle',async(req,res)=>{if(Number(req.params.id)===Number(req.session.user.id)){req.session.flash={type:'warning',message:'Akun yang sedang dipakai tidak bisa dinonaktifkan.'};return res.redirect('/settings#users');}await db.execute(`UPDATE users SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings#users');});
+router.post('/users/:id/password',async(req,res)=>{const hash=await bcrypt.hash(req.body.password,12);await db.execute(`UPDATE users SET password_hash=? WHERE id=?`,[hash,req.params.id]);req.session.flash={type:'success',message:'Password berhasil direset.'};res.redirect('/settings#users');});
+module.exports=router;

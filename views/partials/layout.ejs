@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090d1a">
+  <title><%= title %> · <%= appName %></title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/css/app.css?v=1.2.1">
+  <script>(()=>{try{const t=localStorage.getItem('inkamnet-theme')||'dark';document.documentElement.dataset.theme=t}catch(e){}})();</script>
+  <style id="inkamnet-critical-ui">
+    /* Critical shell/loader CSS prevents FOUC and oversized logo while the main stylesheet is loading. */
+    #appLoader{position:fixed!important;inset:0!important;z-index:3000!important;display:grid!important;place-items:center!important;align-content:center!important;gap:18px!important;overflow:hidden!important;background:#070a13!important;color:#fff!important;transition:opacity .34s ease,visibility .34s ease!important}
+    #appLoader .boot-logo{width:min(250px,72vw)!important;height:88px!important;display:grid!important;place-items:center!important;position:relative!important}
+    #appLoader .boot-logo img{display:block!important;width:100%!important;max-width:250px!important;max-height:88px!important;height:auto!important;object-fit:contain!important}
+    #appLoader.is-hidden{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
+  </style>
+</head>
+<body>
+  <div class="ambient-grid" aria-hidden="true"></div>
+  <div class="ambient-orb orb-a" aria-hidden="true"></div>
+  <div class="ambient-orb orb-b" aria-hidden="true"></div>
+  <div class="signal-stream" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <div class="app-loader" id="appLoader" aria-hidden="true">
+    <div class="boot-logo"><img src="/img/inkamnet-wordmark-hq.png?v=1.2.1" alt="INKAMNET"></div>
+    <div class="loader-radar"><span></span><span></span><span></span><i class="bi bi-broadcast-pin"></i></div>
+    <div class="loader-copy"><strong>INKAMNET CONTROL CENTER</strong><small>Initializing Network · Billing · Warehouse · Finance</small></div>
+    <div class="boot-status"><span></span><b>SECURE SYSTEM READY</b></div>
+  </div>
+  <div class="page-progress" id="pageProgress"></div>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <a href="/" class="brand-link">
+          <span class="brand-logo-plate"><img src="/img/inkamnet-wordmark-hq.png?v=1.2.1" alt="INKAMNET"></span>
+        </a>
+        <button class="sidebar-close d-lg-none" type="button" data-sidebar-close><i class="bi bi-x-lg"></i></button>
+      </div>
+
+      <div class="sidebar-scroll">
+        <div class="sidebar-section-label">CONTROL CENTER</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath === '/' ? 'active' : '' %>" href="/"><i class="bi bi-grid-1x2-fill"></i><span>Dashboard</span><em>⌘</em></a>
+        </nav>
+
+        <div class="sidebar-section-label">PELANGGAN</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath.startsWith('/customers') ? 'active' : '' %>" href="/customers"><i class="bi bi-people-fill"></i><span>Pelanggan</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/packages') ? 'active' : '' %>" href="/packages"><i class="bi bi-speedometer2"></i><span>Paket Internet</span></a>
+        </nav>
+
+        <div class="sidebar-section-label">NETWORK</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath.startsWith('/sites') ? 'active' : '' %>" href="/sites"><i class="bi bi-hdd-rack-fill"></i><span>Site / POP</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/routers') ? 'active' : '' %>" href="/routers"><i class="bi bi-router-fill"></i><span>Router MikroTik</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/clusters') ? 'active' : '' %>" href="/clusters"><i class="bi bi-diagram-3-fill"></i><span>Cluster & ODP</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/network/monitor') ? 'active' : '' %>" href="/network/monitor"><i class="bi bi-activity"></i><span>Network Monitor</span></a>
+        </nav>
+
+        <div class="sidebar-section-label">SUPPORT</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath.startsWith('/tickets') ? 'active' : '' %>" href="/tickets"><i class="bi bi-life-preserver"></i><span>Ticketing</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/schedules') ? 'active' : '' %>" href="/schedules"><i class="bi bi-calendar2-check-fill"></i><span>Jadwal Teknisi</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/server-duty') ? 'active' : '' %>" href="/server-duty"><i class="bi bi-shield-check"></i><span>Piket Server</span></a>
+        </nav>
+
+        <div class="sidebar-section-label">GUDANG</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath === '/inventory' ? 'active' : '' %>" href="/inventory"><i class="bi bi-box-seam-fill"></i><span>Stock Barang</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/inventory/movements') ? 'active' : '' %>" href="/inventory/movements"><i class="bi bi-arrow-left-right"></i><span>Pergerakan Stock</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/inventory/usage') ? 'active' : '' %>" href="/inventory/usage"><i class="bi bi-tools"></i><span>Pemakaian Material</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/inventory/suppliers') ? 'active' : '' %>" href="/inventory/suppliers"><i class="bi bi-truck"></i><span>Supplier</span></a>
+        </nav>
+
+        <div class="sidebar-section-label">BILLING</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath.startsWith('/invoices') ? 'active' : '' %>" href="/invoices"><i class="bi bi-receipt-cutoff"></i><span>Tagihan</span></a>
+          <a class="sidebar-link <%= currentPath === '/payments' ? 'active' : '' %>" href="/payments"><i class="bi bi-wallet2"></i><span>Pembayaran</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/custom-invoices') ? 'active' : '' %>" href="/custom-invoices"><i class="bi bi-file-earmark-text-fill"></i><span>Faktur Custom</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/discounts') ? 'active' : '' %>" href="/discounts"><i class="bi bi-percent"></i><span>Diskon</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/charges') ? 'active' : '' %>" href="/charges"><i class="bi bi-plus-square-fill"></i><span>Biaya Tambahan</span></a>
+        </nav>
+
+        <div class="sidebar-section-label">KEUANGAN</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath.startsWith('/payments/reconciliation') ? 'active' : '' %>" href="/payments/reconciliation"><i class="bi bi-arrow-repeat"></i><span>Rekonsiliasi</span></a>
+          <a class="sidebar-link <%= currentPath === '/cash' ? 'active' : '' %>" href="/cash"><i class="bi bi-cash-stack"></i><span>Arus Kas</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/cash/categories') ? 'active' : '' %>" href="/cash/categories"><i class="bi bi-tags-fill"></i><span>Kategori Kas</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/reports') ? 'active' : '' %>" href="/reports"><i class="bi bi-bar-chart-line-fill"></i><span>Laporan</span></a>
+        </nav>
+
+        <div class="sidebar-section-label">SYSTEM</div>
+        <nav class="sidebar-nav">
+          <a class="sidebar-link <%= currentPath.startsWith('/logs') ? 'active' : '' %>" href="/logs"><i class="bi bi-terminal-fill"></i><span>Activity Log</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/settings') ? 'active' : '' %>" href="/settings"><i class="bi bi-sliders2"></i><span>Pengaturan</span></a>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
+        <span class="version-pill">CONTROL CENTER v1.2</span>
+      </div>
+    </aside>
+
+    <div class="sidebar-backdrop" data-sidebar-close></div>
+
+    <div class="main-panel">
+      <header class="topbar">
+        <div class="d-flex align-items-center gap-3 min-w-0">
+          <button class="icon-button d-lg-none" type="button" data-sidebar-open><i class="bi bi-list"></i></button>
+          <div class="topbar-title-wrap min-w-0"><div class="topbar-kicker"><span class="topbar-live-dot"></span> INKAMNET CONTROL CENTER</div><div class="topbar-title text-truncate"><%= title %></div></div>
+        </div>
+        <div class="topbar-actions">
+          <button class="command-button d-none d-md-flex" type="button" data-command-open><i class="bi bi-command"></i><span>Quick Command</span><kbd>Ctrl K</kbd></button>
+          <div class="live-clock d-none d-xl-flex"><i class="bi bi-clock-history"></i><span data-live-clock>--:--:-- WIB</span></div>
+          <div class="live-chip d-none d-xl-flex"><span class="pulse-dot"></span> SYSTEM LIVE</div>
+          <button class="icon-button theme-toggle" type="button" data-theme-toggle title="Dark / Light Mode"><i class="bi bi-moon-stars-fill"></i></button>
+          <div class="user-menu dropdown">
+            <button class="user-button dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false"><span class="avatar"><%= (user?.name || 'A').charAt(0).toUpperCase() %></span><span class="user-copy d-none d-sm-flex"><strong><%= user?.name || 'Administrator' %></strong><small><%= user?.role || 'admin' %></small></span></button>
+            <div class="dropdown-menu dropdown-menu-end app-dropdown p-2 mt-2"><div class="px-3 py-2"><small class="text-secondary">SIGNED IN AS</small><strong class="d-block mt-1"><%= user?.name || 'Administrator' %></strong></div><div class="dropdown-divider"></div><a class="dropdown-item rounded-3" href="/settings"><i class="bi bi-gear me-2"></i>Pengaturan</a><form method="post" action="/logout"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="dropdown-item rounded-3 text-danger"><i class="bi bi-box-arrow-right me-2"></i>Logout</button></form></div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content-wrap">
+        <% if(flash){ %><div class="alert alert-<%= flash.type %> alert-modern alert-dismissible fade show" role="alert"><i class="bi bi-info-circle-fill me-2"></i><%= flash.message %><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div><% } %>
+        <div class="page-enter"><%- body %></div>
+        <footer class="app-footer"><span>PT INKAMNET NEXERA TECHNOLOGY</span><span>From the Village, Online Everywhere</span></footer>
+      </main>
+    </div>
+  </div>
+
+  <div class="command-palette" id="commandPalette" aria-hidden="true">
+    <div class="command-backdrop" data-command-close></div>
+    <div class="command-dialog">
+      <div class="command-search"><i class="bi bi-search"></i><input id="commandInput" placeholder="Cari menu atau aksi..." autocomplete="off"><kbd>ESC</kbd></div>
+      <div class="command-list" id="commandList">
+        <a href="/customers/new" data-keywords="pelanggan baru psb tambah"><i class="bi bi-person-plus-fill"></i><div><strong>Tambah Pelanggan</strong><small>Registrasi PSB baru</small></div><span>→</span></a>
+        <a href="/invoices" data-keywords="tagihan invoice generate"><i class="bi bi-receipt"></i><div><strong>Buka Tagihan</strong><small>Generate & kelola billing</small></div><span>→</span></a>
+        <a href="/payments" data-keywords="pembayaran transfer cash"><i class="bi bi-wallet2"></i><div><strong>Catat Pembayaran</strong><small>Transfer atau cash ke tim</small></div><span>→</span></a>
+        <a href="/payments/reconciliation" data-keywords="rekonsiliasi setoran cash staff"><i class="bi bi-arrow-repeat"></i><div><strong>Rekonsiliasi Cash</strong><small>Cek uang yang masih di staff</small></div><span>→</span></a>
+        <a href="/server-duty" data-keywords="piket server jadwal shift"><i class="bi bi-shield-check"></i><div><strong>Piket Server</strong><small>Jadwal piket mingguan</small></div><span>→</span></a>
+        <a href="/tickets" data-keywords="tiket gangguan teknisi"><i class="bi bi-life-preserver"></i><div><strong>Ticketing</strong><small>Keluhan & pekerjaan teknisi</small></div><span>→</span></a>
+        <a href="/network/monitor" data-keywords="network noc monitor router"><i class="bi bi-activity"></i><div><strong>Network Monitor</strong><small>Status site, router & pelanggan</small></div><span>→</span></a>
+        <a href="/inventory" data-keywords="gudang stock barang"><i class="bi bi-box-seam-fill"></i><div><strong>Stock Gudang</strong><small>Warehouse control</small></div><span>→</span></a>
+        <a href="/cash" data-keywords="kas uang pendapatan pengeluaran"><i class="bi bi-cash-stack"></i><div><strong>Arus Kas</strong><small>Income & expense</small></div><span>→</span></a>
+        <a href="/reports" data-keywords="laporan report site"><i class="bi bi-bar-chart-line-fill"></i><div><strong>Laporan</strong><small>Billing, finance & site</small></div><span>→</span></a>
+      </div>
+      <div class="command-footer"><span><i class="bi bi-arrow-return-left"></i> Open</span><span><i class="bi bi-stars"></i> INKAMNET Command Center</span></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/app.js?v=1.2.1"></script>
+</body>
+</html>

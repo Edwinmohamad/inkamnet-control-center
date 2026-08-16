@@ -1,0 +1,26 @@
+{
+  "name": "inkamnet-billing",
+  "version": "1.2.1",
+  "private": true,
+  "description": "INKAMNET Control Center FINAL v1.2.1 - cache-safe UI hotfix, robust animated loader, subscriber/PSB growth dashboard, HQ branding, XLSX, server duty, billing, network, warehouse and finance",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js",
+    "check": "node --check app.js && find routes services middleware config -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "validate": "npm run check && node scripts/validate-static.js"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.2",
+    "dotenv": "17.2.1",
+    "ejs": "3.1.10",
+    "express": "5.1.0",
+    "express-ejs-layouts": "2.5.1",
+    "express-mysql-session": "3.0.3",
+    "express-session": "1.18.2",
+    "mysql2": "3.14.3",
+    "node-cron": "4.2.1",
+    "multer": "2.0.2",
+    "exceljs": "4.4.0"
+  }
+}
