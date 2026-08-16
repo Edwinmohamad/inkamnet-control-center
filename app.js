@@ -172,6 +172,7 @@ app.use('/settings', requireAuth, require('./routes/settings'));
 app.use('/profile', requireAuth, require('./routes/profile'));
 app.use('/clusters', requireAuth, require('./routes/clusters'));
 app.use('/tickets', requireAuth, require('./routes/tickets'));
+app.use('/team-kpi', requireAuth, require('./routes/teamKpi'));
 app.use('/schedules', requireAuth, require('./routes/schedules'));
 app.use('/server-duty', requireAuth, require('./routes/serverDuty'));
 app.use('/inventory', requireAuth, require('./routes/inventory'));

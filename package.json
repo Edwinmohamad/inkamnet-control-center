@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.10.0 - hardened universal action menus, automatic customer IDs for XLSX import, explicit package price visibility, and reliable cash actions",
+  "description": "INKAMNET Control Center v1.11.0 - compact action popovers, dedicated team KPI, bulk invoice payment selection, safe invoice metadata editing, and direct payment actions",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

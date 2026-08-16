@@ -3,10 +3,12 @@ const db=require('../config/db');
 const { generateMonthlyInvoices }=require('../services/invoiceService');
 const { requireAdmin }=require('../middleware/auth');
 const { createCorporateInvoicePdf }=require('../services/reportPdf');
+const { audit }=require('../services/auditService');
 const router=express.Router();
 
 const MONTH_NAMES=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 function intInRange(value,min,max,fallback){const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;}
+function localReturn(value,fallback='/invoices'){const v=String(value||'').trim();return v.startsWith('/')&&!v.startsWith('//')?v:fallback;}
 function periodDate(year,month){
   const now=new Date();
   const day=(now.getFullYear()===year && now.getMonth()+1===month)?now.getDate():1;
@@ -42,7 +44,7 @@ router.get('/',async(req,res)=>{
   if(status){listWhere.push('i.status=?');listParams.push(status);}
   if(q){listWhere.push('(c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');const like=`%${q}%`;listParams.push(like,like,like,like,like);}
 
-  const [invoices]=await db.execute(`SELECT i.*,c.customer_code,c.name customer_name,c.phone,c.due_day,p.name package_name,s.code site_code,cl.name cluster_name
+  const [invoices]=await db.execute(`SELECT i.*,DATE_FORMAT(i.invoice_date,'%Y-%m-%d') invoice_date_key,DATE_FORMAT(i.due_date,'%Y-%m-%d') due_date_key,c.customer_code,c.name customer_name,c.phone,c.due_day,p.name package_name,s.code site_code,cl.name cluster_name
     FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN packages p ON p.id=c.package_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     WHERE ${listWhere.join(' AND ')} ORDER BY i.due_date ASC,c.name ASC`,listParams);
 
@@ -111,6 +113,27 @@ router.get('/:id/print',async(req,res)=>{
   const [payments]=await db.execute(`SELECT amount,method,reference,status,paid_at FROM payments WHERE invoice_id=? ORDER BY paid_at`,[req.params.id]);
   const [bankRows]=await db.query(`SELECT bank_name,account_name,account_number,type FROM banks WHERE is_active=1 ORDER BY id LIMIT 1`);
   res.render('invoices/print',{title:`Faktur ${rows[0].invoice_number}`,invoice:rows[0],payments,bank:bankRows[0]||null});
+});
+
+
+router.post('/:id/update-meta',async(req,res)=>{
+  const invoiceDate=String(req.body.invoice_date||'').trim();
+  const dueDate=String(req.body.due_date||'').trim();
+  const isProrata=req.body.is_prorata==='1'?1:0;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)||!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)){
+    req.session.flash={type:'danger',message:'Tanggal faktur dan jatuh tempo wajib valid.'};
+    return res.redirect(localReturn(req.body.return_to,'/invoices'));
+  }
+  if(new Date(`${dueDate}T00:00:00`)<new Date(`${invoiceDate}T00:00:00`)){
+    req.session.flash={type:'danger',message:'Jatuh tempo tidak boleh sebelum tanggal faktur.'};
+    return res.redirect(localReturn(req.body.return_to,'/invoices'));
+  }
+  const [rows]=await db.execute(`SELECT id,invoice_number,period_month,period_year,total,paid_amount,status FROM invoices WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
+  await db.execute(`UPDATE invoices SET invoice_date=?,due_date=?,is_prorata=?,status=CASE WHEN status='overdue' AND ?>=CURDATE() THEN 'unpaid' WHEN status='unpaid' AND ?<CURDATE() THEN 'overdue' ELSE status END WHERE id=?`,[invoiceDate,dueDate,isProrata,dueDate,dueDate,req.params.id]);
+  await audit({userId:req.session.user.id,action:'update',entityType:'invoice',entityId:req.params.id,description:`Edit metadata tagihan ${rows[0].invoice_number}: tanggal ${invoiceDate}, jatuh tempo ${dueDate}, tipe ${isProrata?'prorata':'bulanan'}; nominal tidak diubah`,ip:req.ip});
+  req.session.flash={type:'success',message:'Metadata tagihan berhasil diperbarui. Nominal, pembayaran, dan saldo tagihan tidak diubah.'};
+  res.redirect(localReturn(req.body.return_to,`/invoices?month=${rows[0].period_month}&year=${rows[0].period_year}`));
 });
 
 router.post('/:id/delete',requireAdmin,async(req,res)=>{

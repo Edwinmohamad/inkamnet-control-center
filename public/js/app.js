@@ -123,7 +123,50 @@
   }
 
 
-  // Row actions use native <dialog> top-layer sheets in v1.10, so they do not depend on table overflow or Popper.
+  // v1.11 compact professional row-action popovers.
+  // Menus are portaled to <body> and positioned with fixed coordinates so table overflow cannot clip them.
+  let activeActionPopover=null;
+  const closeActionPopover=()=>{
+    if(!activeActionPopover)return;
+    activeActionPopover.menu.hidden=true;
+    activeActionPopover.button.setAttribute('aria-expanded','false');
+    activeActionPopover.button.classList.remove('show');
+    activeActionPopover=null;
+  };
+  const positionActionPopover=(button,menu)=>{
+    const r=button.getBoundingClientRect();
+    const gap=7;
+    menu.hidden=false;
+    menu.style.visibility='hidden';
+    menu.style.left='0px';menu.style.top='0px';
+    const m=menu.getBoundingClientRect();
+    const vw=document.documentElement.clientWidth,vh=document.documentElement.clientHeight;
+    let left=Math.min(vw-m.width-8,Math.max(8,r.right-m.width));
+    let top=r.bottom+gap;
+    if(top+m.height>vh-8 && r.top-m.height-gap>=8)top=r.top-m.height-gap;
+    else top=Math.min(vh-m.height-8,Math.max(8,top));
+    menu.style.left=`${Math.round(left)}px`;menu.style.top=`${Math.round(top)}px`;menu.style.visibility='visible';
+  };
+  document.addEventListener('click',event=>{
+    const button=event.target.closest('[data-action-popover-target]');
+    if(button){
+      event.preventDefault();event.stopPropagation();
+      const id=button.dataset.actionPopoverTarget,menu=id?document.getElementById(id):null;
+      if(!menu)return;
+      if(activeActionPopover?.menu===menu){closeActionPopover();return;}
+      closeActionPopover();
+      if(menu.parentElement!==document.body)document.body.appendChild(menu);
+      positionActionPopover(button,menu);
+      button.setAttribute('aria-expanded','true');button.classList.add('show');
+      activeActionPopover={button,menu};
+      return;
+    }
+    if(activeActionPopover && event.target.closest('.ink-action-popover')!==activeActionPopover.menu)closeActionPopover();
+  });
+  document.addEventListener('click',event=>{if(event.target.closest('[data-action-close],.ink-action-popover a'))closeActionPopover();});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')closeActionPopover();});
+  window.addEventListener('resize',closeActionPopover);
+  document.addEventListener('scroll',closeActionPopover,true);
 
   // Progressive reveal for dense admin screens without adding a heavy animation library.
   if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

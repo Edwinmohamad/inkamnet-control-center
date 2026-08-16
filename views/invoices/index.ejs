@@ -41,39 +41,51 @@
   </form>
 
   <div class="data-card invoice-registry-card action-safe-card">
-    <div class="data-card-head">
+    <div class="data-card-head invoice-registry-head">
       <div><h3>Daftar Tagihan</h3><small><%= invoices.length %> tagihan · <%= monthNames[filters.month-1] %> <%= filters.year %></small></div>
-      <div class="legend-inline"><span><i class="dot success"></i>Lunas</span><span><i class="dot warning"></i>Belum Lunas</span></div>
+      <div class="invoice-registry-tools">
+        <div class="invoice-selection-state"><i class="bi bi-check2-square"></i><span><b id="invoiceTableSelectedCount">0</b> dipilih</span></div>
+        <button class="btn-tech success compact" type="button" id="paySelectedInvoices" disabled><i class="bi bi-wallet2"></i>Bayar Dipilih</button>
+        <div class="legend-inline"><span><i class="dot success"></i>Lunas</span><span><i class="dot warning"></i>Belum Lunas</span></div>
+      </div>
     </div>
     <div class="table-responsive action-safe-table">
       <table class="app-table invoice-table">
         <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Sisa</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
-          <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62'); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; %>
+          <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62'); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const canPay=Number(i.outstanding)>0 && !['paid','cancelled','refunded'].includes(i.status); %>
           <tr>
             <td><span class="cell-main"><%= index+1 %></span></td>
-            <td><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><a class="invoice-number-link" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></td>
+            <td>
+              <div class="invoice-customer-select">
+                <input class="form-check-input invoice-table-check" type="checkbox" value="<%= i.id %>" data-invoice-table-check <%= canPay?'':'disabled' %> aria-label="Pilih tagihan <%= i.customer_name %>">
+                <div><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><a class="invoice-number-link" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></div>
+              </div>
+            </td>
             <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
-            <td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':'BELUM LUNAS' %></span></td>
+            <td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span></td>
             <td class="money"><%= formatRupiah(i.total) %><span class="cell-sub"><%= i.package_name %></span></td>
             <td class="money text-success-soft"><%= formatRupiah(i.paid_amount) %></td>
             <td class="money <%= Number(i.outstanding)>0?'text-danger-soft':'text-success-soft' %>"><%= formatRupiah(i.outstanding) %></td>
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
             <td><%= formatDate(i.due_date) %></td>
             <td class="invoice-action-cell">
-              <button class="action-menu action-menu-labeled" type="button" onclick="document.getElementById('invoiceAction<%= i.id %>').showModal()" aria-label="Buka tindakan tagihan <%= i.invoice_number %>"><i class="bi bi-three-dots-vertical"></i><span>Aksi</span></button>
-              <dialog class="ink-action-dialog" id="invoiceAction<%= i.id %>">
-                <div class="ink-action-dialog-head"><div><small>TAGIHAN</small><strong><%= i.customer_name %></strong><span><%= i.invoice_number %> · <%= monthNames[i.period_month-1] %> <%= i.period_year %></span></div><button class="ink-dialog-close" type="button" onclick="this.closest('dialog').close()" aria-label="Tutup"><i class="bi bi-x-lg"></i></button></div>
-                <div class="ink-action-dialog-body">
-                  <% if(Number(i.outstanding)>0){ %><button type="button" class="ink-action-item success" onclick="this.closest('dialog').close()" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i><span><b>Pembayaran</b><small>Catat pembayaran faktur ini</small></span></button><% } %>
-                  <a class="ink-action-item" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><span><b>Lihat Faktur PDF</b><small>Buka PDF di tab baru</small></span></a>
-                  <a class="ink-action-item" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i><span><b>Unduh Faktur PDF</b><small>Simpan PDF ke perangkat</small></span></a>
-                  <a class="ink-action-item" href="/invoices/<%= i.id %>/print" target="_blank"><i class="bi bi-printer"></i><span><b>Versi Cetak</b><small>Tampilan siap print</small></span></a>
-                  <a class="ink-action-item" href="/payments?q=<%= encodeURIComponent(i.invoice_number) %>"><i class="bi bi-clock-history"></i><span><b>Riwayat Pembayaran</b><small>Lihat transaksi faktur</small></span></a>
-                  <% if(wa){ %><a class="ink-action-item success" target="_blank" rel="noopener" href="https://wa.me/<%= wa %>?text=<%= encodeURIComponent(reminder) %>"><i class="bi bi-whatsapp"></i><span><b>Kirim Pengingat</b><small>WhatsApp pelanggan</small></span></a><% } %>
-                  <% if(user.role==='admin' && Number(i.paid_amount)===0){ %><div class="ink-action-separator"></div><form method="post" action="/invoices/<%= i.id %>/delete" onsubmit="return confirm('Hapus tagihan <%= i.invoice_number %>? Hanya tagihan tanpa pembayaran yang dapat dihapus.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="ink-action-item danger" type="submit"><i class="bi bi-trash3"></i><span><b>Hapus Tagihan</b><small>Hanya faktur tanpa pembayaran</small></span></button></form><% } %>
+              <div class="invoice-inline-actions">
+                <% if(canPay){ %><button type="button" class="invoice-pay-button" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i><span>Bayar</span></button><% } %>
+                <button class="action-menu" type="button" data-action-popover-target="invoiceAction<%= i.id %>" aria-label="Buka tindakan tagihan <%= i.invoice_number %>"><i class="bi bi-three-dots-vertical"></i></button>
+              </div>
+              <div class="ink-action-popover" id="invoiceAction<%= i.id %>" hidden>
+                <div class="ink-action-popover-head"><div><small>TAGIHAN</small><strong><%= i.customer_name %></strong><span><%= i.invoice_number %></span></div></div>
+                <div class="ink-action-popover-body">
+                  <% if(canPay){ %><button type="button" class="ink-action-item compact success" data-action-close data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i><span><b>Pembayaran</b><small>Catat pembayaran</small></span></button><% } %>
+                  <button type="button" class="ink-action-item compact" data-action-close data-bs-toggle="modal" data-bs-target="#invoiceEditModal" data-invoice-edit-id="<%= i.id %>" data-invoice-edit-number="<%= i.invoice_number %>" data-invoice-edit-customer="<%= i.customer_name %>" data-invoice-edit-date="<%= i.invoice_date_key %>" data-invoice-edit-due="<%= i.due_date_key %>" data-invoice-edit-prorata="<%= i.is_prorata?1:0 %>"><i class="bi bi-pencil-square"></i><span><b>Edit Tagihan</b><small>Tanggal & tipe, bukan nominal</small></span></button>
+                  <a class="ink-action-item compact" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><span><b>Lihat Faktur PDF</b><small>Buka di tab baru</small></span></a>
+                  <a class="ink-action-item compact" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i><span><b>Unduh PDF</b><small>Simpan faktur</small></span></a>
+                  <a class="ink-action-item compact" href="/payments?q=<%= encodeURIComponent(i.invoice_number) %>"><i class="bi bi-clock-history"></i><span><b>Riwayat Pembayaran</b><small>Lihat transaksi</small></span></a>
+                  <% if(wa){ %><a class="ink-action-item compact success" target="_blank" rel="noopener" href="https://wa.me/<%= wa %>?text=<%= encodeURIComponent(reminder) %>"><i class="bi bi-whatsapp"></i><span><b>Kirim Pengingat</b><small>WhatsApp pelanggan</small></span></a><% } %>
+                  <% if(user.role==='admin' && Number(i.paid_amount)===0){ %><div class="ink-action-separator"></div><form method="post" action="/invoices/<%= i.id %>/delete" onsubmit="return confirm('Hapus tagihan <%= i.invoice_number %>? Hanya tagihan tanpa pembayaran yang dapat dihapus.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="ink-action-item compact danger" type="submit"><i class="bi bi-trash3"></i><span><b>Hapus Tagihan</b><small>Tanpa pembayaran saja</small></span></button></form><% } %>
                 </div>
-              </dialog>
+              </div>
             </td>
           </tr>
           <% }) %>
@@ -103,4 +115,33 @@
   </div>
 </div>
 
+<div class="modal fade" id="invoiceEditModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="invoiceEditForm" method="post">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input type="hidden" name="return_to" value="/invoices?<%= periodQueryString %>">
+      <div class="modal-header"><div><div class="module-kicker">EDIT TAGIHAN</div><h5 class="modal-title">Perbaiki Metadata Tagihan</h5><small class="text-secondary" id="invoiceEditIdentity">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="invoice-edit-safety"><i class="bi bi-shield-lock-fill"></i><div><strong>Nominal dikunci</strong><small>Edit ini tidak dapat mengubah subtotal, total, pembayaran, atau sisa tagihan.</small></div></div>
+        <div class="row g-3 mt-1"><div class="col-md-6"><label class="form-label">Tanggal Faktur</label><input class="form-control" type="date" name="invoice_date" id="invoiceEditDate" required></div><div class="col-md-6"><label class="form-label">Jatuh Tempo</label><input class="form-control" type="date" name="due_date" id="invoiceEditDue" required></div><div class="col-12"><label class="form-label">Tipe Tagihan</label><select class="form-select" name="is_prorata" id="invoiceEditProrata"><option value="0">Bulanan</option><option value="1">Prorata</option></select></div></div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-check2-circle"></i>Simpan Perubahan</button></div>
+    </form>
+  </div>
+</div>
+
 <%- include('../payments/_payment-modal',{openInvoices,staff,preselectedInvoiceId:null,returnTo:'/invoices?'+periodQueryString,autoOpenPaymentModal:false}) %>
+
+<script>
+(()=>{
+  const tableChecks=[...document.querySelectorAll('[data-invoice-table-check]')];
+  const paySelected=document.getElementById('paySelectedInvoices');
+  const selectedCount=document.getElementById('invoiceTableSelectedCount');
+  const refreshSelection=()=>{const ids=tableChecks.filter(x=>x.checked&&!x.disabled).map(x=>String(x.value));if(selectedCount)selectedCount.textContent=ids.length;if(paySelected)paySelected.disabled=!ids.length;return ids;};
+  tableChecks.forEach(ch=>ch.addEventListener('change',refreshSelection));
+  paySelected?.addEventListener('click',()=>{const ids=refreshSelection();if(!ids.length)return;const paymentModal=document.getElementById('paymentModal');if(!paymentModal)return;paymentModal.querySelectorAll('.payment-invoice-check').forEach(ch=>{ch.checked=ids.includes(String(ch.value));ch.dispatchEvent(new Event('change',{bubbles:true}));});bootstrap.Modal.getOrCreateInstance(paymentModal).show();});
+  const editModal=document.getElementById('invoiceEditModal');
+  editModal?.addEventListener('show.bs.modal',event=>{const b=event.relatedTarget;if(!b)return;document.getElementById('invoiceEditForm').action=`/invoices/${b.dataset.invoiceEditId}/update-meta`;document.getElementById('invoiceEditIdentity').textContent=`${b.dataset.invoiceEditNumber} · ${b.dataset.invoiceEditCustomer}`;document.getElementById('invoiceEditDate').value=b.dataset.invoiceEditDate||'';document.getElementById('invoiceEditDue').value=b.dataset.invoiceEditDue||'';document.getElementById('invoiceEditProrata').value=b.dataset.invoiceEditProrata||'0';});
+  refreshSelection();
+})();
+</script>
