@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title><%= invoice.invoice_number %> · INKAMNET</title>
+<style>
+body{font-family:Arial,sans-serif;color:#111;margin:0;background:#f4f5f8}.sheet{width:min(820px,calc(100% - 32px));margin:28px auto;background:#fff;padding:34px;box-shadow:0 12px 40px rgba(0,0,0,.08)}.head{display:flex;justify-content:space-between;gap:20px;border-bottom:2px solid #603aea;padding-bottom:18px}.brand h1{margin:0;color:#603aea;font-size:24px}.brand p,.meta p{margin:5px 0;color:#555;font-size:12px}.meta{text-align:right}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:24px 0}.box{border:1px solid #ddd;border-radius:10px;padding:14px}.box small{color:#777;display:block;margin-bottom:5px}.box strong{font-size:14px}.amount{margin-top:18px;border-collapse:collapse;width:100%}.amount th,.amount td{padding:12px;border-bottom:1px solid #eee;text-align:left}.amount th:last-child,.amount td:last-child{text-align:right}.total{font-size:18px;font-weight:700}.foot{margin-top:28px;font-size:11px;color:#777;text-align:center}.actions{text-align:right;margin-bottom:14px}.actions button{background:#603aea;color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer}@media print{body{background:#fff}.sheet{box-shadow:none;width:auto;margin:0;padding:20px}.actions{display:none}}
+</style>
+</head>
+<body>
+<div class="sheet">
+<div class="actions"><button onclick="window.print()">Cetak / Simpan PDF</button></div>
+<div class="head"><div class="brand"><h1>INKAMNET</h1><p>PT INKAMNET NEXERA TECHNOLOGY</p><p>Layanan Internet · Operasional Jaringan</p></div><div class="meta"><strong>FAKTUR TAGIHAN</strong><p><%= invoice.invoice_number %></p><p>Periode <%= String(invoice.period_month).padStart(2,'0') %>/<%= invoice.period_year %></p></div></div>
+<div class="grid"><div class="box"><small>Pelanggan</small><strong><%= invoice.customer_name %></strong><p><%= invoice.customer_code %></p><p><%= invoice.address||'-' %></p></div><div class="box"><small>Detail Layanan</small><strong><%= invoice.package_name %></strong><p>Site <%= invoice.site_code %> · Cluster <%= invoice.cluster_name||'-' %> · <%= invoice.site_name %></p><p>Jatuh tempo: <%= formatDate(invoice.due_date) %></p></div></div>
+<table class="amount"><thead><tr><th>Deskripsi</th><th>Nominal</th></tr></thead><tbody><tr><td>Paket internet <%= invoice.package_name %><%= invoice.is_prorata?' (prorata)':'' %></td><td><%= formatRupiah(invoice.subtotal) %></td></tr><tr><td>Diskon</td><td>- <%= formatRupiah(invoice.discount) %></td></tr><tr><td class="total">Total</td><td class="total"><%= formatRupiah(invoice.total) %></td></tr><tr><td>Sudah dibayar</td><td><%= formatRupiah(invoice.paid_amount) %></td></tr><tr><td class="total">Sisa tagihan</td><td class="total"><%= formatRupiah(invoice.outstanding) %></td></tr></tbody></table>
+<% if(bank){ %><div class="box" style="margin-top:18px"><small>Informasi Pembayaran</small><strong><%= bank.bank_name %> · <%= bank.account_number %></strong><p>a.n. <%= bank.account_name %></p></div><% } %>
+<% if(payments.length){ %><div class="box" style="margin-top:22px"><small>Riwayat pembayaran</small><% payments.forEach(p=>{ %><p><strong><%= formatRupiah(p.amount) %></strong> · <%= p.method %> · <%= p.status %> · <%= new Date(p.paid_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'}) %></p><% }) %></div><% } %>
+<div class="foot">Faktur dibuat otomatis oleh INKAMNET Control Center · Dokumen digital, tidak memerlukan tanda tangan.</div>
+</div>
+</body></html>

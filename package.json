@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.2.2",
+  "version": "1.6.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.2.2 - topbar account dropdown visibility and responsive positioning fix",
+  "description": "INKAMNET Control Center v1.6.0 - customer search, bulk payments, inline invoice PDF, cluster context, expense categories and proof evidence",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
@@ -21,6 +21,7 @@
     "mysql2": "3.14.3",
     "node-cron": "4.2.1",
     "multer": "2.0.2",
-    "exceljs": "4.4.0"
+    "exceljs": "4.4.0",
+    "pdfkit": "0.19.1"
   }
 }

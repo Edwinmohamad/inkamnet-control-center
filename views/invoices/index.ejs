@@ -1,7 +1,103 @@
-<section>
-<div class="module-head"><div><div class="module-kicker">BILLING ENGINE</div><h1>Tagihan Pelanggan</h1><p>Generate invoice, pantau tunggakan, prorata, outstanding, dan status pembayaran.</p></div><div class="module-actions"><a class="btn-tech" href="/payments"><i class="bi bi-wallet2"></i>Pembayaran</a><form method="post" action="/invoices/generate"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="btn-tech primary"><i class="bi bi-stars"></i>Generate Tagihan</button></form></div></div>
-<% const paidCount=invoices.filter(i=>i.status==='paid').length; const overdueCount=invoices.filter(i=>i.status==='overdue').length; const outstanding=invoices.reduce((a,i)=>a+Number(i.outstanding||0),0); const total=invoices.reduce((a,i)=>a+Number(i.total||0),0); %>
-<div class="metric-grid"><article class="metric-card"><div class="metric-top"><span class="metric-label">Total Invoice</span><span class="metric-icon"><i class="bi bi-receipt-fill"></i></span></div><strong><%= invoices.length %></strong><small>Data sesuai filter</small></article><article class="metric-card green"><div class="metric-top"><span class="metric-label">Lunas</span><span class="metric-icon"><i class="bi bi-check2-circle"></i></span></div><strong><%= paidCount %></strong><small>Invoice paid</small></article><article class="metric-card red"><div class="metric-top"><span class="metric-label">Overdue</span><span class="metric-icon"><i class="bi bi-alarm-fill"></i></span></div><strong><%= overdueCount %></strong><small>Perlu follow-up</small></article><article class="metric-card orange"><div class="metric-top"><span class="metric-label">Outstanding</span><span class="metric-icon"><i class="bi bi-hourglass-split"></i></span></div><strong><%= formatRupiah(outstanding) %></strong><small>Dari <%= formatRupiah(total) %> tertagih</small></article></div>
-<div class="filter-card"><div class="toolbar"><div class="toolbar-left"><a href="/invoices" class="btn-tech <%= !status?'primary':'' %>">Semua</a><a href="/invoices?status=unpaid" class="btn-tech <%= status==='unpaid'?'primary':'' %>">Unpaid</a><a href="/invoices?status=overdue" class="btn-tech <%= status==='overdue'?'primary':'' %>">Overdue</a><a href="/invoices?status=paid" class="btn-tech <%= status==='paid'?'primary':'' %>">Paid</a></div><div class="toolbar-right"><a class="btn-tech" href="/reports"><i class="bi bi-bar-chart-line"></i>Laporan</a></div></div></div>
-<div class="data-card"><div class="data-card-head"><div><h3>Invoice Registry</h3><small>Billing status dan nominal per pelanggan</small></div></div><div class="table-responsive"><table class="app-table"><thead><tr><th>Invoice</th><th>Pelanggan</th><th>Site</th><th>Jatuh Tempo</th><th>Tagihan</th><th>Dibayar</th><th>Outstanding</th><th>Status</th></tr></thead><tbody><% invoices.forEach(i=>{ %><tr><td><span class="cell-main text-purple"><%= i.invoice_number %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'MONTHLY' %></span></td><td><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span></td><td><span class="status-badge purple"><%= i.site_code %></span></td><td><%= formatDate(i.due_date) %></td><td class="money"><%= formatRupiah(i.total) %></td><td class="money text-success-soft"><%= formatRupiah(i.paid_amount) %></td><td class="money <%= Number(i.outstanding)>0?'text-danger-soft':'' %>"><%= formatRupiah(i.outstanding) %></td><td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status %></span></td></tr><% }) %><% if(!invoices.length){%><tr><td colspan="8"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Belum ada invoice</strong><small>Gunakan Generate Tagihan untuk membuat billing.</small></div></td></tr><%}%></tbody></table></div></div>
+<section class="billing-page">
+  <div class="module-head billing-head">
+    <div>
+      <div class="module-kicker">MESIN TAGIHAN</div>
+      <h1>Tagihan Pelanggan</h1>
+      <p>Buat tagihan per bulan atau per pelanggan, pantau status pembayaran, dan tindak lanjuti tagihan dari satu halaman.</p>
+    </div>
+    <div class="module-actions">
+      <a class="btn-tech" href="/reports?view=invoice"><i class="bi bi-file-earmark-text"></i>Faktur</a><a class="btn-tech" href="/payments"><i class="bi bi-wallet2"></i>Pembayaran</a>
+      <button class="btn-tech primary" type="button" data-bs-toggle="modal" data-bs-target="#generateInvoiceModal"><i class="bi bi-stars"></i>Buat Tagihan</button>
+    </div>
+  </div>
+
+  <div class="billing-period-note">
+    <i class="bi bi-info-circle-fill"></i>
+    <div><strong>Periode aktif: <%= monthNames[filters.month-1] %> <%= filters.year %></strong><span>Ringkasan dan tabel di bawah mengikuti periode/filter yang dipilih. Pembuatan tagihan dapat dilakukan untuk semua pelanggan aktif atau satu pelanggan tertentu.</span></div>
+  </div>
+
+  <div class="billing-stat-grid">
+    <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-people"></i></span><div><small>Pelanggan Aktif</small><strong><%= summary.active %></strong></div></article>
+    <article class="billing-stat"><span class="billing-stat-icon blue"><i class="bi bi-calendar2-check"></i></span><div><small>Total Tagihan</small><strong><%= summary.total %></strong></div></article>
+    <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-receipt"></i></span><div><small>Tagihan Terbit</small><strong><%= summary.issued %></strong></div></article>
+    <article class="billing-stat"><span class="billing-stat-icon red"><i class="bi bi-calendar2-x"></i></span><div><small>Belum Terbit</small><strong><%= summary.notIssued %></strong></div></article>
+    <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-check2-circle"></i></span><div><small>Tagihan Lunas</small><strong><%= summary.paidCount %></strong></div></article>
+    <article class="billing-stat"><span class="billing-stat-icon red"><i class="bi bi-alarm"></i></span><div><small>Belum Lunas</small><strong><%= summary.unpaidCount %></strong></div></article>
+    <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-cash-coin"></i></span><div><small>Nominal Terbayar</small><strong><%= formatRupiah(summary.paidAmount) %></strong></div></article>
+    <article class="billing-stat"><span class="billing-stat-icon red"><i class="bi bi-hourglass-split"></i></span><div><small>Sisa Tagihan</small><strong><%= formatRupiah(summary.outstanding) %></strong></div></article>
+  </div>
+
+  <form class="billing-filter-panel" method="get" action="/invoices">
+    <div class="billing-filter-head"><div><strong>Filter Tagihan</strong><small>Pilih periode dan data yang ingin ditampilkan.</small></div><a href="/invoices" class="ink-text-link"><i class="bi bi-arrow-counterclockwise"></i> Atur Ulang</a></div>
+    <div class="billing-filter-grid">
+      <div class="filter-group"><label>BULAN</label><select class="form-select" name="month"><% monthNames.forEach((m,i)=>{ %><option value="<%= i+1 %>" <%= filters.month===i+1?'selected':'' %>><%= m %></option><% }) %></select></div>
+      <div class="filter-group"><label>TAHUN</label><input class="form-control" name="year" type="number" min="2020" max="2100" value="<%= filters.year %>"></div>
+      <div class="filter-group"><label>STATUS</label><select class="form-select" name="status"><option value="">Semua Status</option><option value="unpaid" <%= filters.status==='unpaid'?'selected':'' %>>Belum Lunas</option><option value="partial" <%= filters.status==='partial'?'selected':'' %>>Sebagian</option><option value="overdue" <%= filters.status==='overdue'?'selected':'' %>>Terlambat</option><option value="paid" <%= filters.status==='paid'?'selected':'' %>>Lunas</option></select></div>
+      <div class="filter-group"><label>SITE / POP</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
+      <div class="filter-group billing-filter-customer"><label>PELANGGAN</label><select class="form-select" name="customer"><option value="">Semua Pelanggan</option><% customers.forEach(c=>{ %><option value="<%= c.id %>" <%= String(filters.customer)===String(c.id)?'selected':'' %>><%= c.site_code %> · Cluster <%= c.cluster_name||'-' %> · <%= c.customer_code %> · <%= c.name %></option><% }) %></select></div>
+      <div class="filter-group billing-filter-search"><label>CARI</label><div class="search-box"><i class="bi bi-search"></i><input name="q" value="<%= filters.q %>" placeholder="Nama, ID pelanggan, nomor faktur..."></div></div>
+      <div class="billing-filter-submit"><button class="btn-tech primary"><i class="bi bi-funnel"></i>Terapkan Filter</button></div>
+    </div>
+  </form>
+
+  <div class="data-card invoice-registry-card">
+    <div class="data-card-head">
+      <div><h3>Daftar Tagihan</h3><small><%= invoices.length %> tagihan · <%= monthNames[filters.month-1] %> <%= filters.year %></small></div>
+      <div class="legend-inline"><span><i class="dot success"></i>Lunas</span><span><i class="dot warning"></i>Belum Lunas</span></div>
+    </div>
+    <div class="table-responsive">
+      <table class="app-table invoice-table">
+        <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Sisa</th><th>Site</th><th>Jatuh Tempo</th><th class="text-end">Tindakan</th></tr></thead>
+        <tbody>
+          <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62'); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; %>
+          <tr>
+            <td><span class="cell-main"><%= index+1 %></span></td>
+            <td><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><a class="invoice-number-link" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></td>
+            <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
+            <td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':'BELUM LUNAS' %></span></td>
+            <td class="money"><%= formatRupiah(i.total) %><span class="cell-sub"><%= i.package_name %></span></td>
+            <td class="money text-success-soft"><%= formatRupiah(i.paid_amount) %></td>
+            <td class="money <%= Number(i.outstanding)>0?'text-danger-soft':'text-success-soft' %>"><%= formatRupiah(i.outstanding) %></td>
+            <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
+            <td><%= formatDate(i.due_date) %></td>
+            <td class="text-end">
+              <div class="dropdown invoice-action-dropdown">
+                <button class="action-menu dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false"><i class="bi bi-list"></i></button>
+                <div class="dropdown-menu dropdown-menu-end app-dropdown invoice-action-menu p-2">
+                  <% if(Number(i.outstanding)>0){ %><button type="button" class="dropdown-item rounded-3" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i>Pembayaran</button><% } %>
+                  <a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i>Lihat Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i>Unduh Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/print" target="_blank"><i class="bi bi-printer"></i>Versi Cetak</a>
+                  <a class="dropdown-item rounded-3" href="/payments?q=<%= encodeURIComponent(i.invoice_number) %>"><i class="bi bi-clock-history"></i>Riwayat Pembayaran</a>
+                  <% if(wa){ %><a class="dropdown-item rounded-3 text-success-soft" target="_blank" rel="noopener" href="https://wa.me/<%= wa %>?text=<%= encodeURIComponent(reminder) %>"><i class="bi bi-whatsapp"></i>Kirim Pengingat</a><% } %>
+                  <% if(user.role==='admin' && Number(i.paid_amount)===0){ %><div class="dropdown-divider"></div><form method="post" action="/invoices/<%= i.id %>/delete" onsubmit="return confirm('Hapus tagihan <%= i.invoice_number %>? Hanya tagihan tanpa pembayaran yang dapat dihapus.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="dropdown-item rounded-3 text-danger"><i class="bi bi-trash3"></i>Hapus Tagihan</button></form><% } %>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <% }) %>
+          <% if(!invoices.length){ %><tr><td colspan="10"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Buat Tagihan.</small></div></td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
 </section>
+
+<div class="modal fade" id="generateInvoiceModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form method="post" action="/invoices/generate" class="modal-content">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="modal-header"><div><div class="module-kicker">PEMBUAT TAGIHAN</div><h5 class="modal-title">Buat Tagihan Pelanggan</h5></div><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="generate-note"><i class="bi bi-shield-check"></i><div><strong>Aman dari tagihan ganda</strong><small>Pelanggan yang sudah memiliki tagihan pada periode yang sama otomatis dilewati.</small></div></div>
+        <div class="row g-3 mt-1">
+          <div class="col-md-4"><label class="form-label">Bulan</label><select class="form-select" name="month" required><% monthNames.forEach((m,i)=>{ %><option value="<%= i+1 %>" <%= filters.month===i+1?'selected':'' %>><%= m %></option><% }) %></select></div>
+          <div class="col-md-4"><label class="form-label">Tahun</label><input class="form-control" type="number" name="year" min="2020" max="2100" value="<%= filters.year %>" required></div>
+          <div class="col-md-4"><label class="form-label">Site (opsional)</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %></option><% }) %></select></div>
+          <div class="col-12"><label class="form-label">Pelanggan</label><select class="form-select" name="customer_id"><option value="">Semua pelanggan aktif</option><% customers.forEach(c=>{ %><option value="<%= c.id %>"><%= c.site_code %> · Cluster <%= c.cluster_name||'-' %> · <%= c.customer_code %> · <%= c.name %></option><% }) %></select><div class="form-help">Pilih satu pelanggan bila hanya ingin membuat tagihan untuk pelanggan tersebut.</div></div>
+        </div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-stars"></i>Buat Sekarang</button></div>
+    </form>
+  </div>
+</div>
+
+<%- include('../payments/_payment-modal',{openInvoices,staff,preselectedInvoiceId:null,returnTo:'/invoices?'+periodQuery(filters),autoOpenPaymentModal:false}) %>

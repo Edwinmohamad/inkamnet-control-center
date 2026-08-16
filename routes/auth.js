@@ -10,16 +10,18 @@ router.get('/login', (req, res) => {
 
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  const [rows] = await db.execute(`SELECT id, name, username, password_hash, role, is_active FROM users WHERE username=? LIMIT 1`, [username]);
+  const [rows] = await db.execute(`SELECT id, name, username, password_hash, role, profile_photo, is_active FROM users WHERE username=? LIMIT 1`, [username]);
   const user = rows[0];
   if (!user || !user.is_active || !(await bcrypt.compare(password || '', user.password_hash))) {
     return res.status(401).render('auth/login', { title: 'Login', layout: false, error: 'Username atau password salah.' });
   }
-  const sessionUser = { id: user.id, name: user.name, username: user.username, role: user.role };
+  const [[appSettings]] = await db.query(`SELECT default_language FROM settings WHERE id=1 LIMIT 1`);
+  const sessionUser = { id: user.id, name: user.name, username: user.username, role: user.role, profile_photo: user.profile_photo || null };
   // Regenerate session after login to prevent session fixation.
   req.session.regenerate((err) => {
     if (err) return res.status(500).send('Gagal membuat session login. Coba lagi.');
     req.session.user = sessionUser;
+    req.session.language = appSettings?.default_language === 'en' ? 'en' : 'id';
     req.session.save(() => res.redirect('/'));
   });
 });

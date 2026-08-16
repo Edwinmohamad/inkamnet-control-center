@@ -22,23 +22,41 @@ function calcProrata(price, activationDate, year, monthIndex) {
 async function nextInvoiceNumber(conn, siteCode, year, monthIndex) {
   const ym = `${year}/${String(monthIndex + 1).padStart(2, '0')}`;
   const [rows] = await conn.execute(
-    `SELECT COUNT(*) AS total FROM invoices WHERE YEAR(invoice_date)=? AND MONTH(invoice_date)=?`,
+    `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_number,'/',-1) AS UNSIGNED)),0) AS max_seq FROM invoices WHERE period_year=? AND period_month=?`,
     [year, monthIndex + 1]
   );
-  const seq = String(Number(rows[0].total) + 1).padStart(6, '0');
+  const seq = String(Number(rows[0].max_seq) + 1).padStart(6, '0');
   return `INV/INK/${siteCode}/${ym}/${seq}`;
 }
 
-async function generateMonthlyInvoices(referenceDate = new Date(), force = false, actorUserId = null) {
+/**
+ * Generate invoice bulanan.
+ * options.customerId membatasi generate ke satu pelanggan.
+ * options.siteCode membatasi generate ke satu site.
+ */
+async function generateMonthlyInvoices(referenceDate = new Date(), force = false, actorUserId = null, options = {}) {
   const year = referenceDate.getFullYear();
   const monthIndex = referenceDate.getMonth();
   const todayOnly = new Date(year, monthIndex, referenceDate.getDate());
   const conn = await db.getConnection();
   let created = 0;
   let skipped = 0;
+  let eligible = 0;
 
   try {
     await conn.beginTransaction();
+
+    const where = [`c.customer_status='active'`];
+    const params = [];
+    if (options.customerId) {
+      where.push('c.id=?');
+      params.push(Number(options.customerId));
+    }
+    if (options.siteCode) {
+      where.push('s.code=?');
+      params.push(String(options.siteCode));
+    }
+
     const [customers] = await conn.execute(`
       SELECT c.*, p.price AS package_price, p.name AS package_name, s.code AS site_code,
              COALESCE(c.due_day, s.default_due_day, st.default_due_day, 5) AS effective_due_day,
@@ -48,8 +66,11 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
       JOIN packages p ON p.id=c.package_id
       JOIN sites s ON s.id=c.site_id
       CROSS JOIN settings st
-      WHERE c.customer_status='active'
-    `);
+      WHERE ${where.join(' AND ')}
+      ORDER BY s.code,c.name
+    `, params);
+
+    eligible = customers.length;
 
     for (const c of customers) {
       const dueDay = Math.min(Number(c.effective_due_day), lastDayOfMonth(year, monthIndex));
@@ -87,9 +108,9 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
     await conn.commit();
     await db.execute(
       `INSERT INTO automation_logs (job_name, status, message) VALUES ('generate_monthly_invoices','success',?)`,
-      [`Created ${created}, skipped ${skipped}`]
+      [`Period ${year}-${String(monthIndex + 1).padStart(2,'0')} · created ${created}, skipped ${skipped}, eligible ${eligible}${options.customerId?` · customer ${options.customerId}`:''}${options.siteCode?` · site ${options.siteCode}`:''}`]
     );
-    return { created, skipped };
+    return { created, skipped, eligible };
   } catch (err) {
     await conn.rollback();
     await db.execute(

@@ -13,9 +13,13 @@ const csrf = require('./middleware/csrf');
 const commonLocals = require('./middleware/common');
 const paymentProofUpload = require('./middleware/paymentProofUpload');
 const customerExcelUpload = require('./middleware/customerExcelUpload');
+const clusterExcelUpload = require('./middleware/clusterExcelUpload');
+const profilePhotoUpload = require('./middleware/profilePhotoUpload');
+const cashProofUpload = require('./middleware/cashProofUpload');
 const { requireAuth } = require('./middleware/auth');
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema } = require('./services/schemaService');
 
 const app = express();
 app.set('view engine', 'ejs');
@@ -68,12 +72,48 @@ app.use('/customers/import', (req, res, next) => {
   }
   next();
 });
+app.use('/clusters/import', (req, res, next) => {
+  if (req.method === 'POST' && req.is('multipart/form-data')) {
+    return clusterExcelUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'File Excel maksimal 8 MB.' : err.message };
+        return res.redirect('/clusters');
+      }
+      next();
+    });
+  }
+  next();
+});
+app.use('/profile', (req, res, next) => {
+  if (req.method === 'POST' && req.path === '/' && req.is('multipart/form-data')) {
+    return profilePhotoUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'Foto profil maksimal 4 MB.' : err.message };
+        return res.redirect('/profile');
+      }
+      next();
+    });
+  }
+  next();
+});
 app.use('/payments', (req, res, next) => {
   if (['POST','PUT','PATCH'].includes(req.method) && req.is('multipart/form-data')) {
     return paymentProofUpload(req, res, (err) => {
       if (err) {
         req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'Bukti pembayaran maksimal 6 MB.' : err.message };
         return res.redirect('/payments');
+      }
+      next();
+    });
+  }
+  next();
+});
+app.use('/cash', (req, res, next) => {
+  if (['POST','PUT','PATCH'].includes(req.method) && req.is('multipart/form-data')) {
+    return cashProofUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'Bukti pengeluaran maksimal 6 MB.' : err.message };
+        return res.redirect('/cash');
       }
       next();
     });
@@ -102,6 +142,7 @@ app.use('/reports', requireAuth, require('./routes/reports'));
 app.use('/routers', requireAuth, require('./routes/routers'));
 app.use('/network', requireAuth, require('./routes/network'));
 app.use('/settings', requireAuth, require('./routes/settings'));
+app.use('/profile', requireAuth, require('./routes/profile'));
 app.use('/clusters', requireAuth, require('./routes/clusters'));
 app.use('/tickets', requireAuth, require('./routes/tickets'));
 app.use('/schedules', requireAuth, require('./routes/schedules'));
@@ -129,6 +170,9 @@ async function bootstrap() {
     if (!adminPassword || adminPassword.includes('GantiPassword')) throw new Error('DEFAULT_ADMIN_PASSWORD wajib diganti sebelum startup production.');
   }
   await db.query('SELECT 1');
+  await ensureV14Schema();
+  await ensureV15Schema();
+  await ensureV16Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';

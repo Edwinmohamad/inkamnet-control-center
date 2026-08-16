@@ -29,21 +29,45 @@ router.get('/', async (req, res) => {
     WHERE d.duty_date BETWEEN ? AND ?
     ORDER BY d.duty_date, COALESCE(d.start_time,'23:59:59'), d.staff_name
   `,[weekStart,weekEnd]);
-  const [staff] = await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);
+  const [staff] = await db.query(`SELECT e.id,e.employee_code,e.name,e.user_id,p.name position_name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 ORDER BY e.name`);
   const [sites] = await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
   const days = Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return {date:isoDate(d), label:d.toLocaleDateString('id-ID',{weekday:'short',day:'2-digit',month:'short'})};});
   const prev=new Date(start);prev.setDate(prev.getDate()-7); const next=new Date(start);next.setDate(next.getDate()+7);
   res.render('server-duty/index',{title:'Jadwal Piket Server',duties,staff,sites,days,weekStart,weekEnd,prevWeek:isoDate(prev),nextWeek:isoDate(next)});
 });
 
+
+router.post('/generate-rotation', requireAdmin, async(req,res)=>{
+  const rotation=['Padilah','Jon','Bopung','Edwin','Agung'];
+  const firstMonday=mondayOf(req.body.start_week||req.body.week);
+  const weeks=Math.max(1,Math.min(20,Number(req.body.weeks||5)));
+  const [employees]=await db.query(`SELECT id,name,user_id FROM employees WHERE is_active=1`);
+  let created=0,skipped=0;
+  const conn=await db.getConnection();
+  try{await conn.beginTransaction();
+    for(let w=0;w<weeks;w++){
+      const staffName=rotation[w%rotation.length];const employee=employees.find(e=>String(e.name).trim().toLowerCase()===staffName.toLowerCase());const monday=new Date(`${firstMonday}T00:00:00`);monday.setDate(monday.getDate()+w*7);
+      for(let d=0;d<7;d++){
+        const date=new Date(monday);date.setDate(date.getDate()+d);const dutyDate=isoDate(date);
+        const [exists]=await conn.execute(`SELECT id FROM server_duty_schedules WHERE duty_date=? AND LOWER(staff_name)=LOWER(?) LIMIT 1`,[dutyDate,staffName]);
+        if(exists.length){skipped++;continue;}
+        await conn.execute(`INSERT INTO server_duty_schedules(duty_date,shift_name,user_id,staff_name,status,notes,created_by) VALUES(?,'Piket Mingguan',?,?, 'scheduled',?,?)`,[dutyDate,employee?.user_id||null,staffName,`Rotasi otomatis minggu ${w+1}/${weeks}`,req.session.user.id]);created++;
+      }
+    }
+    await conn.commit();
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+  await audit({userId:req.session.user.id,action:'generate',entityType:'server_duty',description:`Generate rotasi ${weeks} minggu: ${created} jadwal`,ip:req.ip});req.session.flash={type:'success',message:`Rotasi piket dibuat: ${weeks} minggu untuk Padilah, Jon, Bopung, Edwin, Agung. ${created} assignment baru, ${skipped} dilewati.`};res.redirect(`/server-duty?week=${firstMonday}`);
+});
+
 router.post('/', requireAdmin, async (req,res)=>{
   const b=req.body;
-  const selectedUser=b.user_id?Number(b.user_id):null;
+  const selectedEmployee=b.employee_id?Number(b.employee_id):null;
+  let selectedUser=null;
   let staffName=(b.staff_name||'').trim();
-  if(selectedUser){
-    const [rows]=await db.execute(`SELECT name FROM users WHERE id=? AND is_active=1`,[selectedUser]);
-    if(!rows.length) throw new Error('Akun staff tidak ditemukan.');
-    staffName=rows[0].name;
+  if(selectedEmployee){
+    const [rows]=await db.execute(`SELECT id,name,user_id FROM employees WHERE id=? AND is_active=1`,[selectedEmployee]);
+    if(!rows.length) throw new Error('Data karyawan tidak ditemukan.');
+    staffName=rows[0].name;selectedUser=rows[0].user_id||null;
   }
   if(!staffName) throw new Error('Nama petugas piket wajib diisi.');
   const [result]=await db.execute(`INSERT INTO server_duty_schedules(duty_date,shift_name,start_time,end_time,user_id,staff_name,site_id,status,notes,created_by) VALUES(?,?,?,?,?,?,?,'scheduled',?,?)`,[

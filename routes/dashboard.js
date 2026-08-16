@@ -60,10 +60,9 @@ router.get('/', async (req, res) => {
   const routerScope = siteId ? ' AND site_id=?' : '';
   const [[routerNoc]] = await db.execute(`SELECT COUNT(*) routers_total, SUM(last_status='online') routers_online FROM routers WHERE is_active=1${routerScope}`, customerParams);
   const [[ticketNoc]] = await db.execute(`SELECT COUNT(*) tickets_open FROM tickets t LEFT JOIN customers c ON c.id=t.customer_id WHERE t.status IN ('open','progress','pending')${siteId?' AND c.site_id=?':''}`, customerParams);
-  const [[stockNoc]] = await db.execute(`SELECT COUNT(*) low_stock FROM inventory_items WHERE is_active=1 AND qty<=min_stock${siteId?' AND site_id=?':''}`, customerParams);
   const [[cashHeldNoc]] = await db.execute(`SELECT COALESCE(SUM(p.amount),0) cash_held FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.method='cash' AND p.status='confirmed' AND p.settlement_status='held_by_staff'${customerScope}`, customerParams);
   const [[overdueNoc]] = await db.execute(`SELECT COUNT(DISTINCT i.customer_id) overdue_customers FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.status='overdue' AND i.outstanding>0${customerScope}`, customerParams);
-  const noc = { ...routerNoc, ...ticketNoc, ...stockNoc, ...cashHeldNoc, ...overdueNoc };
+  const noc = { ...routerNoc, ...ticketNoc, ...cashHeldNoc, ...overdueNoc };
 
   const [[cashflow]] = await db.execute(`
     SELECT COALESCE(SUM(CASE WHEN cc.type='income' THEN ct.amount ELSE 0 END),0) income,

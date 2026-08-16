@@ -16,6 +16,14 @@ backups/
 storage/payment-proofs/*
 !storage/payment-proofs/.gitkeep
 
+# Profile photos / private uploads
+storage/profile-photos/*
+!storage/profile-photos/.gitkeep
+
+# Cash proof / private expense evidence
+storage/cash-proofs/*
+!storage/cash-proofs/.gitkeep
+
 # Logs
 *.log
 logs/

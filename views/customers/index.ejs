@@ -23,9 +23,10 @@
   <div class="data-card">
     <div class="data-card-head"><div><h3>Database Pelanggan</h3><small><%= customers.length %> data ditemukan</small></div><div class="toolbar-right"><span class="status-badge purple"><%= customers.length %> rows</span></div></div>
     <div class="table-responsive">
-      <table class="app-table"><thead><tr><th>Customer</th><th>Site / Cluster</th><th>Paket</th><th>PPPoE</th><th>Billing</th><th>Network</th><th>Kontak</th><th></th></tr></thead><tbody>
+      <table class="app-table"><thead><tr><th>Customer</th><th>Sales</th><th>Site / Cluster</th><th>Paket</th><th>PPPoE</th><th>Billing</th><th>Network</th><th>Kontak</th><th></th></tr></thead><tbody>
       <% customers.forEach(c=>{ %><tr>
         <td><a class="cell-main text-decoration-none" href="/customers/<%= c.id %>"><%= c.name %></a><span class="cell-sub"><%= c.customer_code %></span></td>
+        <td><span class="cell-main"><%= c.sales_name || 'Direct' %></span><span class="cell-sub"><%= c.sales_code || 'Tanpa sales' %></span></td>
         <td><span class="cell-main"><%= c.site_code %></span><span class="cell-sub"><%= c.cluster_name || 'Belum di-cluster' %></span></td>
         <td><span class="cell-main"><%= c.package_name %></span><span class="cell-sub"><%= formatRupiah(c.package_price) %></span></td>
         <td><span class="cell-main"><%= c.pppoe_username || '-' %></span><span class="cell-sub">Router link</span></td>
@@ -34,7 +35,7 @@
         <td><span class="cell-main"><%= c.phone || '-' %></span><span class="cell-sub"><%= c.address || '-' %></span></td>
         <td><a class="action-menu text-decoration-none" href="/customers/<%= c.id %>/edit"><i class="bi bi-pencil-square"></i></a></td>
       </tr><% }) %>
-      <% if(!customers.length){ %><tr><td colspan="8"><div class="empty-state"><i class="bi bi-people"></i><strong>Data pelanggan tidak ditemukan</strong><small>Coba ubah filter atau tambahkan pelanggan baru.</small></div></td></tr><% } %>
+      <% if(!customers.length){ %><tr><td colspan="9"><div class="empty-state"><i class="bi bi-people"></i><strong>Data pelanggan tidak ditemukan</strong><small>Coba ubah filter atau tambahkan pelanggan baru.</small></div></td></tr><% } %>
       </tbody></table>
     </div>
   </div>

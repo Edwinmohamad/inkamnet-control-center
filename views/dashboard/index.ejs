@@ -90,18 +90,17 @@
     </article>
   </div>
 
-  <div class="metric-grid" style="margin-bottom:12px">
+  <div class="metric-grid dashboard-core-metrics" style="margin-bottom:12px">
     <article class="metric-card green"><div class="metric-top"><span class="metric-label">Router Health</span><span class="metric-icon"><i class="bi bi-router-fill"></i></span></div><strong><%= Number(noc.routers_online||0) %>/<%= Number(noc.routers_total||0) %></strong><small>Router online berdasarkan health check</small></article>
     <article class="metric-card <%= Number(noc.tickets_open||0)>0?'orange':'green' %>"><div class="metric-top"><span class="metric-label">Open Ticket</span><span class="metric-icon"><i class="bi bi-life-preserver"></i></span></div><strong><%= Number(noc.tickets_open||0) %></strong><small>Open · progress · pending</small></article>
-    <article class="metric-card <%= Number(noc.low_stock||0)>0?'red':'green' %>"><div class="metric-top"><span class="metric-label">Low Stock Alert</span><span class="metric-icon"><i class="bi bi-box-seam-fill"></i></span></div><strong><%= Number(noc.low_stock||0) %></strong><small>Item mencapai minimum stock</small></article>
+    
     <article class="metric-card <%= Number(cashflow.balance||0)>=0?'green':'red' %>"><div class="metric-top"><span class="metric-label">Cash Balance</span><span class="metric-icon"><i class="bi bi-wallet2"></i></span></div><strong><%= formatRupiah(cashflow.balance||0) %></strong><small>Arus kas bulan terpilih</small></article>
   </div>
 
-  <div class="ops-alert-rail">
+  <div class="ops-alert-rail dashboard-core-alerts">
     <a href="/payments/reconciliation" class="ops-alert-item <%= Number(noc.cash_held||0)>0?'attention':'ok' %>"><i class="bi bi-person-vcard"></i><div><span>Cash di Tim</span><strong><%= formatRupiah(noc.cash_held||0) %></strong></div><em><%= Number(noc.cash_held||0)>0?'RECONCILE':'CLEAR' %></em></a>
     <a href="/invoices" class="ops-alert-item <%= Number(noc.overdue_customers||0)>0?'danger':'ok' %>"><i class="bi bi-exclamation-diamond"></i><div><span>Customer Overdue</span><strong><%= Number(noc.overdue_customers||0) %> pelanggan</strong></div><em><%= Number(noc.overdue_customers||0)>0?'FOLLOW UP':'CLEAR' %></em></a>
     <a href="/network/monitor" class="ops-alert-item <%= Number(noc.routers_total||0)>Number(noc.routers_online||0)?'danger':'ok' %>"><i class="bi bi-router"></i><div><span>Router Offline</span><strong><%= Math.max(0,Number(noc.routers_total||0)-Number(noc.routers_online||0)) %></strong></div><em>NETWORK</em></a>
-    <a href="/inventory" class="ops-alert-item <%= Number(noc.low_stock||0)>0?'attention':'ok' %>"><i class="bi bi-box-seam"></i><div><span>Low Stock</span><strong><%= Number(noc.low_stock||0) %> item</strong></div><em>WAREHOUSE</em></a>
   </div>
 
   <div class="ink-main-grid">
