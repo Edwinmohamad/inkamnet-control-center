@@ -1,0 +1,207 @@
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inkamnet-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy INKAMNET
+    runs-on: [self-hosted, linux, x64]
+
+    env:
+      PROD_DIR: /DATA/AppData/INKAMNET/production
+      BACKUP_DIR: /DATA/AppData/INKAMNET/auto-deploy-backups
+      APP_CONTAINER: inkamnet-control-center-final-app-1
+      DB_CONTAINER: inkamnet-control-center-final-db-1
+      APP_IMAGE: inkamnet-control-center-final-app
+      HEALTH_URL: http://127.0.0.1:3300/healthz
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Validate source
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== VALIDATE JAVASCRIPT ==="
+          find . -type f -name "*.js" \
+            -not -path "./node_modules/*" \
+            -print0 | xargs -0 -n1 node --check
+
+          echo "Source validation OK"
+
+      - name: Check production before deploy
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== CURRENT PRODUCTION ==="
+          curl -fsS "$HEALTH_URL"
+          echo
+
+          docker ps --format "table {{.Names}}\t{{.Status}}" \
+            | grep inkamnet-control-center-final
+
+      - name: Backup database
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p "$BACKUP_DIR"
+
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          BACKUP_FILE="$BACKUP_DIR/inkamnet-${TIMESTAMP}-${GITHUB_SHA::7}.sql"
+
+          echo "=== DATABASE BACKUP ==="
+          docker exec "$DB_CONTAINER" sh -c \
+            'mariadb-dump -u"$MARIADB_USER" -p"$MARIADB_PASSWORD" --single-transaction --routines --triggers "$MARIADB_DATABASE"' \
+            > "$BACKUP_FILE"
+
+          test -s "$BACKUP_FILE"
+
+          echo "Backup OK:"
+          ls -lh "$BACKUP_FILE"
+
+      - name: Prepare rollback image
+        shell: bash
+        run: |
+          set -e
+
+          docker image inspect "$APP_IMAGE:latest" >/dev/null
+
+          docker tag \
+            "$APP_IMAGE:latest" \
+            "$APP_IMAGE:rollback-${GITHUB_RUN_ID}"
+
+          echo "Rollback image prepared"
+
+      - name: Sync source to production
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== SYNC SOURCE ==="
+
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='node_modules/' \
+            --exclude='backups/' \
+            --exclude='storage/payment-proofs/' \
+            "$GITHUB_WORKSPACE/" "$PROD_DIR/"
+
+          echo "Production .env:"
+          test -f "$PROD_DIR/.env"
+          ls -l "$PROD_DIR/.env"
+
+          echo "Sync OK"
+
+      - name: Validate Docker Compose
+        shell: bash
+        run: |
+          set -e
+          cd "$PROD_DIR"
+
+          docker compose config >/dev/null
+
+          echo "Docker Compose OK"
+
+      - name: Build application
+        shell: bash
+        run: |
+          set -e
+          cd "$PROD_DIR"
+
+          echo "=== BUILD ==="
+          docker compose build app
+
+      - name: Deploy application
+        shell: bash
+        run: |
+          set -e
+          cd "$PROD_DIR"
+
+          echo "=== DEPLOY APP ONLY ==="
+          docker compose up -d --no-deps --force-recreate app
+
+      - name: Health check
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== WAITING FOR APPLICATION ==="
+
+          for i in $(seq 1 30); do
+            if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
+              echo
+              echo "APPLICATION HEALTHY"
+              curl -fsS "$HEALTH_URL"
+              echo
+              exit 0
+            fi
+
+            echo "Waiting... $i/30"
+            sleep 3
+          done
+
+          echo "Health check FAILED"
+          docker logs --tail 100 "$APP_CONTAINER" || true
+          exit 1
+
+      - name: Rollback if deploy failed
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== ROLLBACK ==="
+
+          if docker image inspect "$APP_IMAGE:rollback-${GITHUB_RUN_ID}" >/dev/null 2>&1; then
+            docker tag \
+              "$APP_IMAGE:rollback-${GITHUB_RUN_ID}" \
+              "$APP_IMAGE:latest"
+
+            cd "$PROD_DIR"
+
+            docker compose up -d \
+              --no-deps \
+              --force-recreate \
+              app
+
+            sleep 10
+
+            echo "Rollback health:"
+            curl -fsS "$HEALTH_URL" || true
+          else
+            echo "Rollback image not found"
+          fi
+
+      - name: Cleanup rollback image
+        if: success()
+        shell: bash
+        run: |
+          docker image rm \
+            "$APP_IMAGE:rollback-${GITHUB_RUN_ID}" \
+            2>/dev/null || true
+
+          echo "Deploy completed successfully"
+
+      - name: Production status
+        if: always()
+        shell: bash
+        run: |
+          echo "=== FINAL STATUS ==="
+
+          docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" \
+            | grep inkamnet-control-center-final || true
+
+          echo
+          echo "Commit: $GITHUB_SHA"
+          echo "Run ID: $GITHUB_RUN_ID"
