@@ -15,13 +15,14 @@ async function options() {
 }
 
 function customerFilter(req) {
-  return { q:(req.query.q||'').trim(), site:req.query.site||'', status:req.query.status||'' };
+  return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', status:req.query.status||'' };
 }
 function customerSql(filters) {
   let sql=`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,p.speed_label,r.name router_name,cl.name cluster_name,se.name sales_name,se.employee_code sales_code,(SELECT i.id FROM invoices i WHERE i.customer_id=c.id AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY i.period_year DESC,i.period_month DESC,i.id DESC LIMIT 1) open_invoice_id FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE 1=1`;
   const params=[];
-  if(filters.q){sql+=` AND (c.customer_code LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ? OR c.pppoe_username LIKE ?)`;params.push(...Array(5).fill(`%${filters.q}%`));}
+  if(filters.q){sql+=` AND (c.customer_code LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ? OR c.pppoe_username LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;params.push(...Array(7).fill(`%${filters.q}%`));}
   if(filters.site){sql+=` AND s.code=?`;params.push(filters.site);}
+  if(filters.cluster){sql+=` AND c.cluster_id=?`;params.push(Number(filters.cluster));}
   if(filters.status==='inactive'){sql+=` AND c.customer_status<>'active'`;}else if(filters.status){sql+=` AND c.customer_status=?`;params.push(filters.status);}
   sql+=` ORDER BY c.id DESC`;
   return {sql,params};
@@ -95,48 +96,150 @@ router.get('/', async (req, res) => {
   const filters=customerFilter(req);const {sql,params}=customerSql(filters);
   const [customers]=await db.execute(sql,params);
   const [sites]=await db.query(`SELECT code,name FROM sites ORDER BY code`);
+  const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated FROM customers`);
-  res.render('customers/index',{title:'Pelanggan',customers,sites,stats:stats||{},filters});
+  res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,stats:stats||{},filters});
 });
 
+
+const IMPORT_ALIASES={
+  name:['name','nama','nama pelanggan'],
+  site_code:['site_code','site','server','lokasi server','site / pop'],
+  package_name:['package_name','paket internet','paket','nama paket'],
+  address:['address','alamat'],
+  email:['email','e-mail'],
+  phone:['phone','whatsapp','no whatsapp','nomor whatsapp','no. whatsapp'],
+  activation_date:['activation_date','tanggal instalasi','tanggal aktivasi','aktif sejak'],
+  due_day:['due_day','tanggal jatuh tempo','jatuh tempo'],
+  pppoe_username:['pppoe_username','pppoe username','username pppoe'],
+  router_name:['router_name','router','nama router'],
+  cluster_name:['cluster_name','cluster','odp','cluster / odp'],
+  sales_employee_code:['sales_employee_code','sales','kode sales'],
+  grace_days:['grace_days','grace days','toleransi hari'],
+  customer_status:['customer_status','status pelanggan','status'],
+  prorata_enabled:['prorata_enabled','prorata','pakai prorata'],
+  notes:['notes','catatan','keterangan']
+};
+function normalizeImportHeader(value){
+  return String(value||'').trim().toLowerCase().replace(/\s+/g,' ');
+}
+function findImportHeaderRow(ws){
+  for(let r=1;r<=Math.min(ws.rowCount,30);r++){
+    const row=ws.getRow(r);
+    const values=[];
+    row.eachCell({includeEmpty:false},cell=>values.push(normalizeImportHeader(plainCell(cell))));
+    const hasName=values.some(v=>IMPORT_ALIASES.name.includes(v));
+    const hasSite=values.some(v=>IMPORT_ALIASES.site_code.includes(v));
+    const hasPackage=values.some(v=>IMPORT_ALIASES.package_name.includes(v));
+    if(hasName&&hasSite&&hasPackage)return r;
+  }
+  return 0;
+}
+function mapImportHeaders(row){
+  const headers={};
+  row.eachCell((cell,col)=>{
+    const raw=normalizeImportHeader(plainCell(cell));
+    for(const [key,aliases] of Object.entries(IMPORT_ALIASES)){
+      if(!headers[key]&&aliases.includes(raw))headers[key]=col;
+    }
+  });
+  return headers;
+}
 router.get('/template.xlsx', async(req,res)=>{
   const {sites,packages,routers,clusters,sales}=await options();
   const wb=new ExcelJS.Workbook();wb.creator='INKAMNET Control Center';wb.created=new Date();
-  const ws=wb.addWorksheet('PELANGGAN');
-  ws.columns=[
-    ['name',28],['phone',18],['email',28],['address',40],['sales_employee_code',18],['site_code',13],['package_name',24],['pppoe_username',24],['router_name',24],['cluster_name',24],['activation_date',17],['due_day',12],['grace_days',12],['customer_status',18],['prorata_enabled',18],['notes',35]
-  ].map(([header,width])=>({header,key:header,width}));
+  const ws=wb.addWorksheet('PELANGGAN',{views:[{state:'frozen',ySplit:12}]});
+  const widths=[4,28,15,24,42,28,18,18,18,24,24,24,18,16,16,18,34];
+  widths.forEach((w,i)=>ws.getColumn(i+1).width=w);
+
+  ws.getCell('A1').value='#';ws.getCell('B1').value='INKAMNET - TEMPLATE EXCEL IMPORT PELANGGAN';
+  ws.mergeCells('B1:Q1');
+  ws.getCell('B1').font={bold:true,size:16,color:{argb:'FF6030E0'}};
+  ws.getCell('B1').alignment={vertical:'middle'};ws.getRow(1).height=28;
+
+  const instructions=[
+    'INSTRUKSI UNTUK IMPORT (HARAP DIBACA DULU)',
+    'Sebelum import, pastikan Site / POP dan Paket Internet sudah dibuat di aplikasi.',
+    'Baris dengan kolom pertama berisi # akan diabaikan oleh sistem.',
+    'Customer ID TIDAK perlu diisi. Sistem generate otomatis berdasarkan Site + Jatuh Tempo + nomor urut.',
+    'Nama Site dan Paket Internet harus sesuai dengan data yang sudah dibuat. Import TIDAK membuat Site/Paket baru.',
+    'Jika Cluster / Router diisi, datanya harus sudah ada dan harus berada pada Site yang sama.',
+    'Format tanggal: DD/MM/YYYY atau YYYY-MM-DD. Contoh 16/08/2026.',
+    'Seluruh baris divalidasi dahulu. Jika ada satu baris error, seluruh import dibatalkan agar data tidak masuk setengah-setengah.'
+  ];
+  instructions.forEach((txt,i)=>{
+    const r=i+3;ws.getCell(`A${r}`).value='#';ws.getCell(`B${r}`).value=i===0?txt:`- ${txt}`;
+    ws.mergeCells(`B${r}:Q${r}`);
+    ws.getCell(`B${r}`).font={bold:i===0,color:{argb:i===0?'FFF04030':'FF4B5563'}};
+  });
+
+  const requiredNotes=['#','*WAJIB','*WAJIB','*WAJIB','*WAJIB','Opsional','*WAJIB','*WAJIB','*WAJIB','Opsional','Opsional','Opsional','Opsional','Opsional','Opsional','Opsional','Opsional'];
+  const headers=['#','Nama','Site','Paket Internet','Alamat','Email','Whatsapp','Tanggal Instalasi','Tanggal Jatuh Tempo','PPPoE Username','Router','Cluster','Sales','Grace Days','Status Pelanggan','Prorata','Catatan'];
+  ws.getRow(11).values=requiredNotes;
+  ws.getRow(12).values=headers;
+  ws.getRow(11).height=42;ws.getRow(12).height=24;
+  ws.getRow(11).eachCell((cell,col)=>{
+    cell.alignment={horizontal:'center',vertical:'middle',wrapText:true};
+    cell.font={bold:col>1&&String(cell.value).includes('WAJIB'),color:{argb:col>1&&String(cell.value).includes('WAJIB')?'FFF04030':'FF667085'},size:10};
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF8FAFC'}};
+    cell.border={top:{style:'thin',color:{argb:'FFD0D5DD'}},bottom:{style:'thin',color:{argb:'FFD0D5DD'}}};
+  });
+  ws.getRow(12).eachCell((cell,col)=>{
+    cell.font={bold:true,color:{argb:'FFFFFFFF'}};
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:col===1?'FF111827':'FF6030E0'}};
+    cell.alignment={vertical:'middle',horizontal:col===1?'center':'left'};
+    cell.border={bottom:{style:'medium',color:{argb:'FFF04030'}}};
+  });
+
   const sampleSite=sites[0]?.code||'KRW';
   const sampleSiteObj=sites.find(s=>s.code===sampleSite);
   const samplePackage=(packages.find(p=>p.site_id===null||Number(p.site_id)===Number(sampleSiteObj?.id))||packages[0])?.name||'20 Mbps';
-  ws.addRow({name:'Contoh Pelanggan',phone:'081234567890',email:'',address:'Alamat pelanggan',sales_employee_code:'',site_code:sampleSite,package_name:samplePackage,pppoe_username:'contoh001',router_name:routers.find(r=>r.site_code===sampleSite)?.name||'',cluster_name:clusters.find(c=>c.site_code===sampleSite)?.name||'',activation_date:new Date().toISOString().slice(0,10),due_day:15,grace_days:2,customer_status:'active',prorata_enabled:'YA',notes:'HAPUS BARIS CONTOH INI sebelum import data asli'});
-  styleWorkbook(ws);
-  ws.getColumn('activation_date').numFmt='yyyy-mm-dd';
-  ws.getColumn('phone').numFmt='@';ws.getColumn('pppoe_username').numFmt='@';
-  for(let row=2;row<=1000;row++){
-    ws.getCell(`N${row}`).dataValidation={type:'list',allowBlank:false,formulae:['"active,suspended,terminated"']};
-    ws.getCell(`O${row}`).dataValidation={type:'list',allowBlank:true,formulae:['"YA,TIDAK"']};
-    ws.getCell(`L${row}`).dataValidation={type:'whole',operator:'between',allowBlank:true,formulae:[1,28]};
-    ws.getCell(`M${row}`).dataValidation={type:'whole',operator:'between',allowBlank:true,formulae:[0,30]};
+  const sampleCluster=clusters.find(c=>c.site_code===sampleSite)?.name||'';
+  const sampleRouter=routers.find(r=>r.site_code===sampleSite)?.name||'';
+  ws.getRow(13).values=['#','CONTOH PELANGGAN',sampleSite,samplePackage,'Alamat pelanggan','contoh@pelanggan.id','081234567890',new Date().toISOString().slice(0,10),15,'contoh001',sampleRouter,sampleCluster,sales[0]?.employee_code||'',2,'active','YA','BARIS CONTOH - otomatis diabaikan karena kolom A berisi #'];
+  ws.getRow(13).font={italic:true,color:{argb:'FF667085'}};
+
+  // Hidden same-sheet helper lists keep Excel dropdown validation compatible across desktop/web Excel.
+  const helpers={site:'AA',pkg:'AB',cluster:'AC',router:'AD',sales:'AE',status:'AF',prorata:'AG'};
+  sites.forEach((x,i)=>ws.getCell(`${helpers.site}${i+2}`).value=x.code);
+  packages.forEach((x,i)=>ws.getCell(`${helpers.pkg}${i+2}`).value=x.name);
+  clusters.forEach((x,i)=>ws.getCell(`${helpers.cluster}${i+2}`).value=x.name);
+  routers.forEach((x,i)=>ws.getCell(`${helpers.router}${i+2}`).value=x.name);
+  sales.forEach((x,i)=>ws.getCell(`${helpers.sales}${i+2}`).value=x.employee_code);
+  ['active','suspended','terminated'].forEach((x,i)=>ws.getCell(`${helpers.status}${i+2}`).value=x);
+  ['YA','TIDAK'].forEach((x,i)=>ws.getCell(`${helpers.prorata}${i+2}`).value=x);
+  Object.values(helpers).forEach(col=>ws.getColumn(col).hidden=true);
+
+  const validationRange=(col,count)=>`$${col}$2:$${col}$${Math.max(2,count+1)}`;
+  for(let row=14;row<=2013;row++){
+    if(sites.length)ws.getCell(`C${row}`).dataValidation={type:'list',allowBlank:false,formulae:[validationRange(helpers.site,sites.length)],showErrorMessage:true,errorTitle:'Site tidak valid',error:'Pilih Site dari daftar.'};
+    if(packages.length)ws.getCell(`D${row}`).dataValidation={type:'list',allowBlank:false,formulae:[validationRange(helpers.pkg,packages.length)],showErrorMessage:true,errorTitle:'Paket tidak valid',error:'Pilih Paket dari daftar. Pastikan Site + Paket sesuai sheet REFERENSI.'};
+    ws.getCell(`H${row}`).numFmt='dd/mm/yyyy';
+    ws.getCell(`I${row}`).dataValidation={type:'whole',operator:'between',allowBlank:false,formulae:[1,28],showErrorMessage:true,errorTitle:'Jatuh tempo',error:'Isi angka 1 sampai 28.'};
+    if(routers.length)ws.getCell(`K${row}`).dataValidation={type:'list',allowBlank:true,formulae:[validationRange(helpers.router,routers.length)]};
+    if(clusters.length)ws.getCell(`L${row}`).dataValidation={type:'list',allowBlank:true,formulae:[validationRange(helpers.cluster,clusters.length)]};
+    if(sales.length)ws.getCell(`M${row}`).dataValidation={type:'list',allowBlank:true,formulae:[validationRange(helpers.sales,sales.length)]};
+    ws.getCell(`N${row}`).dataValidation={type:'whole',operator:'between',allowBlank:true,formulae:[0,30]};
+    ws.getCell(`O${row}`).dataValidation={type:'list',allowBlank:true,formulae:[validationRange(helpers.status,3)]};
+    ws.getCell(`P${row}`).dataValidation={type:'list',allowBlank:true,formulae:[validationRange(helpers.prorata,2)]};
+    ws.getCell(`G${row}`).numFmt='@';ws.getCell(`J${row}`).numFmt='@';
   }
-  const info=wb.addWorksheet('PETUNJUK');info.columns=[{width:26},{width:95}];
-  [
-    ['INKAMNET CUSTOMER IMPORT','Isi sheet PELANGGAN lalu upload kembali melalui menu Pelanggan → Import Excel.'],
-    ['WAJIB','name, site_code, package_name'],
-    ['SITE','Gunakan kode site persis seperti daftar REFERENSI (contoh KRW/KBG/CLM).'],
-    ['PACKAGE','Gunakan nama paket persis seperti daftar REFERENSI.'],
-    ['ROUTER / CLUSTER','Opsional. Jika diisi, nama harus cocok dan harus berada pada site yang sama.'],
-    ['Tanggal Aktivasi','Format YYYY-MM-DD, contoh 2026-08-16.'],
-    ['Status','active / suspended / terminated.'],
-    ['Prorata','YA atau TIDAK.'],
-    ['CUSTOMER ID','Tidak perlu diisi. Sistem membuat Customer ID otomatis dari Site + jatuh tempo + nomor urut saat import.'],
-    ['KEAMANAN','Import divalidasi lebih dulu. Jika ada baris error, seluruh import dibatalkan agar data tidak masuk setengah-setengah.']
-  ].forEach(x=>info.addRow(x));
-  info.getRow(1).font={bold:true,color:{argb:'FFF04030'},size:14};
-  const ref=wb.addWorksheet('REFERENSI');ref.state='veryHidden';
-  ref.addRow(['SITE_CODE','SITE_NAME','PACKAGE_NAME','ROUTER_NAME','ROUTER_SITE','CLUSTER_NAME','CLUSTER_SITE','SALES_EMPLOYEE_CODE','SALES_NAME']);
-  const max=Math.max(sites.length,packages.length,routers.length,clusters.length,sales.length);
-  for(let i=0;i<max;i++)ref.addRow([sites[i]?.code||'',sites[i]?.name||'',packages[i]?.name||'',routers[i]?.name||'',routers[i]?.site_code||'',clusters[i]?.name||'',clusters[i]?.site_code||'',sales[i]?.employee_code||'',sales[i]?.name||'']);
+  ws.autoFilter={from:'B12',to:'Q12'};
+
+  const ref=wb.addWorksheet('REFERENSI');
+  ref.columns=[{header:'SITE_CODE',key:'site',width:14},{header:'SITE_NAME',key:'site_name',width:28},{header:'SITE_PAKET',key:'pkg_site',width:14},{header:'PACKAGE_NAME',key:'pkg',width:28},{header:'CLUSTER_SITE',key:'cl_site',width:14},{header:'CLUSTER_NAME',key:'cluster',width:28},{header:'ROUTER_SITE',key:'router_site',width:14},{header:'ROUTER_NAME',key:'router',width:28},{header:'SALES_CODE',key:'sales_code',width:18},{header:'SALES_NAME',key:'sales_name',width:28}];
+  const max=Math.max(sites.length,packages.length,clusters.length,routers.length,sales.length);
+  for(let i=0;i<max;i++)ref.addRow({
+    site:sites[i]?.code||'',site_name:sites[i]?.name||'',
+    pkg_site:packages[i]?.site_code||'GLOBAL',pkg:packages[i]?.name||'',
+    cl_site:clusters[i]?.site_code||'',cluster:clusters[i]?.name||'',
+    router_site:routers[i]?.site_code||'',router:routers[i]?.name||'',
+    sales_code:sales[i]?.employee_code||'',sales_name:sales[i]?.name||''
+  });
+  styleWorkbook(ref);
+  ref.getCell('L1').value='PENTING';ref.getCell('L2').value='Site + Paket harus cocok. Paket site-specific hanya boleh dipakai pada site tersebut.';
+  ref.getCell('L1').font={bold:true,color:{argb:'FFF04030'}};ref.getCell('L2').alignment={wrapText:true};ref.getColumn('L').width=55;
+
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition','attachment; filename="template-import-pelanggan-INKAMNET.xlsx"');
   await wb.xlsx.write(res);res.end();
@@ -160,31 +263,34 @@ router.post('/import', requireAdmin, async(req,res)=>{
   const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(req.file.buffer);
   const ws=workbook.getWorksheet('PELANGGAN')||workbook.worksheets[0];if(!ws)throw new Error('Workbook tidak memiliki sheet pelanggan.');
   if(ws.rowCount>5001) throw new Error('Maksimal 5.000 pelanggan per sekali import. Pecah file menjadi beberapa batch.');
-  const headers={};ws.getRow(1).eachCell((cell,col)=>{headers[String(plainCell(cell)).trim().toLowerCase()]=col;});
-  const required=['name','site_code','package_name'];const missing=required.filter(h=>!headers[h]);if(missing.length)throw new Error(`Kolom wajib tidak ada: ${missing.join(', ')}`);
-  const [sites]=await db.query(`SELECT s.id,s.code,COALESCE(s.default_due_day,st.default_due_day,15) default_due_day FROM sites s LEFT JOIN settings st ON st.id=1 WHERE s.is_active=1`);const siteMap=new Map(sites.map(x=>[x.code.toUpperCase(),x]));
+  const headerRow=findImportHeaderRow(ws);if(!headerRow)throw new Error('Header pelanggan tidak ditemukan. Gunakan template terbaru dari menu Download Format Import.');
+  const headers=mapImportHeaders(ws.getRow(headerRow));
+  const required=['name','site_code','package_name','address','phone','activation_date','due_day'];const missing=required.filter(h=>!headers[h]);if(missing.length)throw new Error(`Kolom wajib tidak ada: ${missing.join(', ')}. Download template terbaru dan jangan ubah nama kolom wajib.`);
+  const [sites]=await db.query(`SELECT s.id,s.code,s.name,COALESCE(s.default_due_day,st.default_due_day,15) default_due_day FROM sites s LEFT JOIN settings st ON st.id=1 WHERE s.is_active=1`);
+  const siteMap=new Map();for(const x of sites){siteMap.set(String(x.code).trim().toUpperCase(),x);siteMap.set(String(x.name||'').trim().toUpperCase(),x);}
   const [packages]=await db.query(`SELECT id,name,site_id FROM packages WHERE is_active=1`);
   const [routers]=await db.query(`SELECT id,name,site_id FROM routers WHERE is_active=1`);const [clusters]=await db.query(`SELECT id,name,site_id FROM clusters WHERE status!='inactive'`);const [sales]=await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales'`);
   const value=(row,key)=>headers[key]?plainCell(row.getCell(headers[key])):'';
   const data=[],errors=[];
-  for(let n=2;n<=ws.rowCount;n++){
-    const row=ws.getRow(n);const name=String(value(row,'name')||'').trim();
+  for(let n=headerRow+1;n<=ws.rowCount;n++){
+    const row=ws.getRow(n);const marker=String(plainCell(row.getCell(1))||'').trim();if(marker==='#')continue;const name=String(value(row,'name')||'').trim();
     if(!name)continue;
-    const siteCode=String(value(row,'site_code')||'').trim().toUpperCase(), packageName=String(value(row,'package_name')||'').trim();
-    const siteObj=siteMap.get(siteCode);const siteId=siteObj?.id;
+    const siteInput=String(value(row,'site_code')||'').trim(), packageName=String(value(row,'package_name')||'').trim();
+    const siteObj=siteMap.get(siteInput.toUpperCase());const siteId=siteObj?.id;const siteCode=siteObj?.code||siteInput.toUpperCase();
     const packageKey=packageName.toLowerCase();
     const packageObj=packages.find(x=>x.name.trim().toLowerCase()===packageKey && Number(x.site_id)===Number(siteId)) || packages.find(x=>x.name.trim().toLowerCase()===packageKey && x.site_id===null);
     const packageId=packageObj?.id;
-    if(!name)errors.push(`Baris ${n}: name kosong`);if(!siteId)errors.push(`Baris ${n}: site_code '${siteCode}' tidak ditemukan`);if(!packageId)errors.push(`Baris ${n}: package_name '${packageName}' tidak ditemukan / tidak tersedia untuk site ${siteCode}`);
+    const address=String(value(row,'address')||'').trim();const phone=phoneString(value(row,'phone'));
+    if(!name)errors.push(`Baris ${n}: Nama wajib diisi`);if(!siteId)errors.push(`Baris ${n}: Site '${siteCode}' tidak ditemukan. Gunakan Site yang sudah dibuat di aplikasi.`);if(!packageId)errors.push(`Baris ${n}: Paket Internet '${packageName}' tidak ditemukan / tidak tersedia untuk Site ${siteCode}. Gunakan kombinasi Site + Paket dari sheet REFERENSI.`);if(!address)errors.push(`Baris ${n}: Alamat wajib diisi`);if(!phone)errors.push(`Baris ${n}: Whatsapp wajib diisi`);
     const status=String(value(row,'customer_status')||'active').trim().toLowerCase();if(!['active','suspended','terminated'].includes(status))errors.push(`Baris ${n}: customer_status tidak valid`);
     const dueRaw=value(row,'due_day'), graceRaw=value(row,'grace_days');const due=dueRaw===''?null:Number(dueRaw), grace=graceRaw===''?null:Number(graceRaw);
     if(due!==null&&(!Number.isInteger(due)||due<1||due>28))errors.push(`Baris ${n}: due_day harus 1-28`);if(grace!==null&&(!Number.isInteger(grace)||grace<0||grace>30))errors.push(`Baris ${n}: grace_days harus 0-30`);
     const routerName=String(value(row,'router_name')||'').trim(), clusterName=String(value(row,'cluster_name')||'').trim();
     const routerObj=routerName?routers.find(r=>r.site_id===siteId&&r.name.toLowerCase()===routerName.toLowerCase()):null;const clusterObj=clusterName?clusters.find(c=>c.site_id===siteId&&c.name.toLowerCase()===clusterName.toLowerCase()):null;
     if(routerName&&!routerObj)errors.push(`Baris ${n}: router '${routerName}' tidak ditemukan di site ${siteCode}`);if(clusterName&&!clusterObj)errors.push(`Baris ${n}: cluster '${clusterName}' tidak ditemukan di site ${siteCode}`);
-    const activationRaw=value(row,'activation_date'), activation=activationRaw?dateString(activationRaw):null;if(activationRaw&&!activation)errors.push(`Baris ${n}: activation_date tidak valid`);
+    const activationRaw=value(row,'activation_date'), activation=activationRaw?dateString(activationRaw):null;if(!activationRaw)errors.push(`Baris ${n}: Tanggal Instalasi wajib diisi`);else if(!activation)errors.push(`Baris ${n}: Tanggal Instalasi tidak valid`);if(due===null)errors.push(`Baris ${n}: Tanggal Jatuh Tempo wajib diisi (1-28)`);
     const salesCode=String(value(row,'sales_employee_code')||'').trim().toUpperCase();const salesObj=salesCode?sales.find(x=>String(x.employee_code).toUpperCase()===salesCode):null;if(salesCode&&!salesObj)errors.push(`Baris ${n}: sales_employee_code '${salesCode}' tidak ditemukan / bukan posisi Sales`);
-    data.push({row:n,name,phone:phoneString(value(row,'phone')),email:String(value(row,'email')||'').trim()||null,address:String(value(row,'address')||'').trim()||null,sales_id:salesObj?.id||null,site_id:siteId,site_code:siteCode,site_default_due_day:Number(siteObj?.default_due_day||15),package_id:packageId,router_id:routerObj?.id||null,cluster_id:clusterObj?.id||null,pppoe_username:String(value(row,'pppoe_username')||'').trim()||null,activation_date:activation,due_day:due,grace_days:grace,customer_status:status,prorata_enabled:boolValue(value(row,'prorata_enabled'),true)?1:0,notes:String(value(row,'notes')||'').trim()||null});
+    data.push({row:n,name,phone,email:String(value(row,'email')||'').trim()||null,address,sales_id:salesObj?.id||null,site_id:siteId,site_code:siteCode,site_default_due_day:Number(siteObj?.default_due_day||15),package_id:packageId,router_id:routerObj?.id||null,cluster_id:clusterObj?.id||null,pppoe_username:String(value(row,'pppoe_username')||'').trim()||null,activation_date:activation,due_day:due,grace_days:grace,customer_status:status,prorata_enabled:boolValue(value(row,'prorata_enabled'),true)?1:0,notes:String(value(row,'notes')||'').trim()||null});
   }
   if(!data.length)throw new Error('Tidak ada data pelanggan pada file.');
   if(errors.length){req.session.flash={type:'danger',message:`Import dibatalkan. ${errors.slice(0,8).join(' | ')}${errors.length>8?` | +${errors.length-8} error lain`:''}`};return res.redirect('/customers');}

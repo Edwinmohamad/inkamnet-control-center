@@ -69,6 +69,10 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
       where.push('s.code=?');
       params.push(String(options.siteCode));
     }
+    if (options.clusterId) {
+      where.push('c.cluster_id=?');
+      params.push(Number(options.clusterId));
+    }
 
     const [customers] = await conn.execute(`
       SELECT c.*, p.price AS package_price, p.name AS package_name, s.code AS site_code,
@@ -132,7 +136,7 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
     await conn.commit();
     await db.execute(
       `INSERT INTO automation_logs (job_name, status, message) VALUES ('generate_monthly_invoices','success',?)`,
-      [`Period ${year}-${String(month).padStart(2,'0')} · created ${created}, skipped ${skipped}, paid preserved ${existingPaid}, open preserved ${existingOpen}, schedule skipped ${skippedSchedule}, eligible ${eligible}${options.customerId?` · customer ${options.customerId}`:''}${options.siteCode?` · site ${options.siteCode}`:''}`]
+      [`Period ${year}-${String(month).padStart(2,'0')} · created ${created}, skipped ${skipped}, paid preserved ${existingPaid}, open preserved ${existingOpen}, schedule skipped ${skippedSchedule}, eligible ${eligible}${options.customerId?` · customer ${options.customerId}`:''}${options.siteCode?` · site ${options.siteCode}`:''}${options.clusterId?` · cluster ${options.clusterId}`:''}`]
     );
     return { created, skipped, eligible, existingPaid, existingOpen, skippedSchedule };
   } catch (err) {

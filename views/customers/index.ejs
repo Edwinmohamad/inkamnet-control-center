@@ -1,7 +1,7 @@
 <section>
   <div class="module-head">
     <div><div class="module-kicker">CUSTOMER EXPERIENCE</div><h1>Manajemen Pelanggan</h1><p>Kelola pelanggan, paket, site, status billing, dan kondisi jaringan dari satu layar.</p></div>
-    <div class="module-actions customer-actions"><a class="btn-tech" href="/customers/template.xlsx"><i class="bi bi-file-earmark-spreadsheet"></i>Template XLSX</a><% if(user?.role==='admin'){ %><button class="btn-tech" type="button" data-bs-toggle="modal" data-bs-target="#customerImportModal"><i class="bi bi-cloud-arrow-up-fill"></i>Import XLSX</button><% } %><a class="btn-tech" href="/customers/export.xlsx?q=<%= encodeURIComponent(filters.q) %>&site=<%= encodeURIComponent(filters.site) %>&status=<%= encodeURIComponent(filters.status) %>"><i class="bi bi-download"></i>Export XLSX</a><a class="btn-tech primary" href="/customers/new"><i class="bi bi-person-plus-fill"></i>Tambah Pelanggan</a></div>
+    <div class="module-actions customer-actions"><a class="btn-tech" href="/customers/template.xlsx"><i class="bi bi-file-earmark-spreadsheet"></i>Template XLSX</a><% if(user?.role==='admin'){ %><button class="btn-tech" type="button" data-bs-toggle="modal" data-bs-target="#customerImportModal"><i class="bi bi-cloud-arrow-up-fill"></i>Import XLSX</button><% } %><a class="btn-tech" href="/customers/export.xlsx?q=<%= encodeURIComponent(filters.q) %>&site=<%= encodeURIComponent(filters.site) %>&cluster=<%= encodeURIComponent(filters.cluster) %>&status=<%= encodeURIComponent(filters.status) %>"><i class="bi bi-download"></i>Export XLSX</a><a class="btn-tech primary" href="/customers/new"><i class="bi bi-person-plus-fill"></i>Tambah Pelanggan</a></div>
   </div>
 
   <div class="metric-grid">
@@ -13,8 +13,9 @@
 
   <form class="filter-card" method="get">
     <div class="filter-grid">
-      <div class="filter-group"><label>PENCARIAN</label><input class="form-control" name="q" value="<%= filters.q %>" placeholder="ID, nama, telepon, alamat..."></div>
+      <div class="filter-group"><label>PENCARIAN</label><input class="form-control" name="q" value="<%= filters.q %>" placeholder="ID, nama, telepon, alamat, site, cluster..."></div>
       <div class="filter-group"><label>SITE / POP</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
+      <div class="filter-group"><label>CLUSTER / ODP</label><select class="form-select" name="cluster"><option value="">Semua Cluster</option><% clusters.forEach(c=>{ %><option value="<%= c.id %>" <%= String(filters.cluster)===String(c.id)?'selected':'' %>><%= c.site_code %> · <%= c.name %></option><% }) %></select></div>
       <div class="filter-group"><label>STATUS PELANGGAN</label><select class="form-select" name="status"><option value="">Semua Status</option><option value="active" <%= filters.status==='active'?'selected':'' %>>Aktif</option><option value="inactive" <%= filters.status==='inactive'?'selected':'' %>>Tidak Aktif</option><option value="suspended" <%= filters.status==='suspended'?'selected':'' %>>Suspended</option><option value="terminated" <%= filters.status==='terminated'?'selected':'' %>>Berhenti</option></select></div>
       <div class="filter-group d-flex align-items-end gap-2"><button class="btn-tech primary flex-fill"><i class="bi bi-funnel-fill"></i>Terapkan Filter</button><a class="btn-tech" href="/customers"><i class="bi bi-arrow-counterclockwise"></i></a></div>
     </div>
@@ -56,4 +57,55 @@
   </div>
 </section>
 
-<div class="modal fade" id="customerImportModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered"><form class="modal-content" method="post" action="/customers/import" enctype="multipart/form-data"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><div class="modal-header"><div><div class="module-kicker">BULK CUSTOMER ONBOARDING</div><h5 class="modal-title">Import Pelanggan dari Excel</h5></div><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="excel-import-intro"><span class="excel-icon"><i class="bi bi-file-earmark-spreadsheet-fill"></i></span><div><strong>Gunakan template INKAMNET agar data terbaca otomatis.</strong><small>Format .xlsx · maksimal 8 MB · seluruh file divalidasi sebelum data dimasukkan.</small></div><a class="btn-tech" href="/customers/template.xlsx"><i class="bi bi-download"></i>Download Template</a></div><label class="proof-dropzone large mt-3"><input type="file" name="customer_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required><span class="proof-drop-icon"><i class="bi bi-cloud-arrow-up-fill"></i></span><span><strong>Pilih file pelanggan .xlsx</strong><small>Klik atau drag file Excel ke area ini</small><em data-file-label>Belum ada file dipilih</em></span></label><div class="secure-file-note mt-3"><i class="bi bi-stars"></i><span><strong>Customer ID dibuat otomatis saat import.</strong> Format mengikuti Site + jatuh tempo + nomor urut, contoh KRW-15-001. Template tidak memerlukan kolom customer_code.</span></div><div class="secure-file-note"><i class="bi bi-shield-check"></i><span>Import ini khusus penambahan pelanggan baru. Seluruh baris divalidasi terlebih dahulu; jika ada site, paket, router, cluster, tanggal, atau format yang salah, import dibatalkan seluruhnya.</span></div></div><div class="modal-footer"><button class="btn-tech" type="button" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-stars"></i>Validasi & Import</button></div></form></div></div>
+<div class="modal fade" id="customerImportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <form class="modal-content customer-import-modal" method="post" action="/customers/import" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="modal-header">
+        <div><div class="module-kicker">IMPORT PELANGGAN</div><h5 class="modal-title">Import Pelanggan dari Excel</h5><small class="text-secondary">Customer ID dibuat otomatis oleh sistem.</small></div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="customer-import-console">
+          <div class="customer-import-topbar">
+            <label class="customer-import-file">
+              <i class="bi bi-file-earmark-spreadsheet-fill"></i>
+              <input type="file" name="customer_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+              <span><b>Pilih file .xlsx</b><small data-file-label>Belum ada file dipilih</small></span>
+            </label>
+            <button class="btn-tech primary" type="submit"><i class="bi bi-cloud-arrow-up-fill"></i>Import</button>
+            <a class="btn-tech customer-template-download" href="/customers/template.xlsx"><i class="bi bi-file-earmark-arrow-down"></i>Download Format Import</a>
+          </div>
+          <div class="customer-import-warning">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <div>
+              <strong>Sebelum melakukan import</strong>
+              <ul>
+                <li>Pastikan <a href="/sites" target="_blank">Site / POP</a> sudah dibuat.</li>
+                <li>Pastikan <a href="/packages" target="_blank">Paket Internet</a> sudah dibuat dan sesuai dengan Site pelanggan.</li>
+                <li>Jika mengisi Cluster / Router, data tersebut harus sudah ada pada Site yang sama.</li>
+                <li>Jangan menambahkan kolom Customer ID. Sistem generate otomatis, contoh <b>KRW-15-001</b>.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="customer-import-required">
+            <div class="customer-import-required-head"><span>KOLOM WAJIB</span><small>Jika salah satu kosong, import seluruh file dibatalkan.</small></div>
+            <div class="customer-import-chip-grid">
+              <% ['Nama','Site','Paket Internet','Alamat','Whatsapp','Tanggal Instalasi','Tanggal Jatuh Tempo'].forEach(x=>{ %><span><i class="bi bi-asterisk"></i><%= x %></span><% }) %>
+            </div>
+          </div>
+          <div class="customer-import-rules">
+            <div><i class="bi bi-diagram-3-fill"></i><span><b>Site + Paket harus cocok</b><small>Paket site-specific tidak dapat digunakan di Site lain. Lihat sheet REFERENSI pada template.</small></span></div>
+            <div><i class="bi bi-shield-check"></i><span><b>Validasi atomik</b><small>Semua baris diperiksa dulu. Satu error = tidak ada data setengah masuk.</small></span></div>
+            <div><i class="bi bi-hash"></i><span><b>Customer ID otomatis</b><small>Format Site + Jatuh Tempo + nomor urut, tanpa risiko duplikat dari import normal.</small></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="customer-import-footer-note"><i class="bi bi-info-circle"></i>Format yang disarankan: template terbaru dari tombol Download Format Import.</span>
+        <button class="btn-tech" type="button" data-bs-dismiss="modal">Batal</button>
+        <button class="btn-tech primary" type="submit"><i class="bi bi-stars"></i>Validasi & Import</button>
+      </div>
+    </form>
+  </div>
+</div>

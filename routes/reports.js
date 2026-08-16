@@ -12,7 +12,7 @@ function common(req){
   const year=Math.max(2020,Math.min(2100,n(req.query.year,now.getFullYear())));
   return {
     view:['customers','billing','cash','invoice'].includes(req.query.view)?req.query.view:'customers',
-    month,year,site:req.query.site||'',status:req.query.status||'',package:req.query.package||'',customer:req.query.customer||'',
+    month,year,site:req.query.site||'',cluster:req.query.cluster||'',status:req.query.status||'',package:req.query.package||'',customer:req.query.customer||'',
     category:req.query.category||'',flow_type:req.query.flow_type||'',method:req.query.method||'',q:String(req.query.q||'').trim(),
     from:iso(req.query.from,new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10)),
     to:iso(req.query.to,now.toISOString().slice(0,10))
@@ -22,14 +22,16 @@ function common(req){
 async function baseOptions(){
   const [sites]=await db.query(`SELECT code,name FROM sites WHERE is_active=1 ORDER BY code`);
   const [packages]=await db.query(`SELECT p.id,p.name,p.site_id,s.code site_code FROM packages p LEFT JOIN sites s ON s.id=p.site_id WHERE p.is_active=1 ORDER BY COALESCE(s.code,'ZZZ'),p.price,p.name`);
+  const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const [customers]=await db.query(`SELECT c.id,c.customer_code,c.name,s.code site_code,cl.name cluster_name FROM customers c JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE c.customer_status!='terminated' ORDER BY s.code,cl.name,c.name`);
   const [categories]=await db.query(`SELECT id,name,type FROM cash_categories WHERE is_active=1 AND COALESCE(is_system,0)=0 ORDER BY type,name`);
-  return{sites,packages,customers,categories};
+  return{sites,clusters,packages,customers,categories};
 }
 
 async function customerReport(f){
   const where=['1=1'],p=[];
   if(f.site){where.push('s.code=?');p.push(f.site);}
+  if(f.cluster){where.push('c.cluster_id=?');p.push(Number(f.cluster));}
   if(f.package){where.push('p.id=?');p.push(f.package);}
   if(f.status){where.push('c.customer_status=?');p.push(f.status);}
   if(f.q){const like=`%${f.q}%`;where.push('(c.name LIKE ? OR c.customer_code LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');p.push(like,like,like,like);}
@@ -40,6 +42,7 @@ async function customerReport(f){
 async function billingReport(f){
   const where=['i.period_month=?','i.period_year=?'],p=[f.month,f.year];
   if(f.site){where.push('s.code=?');p.push(f.site);}
+  if(f.cluster){where.push('c.cluster_id=?');p.push(Number(f.cluster));}
   if(f.package){where.push('pk.id=?');p.push(f.package);}
   if(f.status){where.push('i.status=?');p.push(f.status);}
   if(f.customer){where.push('c.id=?');p.push(f.customer);}
@@ -79,11 +82,13 @@ router.get('/pdf',async(req,res)=>{
   const f=common(req);
   const type=['customers','billing','cash','invoice'].includes(req.query.type)?req.query.type:f.view;
   let rows=[],columns=[],summaryItems=[],title='',subtitle='',filename='laporan-INKAMNET.pdf';
+  let clusterLabel='';
+  if(f.cluster){const [clusterRows]=await db.execute(`SELECT cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.id=? LIMIT 1`,[Number(f.cluster)]);if(clusterRows[0])clusterLabel=`${clusterRows[0].site_code} / ${clusterRows[0].name}`;}
 
   if(type==='customers'){
     rows=await customerReport(f);
     title='LAPORAN PELANGGAN';
-    subtitle=`Scope: ${f.site||'Semua Site'} | ${rows.length} pelanggan${f.status?` | Status ${f.status}`:''}`;
+    subtitle=`Scope: ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''} | ${rows.length} pelanggan${f.status?` | Status ${f.status}`:''}`;
     filename=`laporan-pelanggan-INKAMNET-${new Date().toISOString().slice(0,10)}.pdf`;
     summaryItems=[
       {label:'TOTAL PELANGGAN',value:rows.length,color:COLORS.purple},
@@ -125,7 +130,7 @@ router.get('/pdf',async(req,res)=>{
     const paid=rows.reduce((a,x)=>a+Number(x.paid_amount||0),0);
     const out=rows.reduce((a,x)=>a+Number(x.outstanding||0),0);
     title=type==='invoice'?'REGISTER FAKTUR / INVOICE':'LAPORAN TAGIHAN';
-    subtitle=`Periode ${MONTHS[f.month-1]} ${f.year} | ${f.site||'Semua Site'}${f.status?` | Status ${f.status}`:''}`;
+    subtitle=`Periode ${MONTHS[f.month-1]} ${f.year} | ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''}${f.status?` | Status ${f.status}`:''}`;
     filename=`${type==='invoice'?'register-faktur':'laporan-tagihan'}-INKAMNET-${f.year}-${String(f.month).padStart(2,'0')}.pdf`;
     summaryItems=[
       {label:'TOTAL TAGIHAN',value:rupiah(billed),color:COLORS.purple},

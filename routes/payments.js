@@ -89,15 +89,21 @@ async function staffOptions(){
 
 router.get('/',async(req,res)=>{
   const q=String(req.query.q||'').trim();
+  const site=String(req.query.site||'').trim();
+  const cluster=String(req.query.cluster||'').trim();
   let sql=`SELECT p.*,i.invoice_number,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name,u.name collector_name,v.name verifier_name,pu.name proof_uploader_name
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     LEFT JOIN users u ON u.id=COALESCE(p.collector_user_id,p.received_by) LEFT JOIN users v ON v.id=p.verified_by LEFT JOIN users pu ON pu.id=p.proof_uploaded_by WHERE 1=1`;
   const params=[];
+  if(site){sql+=` AND s.code=?`;params.push(site);}
+  if(cluster){sql+=` AND c.cluster_id=?`;params.push(Number(cluster));}
   if(q){const like=`%${q}%`;sql+=` AND (c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR p.reference LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;params.push(like,like,like,like,like,like);}
   sql+=` ORDER BY p.id DESC LIMIT 500`;
   const [payments]=await db.execute(sql,params);
   const openInvoices=await openInvoiceOptions();
   const staff=await staffOptions();
+  const [sites]=await db.query(`SELECT code,name FROM sites WHERE is_active=1 ORDER BY code`);
+  const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const [[summary]]=await db.query(`SELECT
     COALESCE(SUM(CASE WHEN status='confirmed' THEN amount ELSE 0 END),0) confirmed_total,
     COALESCE(SUM(CASE WHEN method='cash' AND status='confirmed' AND settlement_status='held_by_staff' THEN amount ELSE 0 END),0) cash_held,
@@ -105,7 +111,7 @@ router.get('/',async(req,res)=>{
     SUM(status='confirmed') confirmed_count
     FROM payments WHERE paid_at>=DATE_FORMAT(CURDATE(),'%Y-%m-01')`);
   const preselectedInvoiceId=Number(req.query.invoice_id||0)||null;
-  res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,summary:summary||{},preselectedInvoiceId,filters:{q}});
+  res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,sites,clusters,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster}});
 });
 
 router.post('/',async(req,res)=>{
@@ -210,11 +216,13 @@ router.post('/:id/verify',requireAdmin,async(req,res)=>{
 });
 
 router.get('/reconciliation',requireAdmin,async(req,res)=>{
-  const q=String(req.query.q||'').trim();
+  const q=String(req.query.q||'').trim();const site=String(req.query.site||'').trim();const cluster=String(req.query.cluster||'').trim();
   let heldSql=`SELECT p.*,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name,u.name collector_name,i.invoice_number
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN users u ON u.id=COALESCE(p.collector_user_id,p.received_by)
     WHERE p.method='cash' AND p.status='confirmed' AND p.settlement_status='held_by_staff'`;
   const heldParams=[];
+  if(site){heldSql+=` AND s.code=?`;heldParams.push(site);}
+  if(cluster){heldSql+=` AND c.cluster_id=?`;heldParams.push(Number(cluster));}
   if(q){const like=`%${q}%`;heldSql+=` AND (c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR u.name LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;heldParams.push(like,like,like,like,like,like);}
   heldSql+=` ORDER BY u.name,p.paid_at`;
   const [held]=await db.execute(heldSql,heldParams);
@@ -226,7 +234,8 @@ router.get('/reconciliation',requireAdmin,async(req,res)=>{
     COALESCE(SUM(CASE WHEN method='cash' AND status='confirmed' AND settlement_status='settled' AND DATE(settled_at)=CURDATE() THEN amount ELSE 0 END),0) settled_today,
     COALESCE(SUM(CASE WHEN method='transfer' AND status='confirmed' AND DATE(paid_at)=CURDATE() THEN amount ELSE 0 END),0) transfer_today
     FROM payments`);
-  res.render('payments/reconciliation',{title:'Rekonsiliasi Pembayaran',held,staffBalances,summary:summary||{},q});
+  const [sites]=await db.query(`SELECT code,name FROM sites WHERE is_active=1 ORDER BY code`);const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
+  res.render('payments/reconciliation',{title:'Rekonsiliasi Pembayaran',held,staffBalances,summary:summary||{},q,site,cluster,sites,clusters});
 });
 
 router.post('/:id/settle',requireAdmin,async(req,res)=>{

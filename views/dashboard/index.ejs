@@ -1,5 +1,6 @@
 <% const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; %>
-<section class="command-dashboard dashboard-v19">
+<section class="command-dashboard dashboard-v19 dashboard-v112">
+  <div class="command-tech-mesh" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
   <div class="command-hero">
     <div class="command-hero-copy">
       <div class="command-eyebrow"><span class="command-live-dot"></span> INKAMNET NETWORK & BILLING COMMAND CENTER</div>
@@ -15,6 +16,14 @@
       <a href="/customers/new" class="command-add"><i class="bi bi-person-plus-fill"></i>Tambah Pelanggan</a>
     </div>
     <div class="command-orbit" aria-hidden="true"><span></span><span></span><i class="bi bi-broadcast-pin"></i></div>
+  </div>
+
+  <div class="command-telemetry-rail" aria-label="Live telemetry">
+    <div><span class="telemetry-signal online"></span><small>NOC STATUS</small><strong>ONLINE</strong></div>
+    <div><span class="telemetry-signal purple"></span><small>SCOPE</small><strong><%= selectedSiteCode||'ALL SITES' %></strong></div>
+    <div><span class="telemetry-signal blue"></span><small>ROUTER HEALTH</small><strong><%= routerRate %>%</strong></div>
+    <div><span class="telemetry-signal green"></span><small>CUSTOMER ONLINE</small><strong><%= Number(network.online||0) %></strong></div>
+    <div class="telemetry-stream"><i></i><i></i><i></i><span>LIVE DATA STREAM</span></div>
   </div>
 
   <div class="command-kpis command-kpis-v19">
@@ -116,6 +125,27 @@
   if(psbCanvas){
     const ctx=psbCanvas.getContext('2d');const fill=ctx.createLinearGradient(0,0,0,260);fill.addColorStop(0,'rgba(46,214,161,.30)');fill.addColorStop(1,'rgba(46,214,161,0)');
     new Chart(psbCanvas,{type:'line',data:{labels:data.labels,datasets:[{label:'PSB',data:data.psb,borderColor:'#2ed6a1',backgroundColor:fill,fill:true,tension:.38,borderWidth:2.4,pointRadius:3,pointHoverRadius:5,pointBackgroundColor:'#2ed6a1'}]},options:{...common,plugins:{...common.plugins,tooltip:{...common.plugins.tooltip,callbacks:{label:c=>`PSB: ${Number(c.raw||0)} pelanggan`}}},scales:{...common.scales,y:{...common.scales.y,ticks:{...common.scales.y.ticks,precision:0}}}}});
+  }
+
+  // v1.12 subtle pointer telemetry: purely visual, disabled for touch/reduced-motion.
+  const dashboard=document.querySelector('.dashboard-v112');
+  if(dashboard && matchMedia('(pointer:fine)').matches && !matchMedia('(prefers-reduced-motion: reduce)').matches){
+    let raf=0;
+    dashboard.addEventListener('pointermove',event=>{
+      cancelAnimationFrame(raf);raf=requestAnimationFrame(()=>{
+        const dr=dashboard.getBoundingClientRect();
+        dashboard.style.setProperty('--dash-x',`${Math.round(event.clientX-dr.left)}px`);
+        dashboard.style.setProperty('--dash-y',`${Math.round(event.clientY-dr.top)}px`);
+        const card=event.target.closest('.command-kpi,.command-panel');
+        dashboard.querySelectorAll('.command-kpi[data-tilt-active],.command-panel[data-tilt-active]').forEach(el=>{if(el!==card){el.style.removeProperty('--tilt-x');el.style.removeProperty('--tilt-y');el.removeAttribute('data-tilt-active')}});
+        if(card){
+          const r=card.getBoundingClientRect(),x=(event.clientX-r.left)/r.width,y=(event.clientY-r.top)/r.height;
+          card.style.setProperty('--card-x',`${Math.round(x*100)}%`);card.style.setProperty('--card-y',`${Math.round(y*100)}%`);
+          card.style.setProperty('--tilt-x',`${((.5-y)*2.2).toFixed(2)}deg`);card.style.setProperty('--tilt-y',`${((x-.5)*2.8).toFixed(2)}deg`);card.setAttribute('data-tilt-active','1');
+        }
+      });
+    });
+    dashboard.addEventListener('pointerleave',()=>dashboard.querySelectorAll('[data-tilt-active]').forEach(el=>{el.style.removeProperty('--tilt-x');el.style.removeProperty('--tilt-y');el.removeAttribute('data-tilt-active')}));
   }
 })();
 </script>

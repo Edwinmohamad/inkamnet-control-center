@@ -19,6 +19,7 @@ function periodQuery(filters){
   p.set('month',filters.month);p.set('year',filters.year);
   if(filters.status) p.set('status',filters.status);
   if(filters.site) p.set('site',filters.site);
+  if(filters.cluster) p.set('cluster',filters.cluster);
   if(filters.customer) p.set('customer',filters.customer);
   if(filters.q) p.set('q',filters.q);
   return p.toString();
@@ -31,12 +32,14 @@ router.get('/',async(req,res)=>{
   const year=intInRange(req.query.year,2020,2100,now.getFullYear());
   const status=['unpaid','partial','paid','overdue','cancelled','refunded'].includes(req.query.status)?req.query.status:'';
   const site=String(req.query.site||'').trim();
+  const cluster=String(req.query.cluster||'').trim();
   const customer=String(req.query.customer||'').trim();
   const q=String(req.query.q||'').trim();
 
   const commonWhere=['i.period_year=?','i.period_month=?'];
   const commonParams=[year,month];
   if(site){commonWhere.push('s.code=?');commonParams.push(site);}
+  if(cluster){commonWhere.push('c.cluster_id=?');commonParams.push(Number(cluster));}
   if(customer){commonWhere.push('c.id=?');commonParams.push(Number(customer));}
 
   const listWhere=[...commonWhere];
@@ -44,7 +47,9 @@ router.get('/',async(req,res)=>{
   if(status){listWhere.push('i.status=?');listParams.push(status);}
   if(q){listWhere.push('(c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');const like=`%${q}%`;listParams.push(like,like,like,like,like);}
 
-  const [invoices]=await db.execute(`SELECT i.*,DATE_FORMAT(i.invoice_date,'%Y-%m-%d') invoice_date_key,DATE_FORMAT(i.due_date,'%Y-%m-%d') due_date_key,c.customer_code,c.name customer_name,c.phone,c.due_day,p.name package_name,s.code site_code,cl.name cluster_name
+  const [invoices]=await db.execute(`SELECT i.*,DATE_FORMAT(i.invoice_date,'%Y-%m-%d') invoice_date_key,DATE_FORMAT(i.due_date,'%Y-%m-%d') due_date_key,c.customer_code,c.name customer_name,c.phone,c.due_day,p.name package_name,s.code site_code,cl.name cluster_name,
+      (SELECT COUNT(*) FROM payments px WHERE px.invoice_id=i.id) payment_count,
+      (SELECT COUNT(*) FROM payments pa WHERE pa.invoice_id=i.id AND pa.status IN ('confirmed','pending')) active_payment_count
     FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN packages p ON p.id=c.package_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     WHERE ${listWhere.join(' AND ')} ORDER BY i.due_date ASC,c.name ASC`,listParams);
 
@@ -60,11 +65,13 @@ router.get('/',async(req,res)=>{
   const customerWhere=[`c.customer_status='active'`];
   const customerParams=[];
   if(site){customerWhere.push('s.code=?');customerParams.push(site);}
+  if(cluster){customerWhere.push('c.cluster_id=?');customerParams.push(Number(cluster));}
   if(customer){customerWhere.push('c.id=?');customerParams.push(Number(customer));}
   const [[activeSummary]]=await db.execute(`SELECT COUNT(*) active_customers FROM customers c JOIN sites s ON s.id=c.site_id WHERE ${customerWhere.join(' AND ')}`,customerParams);
 
   const [customers]=await db.query(`SELECT c.id,c.customer_code,c.name,s.code site_code,cl.name cluster_name FROM customers c JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE c.customer_status='active' ORDER BY s.code,cl.name,c.name`);
   const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
+  const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const issued=Number(invoiceSummary.total_invoices||0);
   const active=Number(activeSummary.active_customers||0);
   const summary={
@@ -81,8 +88,8 @@ router.get('/',async(req,res)=>{
     FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY s.code,cl.name,c.name,i.due_date`);
   const [staff]=await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);
-  const filters={month,year,status,site,customer,q};
-  res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,openInvoices,staff,filters,monthNames:MONTH_NAMES,periodQueryString:periodQuery(filters)});
+  const filters={month,year,status,site,cluster,customer,q};
+  res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,clusters,openInvoices,staff,filters,monthNames:MONTH_NAMES,periodQueryString:periodQuery(filters)});
 });
 
 router.post('/generate',async(req,res)=>{
@@ -91,10 +98,11 @@ router.post('/generate',async(req,res)=>{
   const year=intInRange(req.body.year,2020,2100,now.getFullYear());
   const customerId=req.body.customer_id?Number(req.body.customer_id):null;
   const siteCode=String(req.body.site||'').trim()||null;
-  const result=await generateMonthlyInvoices(periodDate(year,month),true,req.session.user.id,{customerId,siteCode});
-  const target=customerId?'pelanggan terpilih':siteCode?`site ${siteCode}`:'seluruh pelanggan aktif';
+  const clusterId=req.body.cluster_id?Number(req.body.cluster_id):null;
+  const result=await generateMonthlyInvoices(periodDate(year,month),true,req.session.user.id,{customerId,siteCode,clusterId});
+  const target=customerId?'pelanggan terpilih':clusterId?`cluster terpilih`:siteCode?`site ${siteCode}`:'seluruh pelanggan aktif';
   req.session.flash={type:'success',message:`Refresh tagihan ${MONTH_NAMES[month-1]} ${year} untuk ${target}: ${result.created} tagihan baru dibuat. ${result.existingPaid||0} tagihan lunas dipertahankan, ${result.existingOpen||0} tagihan existing dipertahankan, total ${result.skipped} dilewati. Tidak ada tagihan existing yang di-reset.`};
-  res.redirect(`/invoices?month=${month}&year=${year}${siteCode?`&site=${encodeURIComponent(siteCode)}`:''}${customerId?`&customer=${customerId}`:''}`);
+  res.redirect(`/invoices?month=${month}&year=${year}${siteCode?`&site=${encodeURIComponent(siteCode)}`:''}${clusterId?`&cluster=${clusterId}`:''}${customerId?`&customer=${customerId}`:''}`);
 });
 
 
@@ -136,6 +144,48 @@ router.post('/:id/update-meta',async(req,res)=>{
   res.redirect(localReturn(req.body.return_to,`/invoices?month=${rows[0].period_month}&year=${rows[0].period_year}`));
 });
 
+
+router.post('/:id/reset-unpaid',requireAdmin,async(req,res)=>{
+  const conn=await db.getConnection();
+  let invoice=null,reversedTotal=0,reversedCount=0;
+  try{
+    await conn.beginTransaction();
+    const [invoiceRows]=await conn.execute(`SELECT id,invoice_number,period_year,period_month,total,paid_amount,outstanding,status,due_date FROM invoices WHERE id=? FOR UPDATE`,[req.params.id]);
+    invoice=invoiceRows[0];
+    if(!invoice)throw new Error('Tagihan tidak ditemukan.');
+    const [payments]=await conn.execute(`SELECT id,amount,status,method,reference,notes FROM payments WHERE invoice_id=? AND status IN ('confirmed','pending') FOR UPDATE`,[invoice.id]);
+    const ids=payments.map(x=>Number(x.id));
+    reversedTotal=payments.filter(x=>x.status==='confirmed').reduce((a,x)=>a+Number(x.amount||0),0);
+    reversedCount=payments.length;
+    if(ids.length){
+      const marks=ids.map(()=>'?').join(',');
+      await conn.execute(`DELETE FROM cash_transactions WHERE source_type='payment' AND source_id IN (${marks})`,ids);
+      const correction=`[KOREKSI ADMIN ${new Date().toISOString().slice(0,19).replace('T',' ')}] Pembayaran dibatalkan agar tagihan kembali belum lunas.`;
+      await conn.execute(`UPDATE payments SET status='failed',settlement_status='not_applicable',notes=CONCAT_WS('\\n',NULLIF(notes,''),?) WHERE id IN (${marks})`,[correction,...ids]);
+    }
+    await conn.execute(`UPDATE invoices SET paid_amount=0,outstanding=total,status=CASE WHEN due_date<CURDATE() THEN 'overdue' ELSE 'unpaid' END WHERE id=?`,[invoice.id]);
+    await conn.commit();
+    await audit({userId:req.session.user.id,action:'financial_correction',entityType:'invoice',entityId:invoice.id,description:`Koreksi tagihan ${invoice.invoice_number} menjadi belum lunas. ${reversedCount} transaksi pembayaran dibatalkan, pendapatan terkonfirmasi dikurangi Rp${reversedTotal}. Nominal tagihan tetap Rp${Number(invoice.total||0)}.`,ip:req.ip});
+    req.session.flash={type:'success',message:`Tagihan ${invoice.invoice_number} dikoreksi menjadi belum lunas. ${reversedCount} transaksi pembayaran terkait dibatalkan dan pendapatan otomatis dikurangi Rp${reversedTotal.toLocaleString('id-ID')}.`};
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+  res.redirect(localReturn(req.body.return_to,invoice?`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`:'/invoices'));
+});
+
+router.post('/:id/cancel',requireAdmin,async(req,res)=>{
+  const [rows]=await db.execute(`SELECT id,invoice_number,period_year,period_month,status,paid_amount,outstanding FROM invoices WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
+  const invoice=rows[0];
+  const [[active]]=await db.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=? AND status IN ('confirmed','pending')`,[invoice.id]);
+  if(Number(active.total)>0 || Number(invoice.paid_amount)>0){
+    req.session.flash={type:'warning',message:'Tagihan masih memiliki pembayaran aktif. Gunakan “Jadikan Belum Lunas” terlebih dahulu agar pembayaran dan pendapatan dikoreksi secara aman.'};
+    return res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
+  }
+  await db.execute(`UPDATE invoices SET status='cancelled',paid_amount=0,outstanding=0 WHERE id=?`,[invoice.id]);
+  await audit({userId:req.session.user.id,action:'cancel',entityType:'invoice',entityId:invoice.id,description:`Tagihan ${invoice.invoice_number} dibatalkan. Histori pembayaran lama dipertahankan untuk audit; tagihan tidak lagi dihitung sebagai outstanding.`,ip:req.ip});
+  req.session.flash={type:'success',message:`Tagihan ${invoice.invoice_number} dibatalkan. Histori transaksi tetap disimpan untuk audit.`};
+  res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
+});
+
 router.post('/:id/delete',requireAdmin,async(req,res)=>{
   const [rows]=await db.execute(`SELECT id,period_year,period_month,paid_amount FROM invoices WHERE id=? LIMIT 1`,[req.params.id]);
   if(!rows.length){req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
@@ -143,8 +193,9 @@ router.post('/:id/delete',requireAdmin,async(req,res)=>{
   const [[pay]]=await db.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=?`,[invoice.id]);
   if(Number(invoice.paid_amount)>0 || Number(pay.total)>0){req.session.flash={type:'danger',message:'Tagihan yang sudah memiliki pembayaran tidak boleh dihapus.'};return res.redirect(`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`);}
   await db.execute(`DELETE FROM invoices WHERE id=?`,[invoice.id]);
-  req.session.flash={type:'success',message:'Tagihan belum dibayar berhasil dihapus.'};
-  res.redirect(`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`);
+  await audit({userId:req.session.user.id,action:'delete',entityType:'invoice',entityId:invoice.id,description:`Tagihan tanpa histori pembayaran dihapus permanen. Periode ${invoice.period_month}/${invoice.period_year}.`,ip:req.ip});
+  req.session.flash={type:'success',message:'Tagihan yang belum pernah memiliki pembayaran berhasil dihapus permanen.'};
+  res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
 });
 
 module.exports=router;
