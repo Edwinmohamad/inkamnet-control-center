@@ -45,6 +45,11 @@ function selectedInvoiceIds(body){
   const list=Array.isArray(raw)?raw:[raw];
   return [...new Set(list.map(Number).filter(Number.isInteger).filter(x=>x>0))];
 }
+function paymentReference(paymentId, date=new Date()){
+  const d=new Date(date);
+  const stamp=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return `PAY-${stamp}-${String(paymentId).padStart(6,'0')}`;
+}
 
 async function paymentCashMeta(conn,invoiceId){
   const [rows]=await conn.execute(`SELECT c.site_id,c.name customer_name,c.customer_code,i.invoice_number FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.id=?`,[invoiceId]);
@@ -106,7 +111,7 @@ router.get('/',async(req,res)=>{
 router.post('/',async(req,res)=>{
   const ids=selectedInvoiceIds(req.body);
   if(!ids.length)throw new Error('Pilih minimal satu faktur yang akan dibayar.');
-  const {method,reference,notes,collector_user_id,bank_name,payment_status}=req.body;
+  const {method,notes,collector_user_id,bank_name,payment_status}=req.body;
   const normalizedMethod=method||'transfer';
   const isAdmin=req.session.user.role==='admin';
   const requestedConfirmed=payment_status==='confirmed';
@@ -129,11 +134,13 @@ router.post('/',async(req,res)=>{
       let savedProof=null;
       if(req.file){savedProof=await saveProofFile(req.file);savedFiles.push(savedProof.filename);}
       const [r]=await conn.execute(`INSERT INTO payments (invoice_id,amount,method,reference,notes,status,settlement_status,bank_name,proof_reference,proof_path,proof_original_name,proof_mime,proof_size,proof_uploaded_by,proof_uploaded_at,paid_at,received_by,collector_user_id,verified_by,verified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?,?,?)`,[
-        invoiceId,numericAmount,normalizedMethod,reference||null,notes||null,status,settlement,bank_name||null,savedProof?.originalName||null,savedProof?.filename||null,savedProof?.originalName||null,savedProof?.mime||null,savedProof?.size||null,savedProof?req.session.user.id:null,savedProof?new Date():null,req.session.user.id,collector,status==='confirmed'?req.session.user.id:null,status==='confirmed'?new Date():null
+        invoiceId,numericAmount,normalizedMethod,null,notes||null,status,settlement,bank_name||null,savedProof?.originalName||null,savedProof?.filename||null,savedProof?.originalName||null,savedProof?.mime||null,savedProof?.size||null,savedProof?req.session.user.id:null,savedProof?new Date():null,req.session.user.id,collector,status==='confirmed'?req.session.user.id:null,status==='confirmed'?new Date():null
       ]);
-      created.push({paymentId:r.insertId,invoiceId,amount:numericAmount});
+      const autoReference=paymentReference(r.insertId);
+      await conn.execute(`UPDATE payments SET reference=? WHERE id=?`,[autoReference,r.insertId]);
+      created.push({paymentId:r.insertId,invoiceId,amount:numericAmount,reference:autoReference});
       await refreshInvoiceStatus(conn,invoiceId);
-      if(status==='confirmed'&&normalizedMethod!=='cash')await postCashTransaction(conn,{paymentId:r.insertId,invoiceId,amount:numericAmount,reference,actorUserId:req.session.user.id});
+      if(status==='confirmed'&&normalizedMethod!=='cash')await postCashTransaction(conn,{paymentId:r.insertId,invoiceId,amount:numericAmount,reference:autoReference,actorUserId:req.session.user.id});
       if(status==='confirmed')confirmedInvoices.push(invoiceId);
     }
     await conn.commit();

@@ -123,28 +123,49 @@
   }
 
 
-  // Keep table action menus aligned and outside overflow clipping.
-  document.querySelectorAll('.invoice-action-dropdown,.portal-action-dropdown').forEach(drop => {
-    const toggle=drop.querySelector('[data-bs-toggle="dropdown"]');
-    const menu=drop.querySelector('.invoice-action-menu,.portal-action-menu');
-    if(!toggle||!menu)return;
-    const home=menu.parentNode;
-    const placeMenu=()=>{
-      if(!menu.classList.contains('show'))return;
-      if(menu.parentNode!==document.body)document.body.appendChild(menu);
-      menu.classList.add('invoice-menu-portal');
-      const r=toggle.getBoundingClientRect();
-      const w=Math.max(218,menu.getBoundingClientRect().width||218);
-      const h=menu.getBoundingClientRect().height||260;
-      const left=Math.min(window.innerWidth-w-8,Math.max(8,r.right-w));
-      const belowSpace=window.innerHeight-r.bottom;
-      const top=belowSpace>=h+12?Math.min(window.innerHeight-h-8,r.bottom+8):Math.max(8,r.top-h-8);
-      Object.assign(menu.style,{left:`${left}px`,top:`${top}px`,right:'auto',bottom:'auto',transform:'none'});
-    };
-    drop.addEventListener('shown.bs.dropdown',()=>{placeMenu();window.addEventListener('resize',placeMenu,{passive:true});window.addEventListener('scroll',placeMenu,true)});
-    drop.addEventListener('hide.bs.dropdown',()=>{window.removeEventListener('resize',placeMenu);window.removeEventListener('scroll',placeMenu,true)});
-    drop.addEventListener('hidden.bs.dropdown',()=>{menu.classList.remove('invoice-menu-portal');menu.removeAttribute('style');if(menu.parentNode!==home)home.appendChild(menu)});
+  // Reliable action menus for customer/invoice tables.
+  // Uses a lightweight fixed-position panel instead of Bootstrap dropdown/Popper,
+  // so actions stay clickable even inside responsive table overflow containers.
+  let activeRowAction=null;
+  const closeRowAction=()=>{
+    if(!activeRowAction)return;
+    const {toggle,panel}=activeRowAction;
+    panel.classList.remove('show');
+    panel.removeAttribute('style');
+    toggle.setAttribute('aria-expanded','false');
+    activeRowAction=null;
+  };
+  const placeRowAction=(toggle,panel)=>{
+    const r=toggle.getBoundingClientRect();
+    panel.classList.add('show');
+    panel.style.visibility='hidden';
+    const w=Math.max(220,panel.offsetWidth||220);
+    const h=Math.max(80,panel.offsetHeight||80);
+    const left=Math.min(window.innerWidth-w-10,Math.max(10,r.right-w));
+    const below=window.innerHeight-r.bottom;
+    const top=below>=h+12?Math.min(window.innerHeight-h-10,r.bottom+8):Math.max(10,r.top-h-8);
+    Object.assign(panel.style,{position:'fixed',left:`${left}px`,top:`${top}px`,right:'auto',bottom:'auto',transform:'none',visibility:'visible',zIndex:'5000'});
+  };
+  document.addEventListener('click',e=>{
+    const toggle=e.target.closest('[data-row-action-toggle]');
+    if(toggle){
+      e.preventDefault();e.stopPropagation();
+      const wrap=toggle.closest('.row-action-menu');
+      const panel=wrap?.querySelector('.row-action-panel');
+      if(!panel)return;
+      if(activeRowAction?.toggle===toggle){closeRowAction();return;}
+      closeRowAction();
+      placeRowAction(toggle,panel);
+      toggle.setAttribute('aria-expanded','true');
+      activeRowAction={toggle,panel};
+      return;
+    }
+    if(!e.target.closest('.row-action-panel'))closeRowAction();
+    else if(e.target.closest('a,button'))setTimeout(closeRowAction,0);
   });
+  window.addEventListener('resize',closeRowAction,{passive:true});
+  window.addEventListener('scroll',closeRowAction,true);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeRowAction();});
 
   // Progressive reveal for dense admin screens without adding a heavy animation library.
   if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

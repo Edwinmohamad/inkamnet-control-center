@@ -22,7 +22,7 @@ function customerSql(filters) {
   const params=[];
   if(filters.q){sql+=` AND (c.customer_code LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ? OR c.pppoe_username LIKE ?)`;params.push(...Array(5).fill(`%${filters.q}%`));}
   if(filters.site){sql+=` AND s.code=?`;params.push(filters.site);}
-  if(filters.status){sql+=` AND c.customer_status=?`;params.push(filters.status);}
+  if(filters.status==='inactive'){sql+=` AND c.customer_status<>'active'`;}else if(filters.status){sql+=` AND c.customer_status=?`;params.push(filters.status);}
   sql+=` ORDER BY c.id DESC`;
   return {sql,params};
 }

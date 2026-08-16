@@ -15,14 +15,14 @@
     <div class="filter-grid">
       <div class="filter-group"><label>PENCARIAN</label><input class="form-control" name="q" value="<%= filters.q %>" placeholder="ID, nama, telepon, alamat..."></div>
       <div class="filter-group"><label>SITE / POP</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
-      <div class="filter-group"><label>STATUS PELANGGAN</label><select class="form-select" name="status"><option value="">Semua Status</option><option value="active" <%= filters.status==='active'?'selected':'' %>>Aktif</option><option value="suspended" <%= filters.status==='suspended'?'selected':'' %>>Suspended</option><option value="terminated" <%= filters.status==='terminated'?'selected':'' %>>Berhenti</option></select></div>
+      <div class="filter-group"><label>STATUS PELANGGAN</label><select class="form-select" name="status"><option value="">Semua Status</option><option value="active" <%= filters.status==='active'?'selected':'' %>>Aktif</option><option value="inactive" <%= filters.status==='inactive'?'selected':'' %>>Tidak Aktif</option><option value="suspended" <%= filters.status==='suspended'?'selected':'' %>>Suspended</option><option value="terminated" <%= filters.status==='terminated'?'selected':'' %>>Berhenti</option></select></div>
       <div class="filter-group d-flex align-items-end gap-2"><button class="btn-tech primary flex-fill"><i class="bi bi-funnel-fill"></i>Terapkan Filter</button><a class="btn-tech" href="/customers"><i class="bi bi-arrow-counterclockwise"></i></a></div>
     </div>
   </form>
 
-  <div class="data-card">
+  <div class="data-card action-safe-card">
     <div class="data-card-head"><div><h3>Database Pelanggan</h3><small><%= customers.length %> data ditemukan</small></div><div class="toolbar-right"><span class="status-badge purple"><%= customers.length %> rows</span></div></div>
-    <div class="table-responsive">
+    <div class="table-responsive action-safe-table">
       <table class="app-table"><thead><tr><th>Customer</th><th>Sales</th><th>Site / Cluster</th><th>Paket</th><th>PPPoE</th><th>Billing</th><th>Network</th><th>Kontak</th><th class="text-center">Tindakan</th></tr></thead><tbody>
       <% customers.forEach(c=>{ const wa=String(c.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); %><tr>
         <td><a class="cell-main text-decoration-none" href="/customers/<%= c.id %>"><%= c.name %></a><span class="cell-sub"><%= c.customer_code %></span></td>
@@ -33,7 +33,7 @@
         <td><span class="status-badge <%= c.billing_status==='paid'?'green':c.billing_status==='overdue'?'red':'orange' %>"><%= c.billing_status %></span></td>
         <td><span class="status-badge <%= c.network_status==='online'?'green':c.network_status==='isolated'?'red':'gray' %>"><%= c.network_status %></span></td>
         <td><% if(wa.length>=9){ %><a class="customer-wa-link" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer" title="Buka WhatsApp <%= c.name %>"><i class="bi bi-whatsapp"></i><span><%= c.phone %></span></a><% }else{ %><span class="cell-main">-</span><% } %><span class="cell-sub"><%= c.address || '-' %></span></td>
-        <td class="text-center"><div class="dropdown portal-action-dropdown"><button class="action-menu" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-three-dots"></i></button><div class="dropdown-menu app-dropdown dropdown-menu-end p-2 portal-action-menu">
+        <td class="text-center"><div class="row-action-menu customer-row-action"><button class="action-menu" type="button" data-row-action-toggle aria-expanded="false" aria-label="Buka tindakan pelanggan <%= c.name %>"><i class="bi bi-three-dots-vertical"></i></button><div class="row-action-panel app-dropdown portal-action-menu">
           <a class="dropdown-item rounded-3" href="/customers/<%= c.id %>"><i class="bi bi-person-vcard me-2"></i>Detail Pelanggan</a>
           <a class="dropdown-item rounded-3" href="/customers/<%= c.id %>/edit"><i class="bi bi-pencil-square me-2"></i>Edit</a>
           <div class="dropdown-divider"></div>

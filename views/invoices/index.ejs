@@ -40,12 +40,12 @@
     </div>
   </form>
 
-  <div class="data-card invoice-registry-card">
+  <div class="data-card invoice-registry-card action-safe-card">
     <div class="data-card-head">
       <div><h3>Daftar Tagihan</h3><small><%= invoices.length %> tagihan · <%= monthNames[filters.month-1] %> <%= filters.year %></small></div>
       <div class="legend-inline"><span><i class="dot success"></i>Lunas</span><span><i class="dot warning"></i>Belum Lunas</span></div>
     </div>
-    <div class="table-responsive">
+    <div class="table-responsive action-safe-table">
       <table class="app-table invoice-table">
         <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Sisa</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
@@ -61,9 +61,9 @@
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
             <td><%= formatDate(i.due_date) %></td>
             <td class="invoice-action-cell">
-              <div class="dropdown invoice-action-dropdown">
-                <button class="action-menu dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" data-bs-display="dynamic" data-bs-offset="0,8" aria-label="Buka tindakan tagihan <%= i.invoice_number %>" aria-expanded="false"><i class="bi bi-three-dots-vertical"></i></button>
-                <div class="dropdown-menu dropdown-menu-end app-dropdown invoice-action-menu p-2">
+              <div class="row-action-menu invoice-action-dropdown">
+                <button class="action-menu" type="button" data-row-action-toggle aria-label="Buka tindakan tagihan <%= i.invoice_number %>" aria-expanded="false"><i class="bi bi-three-dots-vertical"></i></button>
+                <div class="row-action-panel app-dropdown invoice-action-menu">
                   <% if(Number(i.outstanding)>0){ %><button type="button" class="dropdown-item rounded-3" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i>Pembayaran</button><% } %>
                   <a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i>Lihat Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i>Unduh Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/print" target="_blank"><i class="bi bi-printer"></i>Versi Cetak</a>
                   <a class="dropdown-item rounded-3" href="/payments?q=<%= encodeURIComponent(i.invoice_number) %>"><i class="bi bi-clock-history"></i>Riwayat Pembayaran</a>

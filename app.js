@@ -21,7 +21,7 @@ const dutyProofUpload = require('./middleware/dutyProofUpload');
 const { requireAuth } = require('./middleware/auth');
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema } = require('./services/schemaService');
 
 const app = express();
 app.set('view engine', 'ejs');
@@ -202,6 +202,7 @@ async function bootstrap() {
   await ensureV16Schema();
   await ensureV17Schema();
   await ensureV18Schema();
+  await ensureV19Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';

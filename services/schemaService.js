@@ -191,4 +191,12 @@ async function ensureV18Schema() {
   }
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema };
+
+async function ensureV19Schema() {
+  // v1.9: sumber pembelian kas + nomor referensi pembayaran otomatis untuk data lama yang masih kosong.
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS purchase_channel ENUM('online','offline') NULL AFTER notes`);
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS purchase_shop_name VARCHAR(160) NULL AFTER purchase_channel`);
+  await db.query(`UPDATE payments SET reference=CONCAT('PAY-',DATE_FORMAT(paid_at,'%Y%m%d'),'-',LPAD(id,6,'0')) WHERE reference IS NULL OR TRIM(reference)=''`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema };
