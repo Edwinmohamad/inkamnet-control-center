@@ -230,7 +230,7 @@ html[data-theme="dark"] .main-panel::after{content:"";position:fixed;inset:0 0 0
 @keyframes signalDrop{0%{transform:translateY(-45vh);opacity:0}15%{opacity:.55}78%{opacity:.2}100%{transform:translateY(145vh);opacity:0}}
 .main-panel{position:relative;isolation:isolate}
 .main-panel::before{content:"";position:fixed;left:var(--sidebar);right:0;top:78px;height:1px;z-index:1;pointer-events:none;background:linear-gradient(90deg,transparent 3%,rgba(var(--brand-rgb),.25) 35%,rgba(var(--brand-red-rgb),.15) 70%,transparent 97%);opacity:.5}
-.topbar{overflow:hidden}.topbar::after{content:"";position:absolute;left:-25%;bottom:0;width:22%;height:1px;background:linear-gradient(90deg,transparent,var(--brand),var(--brand-red),transparent);animation:topbarScan 7s linear infinite;opacity:.72}
+.topbar{overflow:visible}.topbar::after{content:"";position:absolute;left:-25%;bottom:0;width:22%;height:1px;background:linear-gradient(90deg,transparent,var(--brand),var(--brand-red),transparent);animation:topbarScan 7s linear infinite;opacity:.72}
 @keyframes topbarScan{to{left:110%}}
 .live-clock{height:38px;padding:0 11px;border:1px solid var(--line);border-radius:11px;background:linear-gradient(135deg,var(--panel),rgba(var(--brand-rgb),.035));color:var(--muted);display:flex;align-items:center;gap:7px;font-size:.62rem;font-variant-numeric:tabular-nums}
 .live-clock i{color:#a88fff}.live-clock span{letter-spacing:.04em}
