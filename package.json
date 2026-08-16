@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": true,
-  "description": "INKAMNET Control Center FINAL v1.2.1 - cache-safe UI hotfix, robust animated loader, subscriber/PSB growth dashboard, HQ branding, XLSX, server duty, billing, network, warehouse and finance",
+  "description": "INKAMNET Control Center v1.2.2 - topbar account dropdown visibility and responsive positioning fix",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
