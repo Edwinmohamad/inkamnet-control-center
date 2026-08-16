@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": true,
-  "description": "INKAMNET Control Center v1.6.0 - customer search, bulk payments, inline invoice PDF, cluster context, expense categories and proof evidence",
+  "description": "INKAMNET Control Center v1.6.1 - invoice hotfix, manual cash categories, and calendar picker UX",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

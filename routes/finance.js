@@ -24,8 +24,40 @@ router.get('/charges',async(req,res)=>{const [charges]=await db.query(`SELECT * 
 router.post('/charges',async(req,res)=>{const b=req.body;await db.execute(`INSERT INTO additional_charges(name,amount,description,is_active) VALUES(?,?,?,1)`,[b.name,b.amount||0,b.description||null]);req.session.flash={type:'success',message:'Biaya tambahan ditambahkan.'};res.redirect('/charges');});
 router.post('/charges/:id/toggle',async(req,res)=>{await db.execute(`UPDATE additional_charges SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/charges');});
 
-router.get('/cash/categories',async(req,res)=>{const [categories]=await db.query(`SELECT cc.*,s.code site_code FROM cash_categories cc LEFT JOIN sites s ON s.id=cc.site_id ORDER BY cc.type,cc.name`);const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);res.render('finance/cash-categories',{title:'Kategori Kas',categories,sites});});
-router.post('/cash/categories',async(req,res)=>{const b=req.body;let code=normalizeCategoryCode(b.code||b.name,b.type==='income'?'INC':'EXP');const [dup]=await db.execute(`SELECT id FROM cash_categories WHERE code=? LIMIT 1`,[code]);if(dup.length)code=`${code.slice(0,7)}${String(Date.now()).slice(-3)}`;await db.execute(`INSERT INTO cash_categories(code,name,type,site_id,description,is_active) VALUES(?,?,?,?,?,1)`,[code,b.name,b.type,b.site_id||null,b.description||null]);req.session.flash={type:'success',message:`Kategori kas ${b.name} ditambahkan dengan kode ${code}.`};res.redirect('/cash/categories');});
+router.get('/cash/categories',async(req,res)=>{
+  const [categories]=await db.query(`SELECT cc.*,s.code site_code,COUNT(ct.id) usage_count
+    FROM cash_categories cc LEFT JOIN sites s ON s.id=cc.site_id LEFT JOIN cash_transactions ct ON ct.category_id=cc.id
+    GROUP BY cc.id,s.code ORDER BY cc.type,cc.name`);
+  const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
+  res.render('finance/cash-categories',{title:'Kategori Kas',categories,sites});
+});
+router.post('/cash/categories',async(req,res)=>{
+  const b=req.body;const name=String(b.name||'').trim();const type=['income','expense'].includes(b.type)?b.type:'expense';
+  if(!name){req.session.flash={type:'danger',message:'Nama kategori wajib diisi.'};return res.redirect('/cash/categories');}
+  let code=normalizeCategoryCode(b.code||name,type==='income'?'INC':'EXP');
+  const [dup]=await db.execute(`SELECT id FROM cash_categories WHERE code=? LIMIT 1`,[code]);
+  if(dup.length)code=`${code.slice(0,7)}${String(Date.now()).slice(-3)}`;
+  await db.execute(`INSERT INTO cash_categories(code,name,type,site_id,description,is_active) VALUES(?,?,?,?,?,1)`,[code,name,type,b.site_id||null,b.description||null]);
+  req.session.flash={type:'success',message:`Kategori kas ${name} ditambahkan dengan kode ${code}.`};
+  res.redirect('/cash/categories');
+});
+router.post('/cash/categories/:id/delete',requireAdmin,async(req,res)=>{
+  const [rows]=await db.execute(`SELECT id,name FROM cash_categories WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'warning',message:'Kategori kas tidak ditemukan.'};return res.redirect('/cash/categories');}
+  const category=rows[0];
+  if(['Pendapatan Billing','Setoran Cash Pelanggan'].includes(category.name)){
+    req.session.flash={type:'warning',message:`Kategori ${category.name} dipakai otomatis oleh sistem pembayaran dan tidak dapat dihapus.`};
+    return res.redirect('/cash/categories');
+  }
+  const [[usage]]=await db.execute(`SELECT COUNT(*) total FROM cash_transactions WHERE category_id=?`,[category.id]);
+  if(Number(usage.total)>0){
+    req.session.flash={type:'warning',message:`Kategori ${category.name} sudah dipakai pada ${usage.total} transaksi. Hapus/pindahkan transaksi terkait terlebih dahulu.`};
+    return res.redirect('/cash/categories');
+  }
+  await db.execute(`DELETE FROM cash_categories WHERE id=?`,[category.id]);
+  req.session.flash={type:'success',message:`Kategori ${category.name} berhasil dihapus.`};
+  res.redirect('/cash/categories');
+});
 
 router.get('/cash',async(req,res)=>{
   const now=new Date();const month=intInRange(req.query.month,1,12,now.getMonth()+1);const year=intInRange(req.query.year,2020,2100,now.getFullYear());const site=String(req.query.site||'').trim();const q=String(req.query.q||'').trim();

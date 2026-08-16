@@ -89,6 +89,17 @@
     if(label) label.textContent=input.files?.[0]?.name || 'Belum ada file dipilih';
   }));
 
+  // Open the browser calendar whenever a date field is clicked.
+  // This keeps all date-driven modules consistent without adding another UI dependency.
+  document.querySelectorAll('input[type="date"],input[type="datetime-local"]').forEach(input => {
+    input.classList.add('ink-date-picker');
+    input.setAttribute('autocomplete','off');
+    input.addEventListener('click', () => {
+      if (input.disabled || input.readOnly || typeof input.showPicker !== 'function') return;
+      try { input.showPicker(); } catch (_) {}
+    });
+  });
+
   const palette=document.getElementById('commandPalette');
   const input=document.getElementById('commandInput');
   const openPalette=()=>{if(!palette)return;palette.classList.add('open');palette.setAttribute('aria-hidden','false');setTimeout(()=>input?.focus(),50)};

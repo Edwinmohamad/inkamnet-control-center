@@ -80,7 +80,7 @@ router.get('/',async(req,res)=>{
     WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY s.code,cl.name,c.name,i.due_date`);
   const [staff]=await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);
   const filters={month,year,status,site,customer,q};
-  res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,openInvoices,staff,filters,monthNames:MONTH_NAMES,periodQuery:periodQuery(filters)});
+  res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,openInvoices,staff,filters,monthNames:MONTH_NAMES,periodQueryString:periodQuery(filters)});
 });
 
 router.post('/generate',async(req,res)=>{

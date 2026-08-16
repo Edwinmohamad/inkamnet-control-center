@@ -139,24 +139,8 @@ async function ensureV16Schema() {
   await db.query(`UPDATE cash_categories SET code='SETOR' WHERE name='Setoran Cash Pelanggan' AND (code IS NULL OR code='')`);
   await db.query(`UPDATE cash_categories SET code='OPS' WHERE name='Pengeluaran Operasional' AND (code IS NULL OR code='')`);
 
-  const seeds=[
-    ['PC','Petty Cash','expense','Pengeluaran kecil operasional harian'],
-    ['LIA','Liability / Kewajiban','expense','Kewajiban, hutang, cicilan atau pembayaran liability'],
-    ['NET','Operasional Jaringan','expense','Bandwidth, backbone, ODP, kabel, perangkat dan operasional jaringan'],
-    ['MNT','Maintenance','expense','Perawatan dan perbaikan perangkat / infrastruktur'],
-    ['TRP','Transportasi','expense','BBM, tol, parkir, perjalanan dan transport operasional'],
-    ['PAY','Gaji / Honor','expense','Gaji, honor, insentif dan upah tim'],
-    ['UTL','Listrik & Utilitas','expense','PLN, internet pendukung, air dan utilitas'],
-    ['RNT','Sewa','expense','Sewa lokasi, rack, tempat atau aset operasional'],
-    ['SUP','Perlengkapan','expense','ATK, tools, consumable dan kebutuhan kantor/lapangan'],
-    ['ADM','Administrasi / Pajak','expense','Biaya admin bank, legal, pajak dan administrasi'],
-    ['RFD','Refund / Pengembalian','expense','Refund atau pengembalian dana pelanggan'],
-    ['OTH','Lain-lain','expense','Pengeluaran lain yang tidak masuk kategori utama']
-  ];
-  for(const [code,name,type,description] of seeds){
-    await db.execute(`INSERT INTO cash_categories(code,name,type,description,is_active)
-      SELECT ?,?,?,?,1 WHERE NOT EXISTS (SELECT 1 FROM cash_categories WHERE name=? OR code=?)`,[code,name,type,description,name,code]);
-  }
+  // Kategori pengeluaran/pemasukan dibuat manual dari menu Kategori Kas.
+  // Hanya kategori sistem pembayaran yang tetap dipertahankan jika sudah ada.
 
   await db.query(`UPDATE cash_categories SET code=CONCAT('CAT',LPAD(id,3,'0')) WHERE code IS NULL OR code=''`);
   await db.query(`UPDATE cash_categories c JOIN (SELECT code,MIN(id) keep_id FROM cash_categories WHERE code IS NOT NULL AND code<>'' GROUP BY code HAVING COUNT(*)>1) d ON d.code=c.code SET c.code=CONCAT(LEFT(c.code,10),'-',LPAD(c.id,6,'0')) WHERE c.id<>d.keep_id`);
