@@ -123,49 +123,7 @@
   }
 
 
-  // Reliable action menus for customer/invoice tables.
-  // Uses a lightweight fixed-position panel instead of Bootstrap dropdown/Popper,
-  // so actions stay clickable even inside responsive table overflow containers.
-  let activeRowAction=null;
-  const closeRowAction=()=>{
-    if(!activeRowAction)return;
-    const {toggle,panel}=activeRowAction;
-    panel.classList.remove('show');
-    panel.removeAttribute('style');
-    toggle.setAttribute('aria-expanded','false');
-    activeRowAction=null;
-  };
-  const placeRowAction=(toggle,panel)=>{
-    const r=toggle.getBoundingClientRect();
-    panel.classList.add('show');
-    panel.style.visibility='hidden';
-    const w=Math.max(220,panel.offsetWidth||220);
-    const h=Math.max(80,panel.offsetHeight||80);
-    const left=Math.min(window.innerWidth-w-10,Math.max(10,r.right-w));
-    const below=window.innerHeight-r.bottom;
-    const top=below>=h+12?Math.min(window.innerHeight-h-10,r.bottom+8):Math.max(10,r.top-h-8);
-    Object.assign(panel.style,{position:'fixed',left:`${left}px`,top:`${top}px`,right:'auto',bottom:'auto',transform:'none',visibility:'visible',zIndex:'5000'});
-  };
-  document.addEventListener('click',e=>{
-    const toggle=e.target.closest('[data-row-action-toggle]');
-    if(toggle){
-      e.preventDefault();e.stopPropagation();
-      const wrap=toggle.closest('.row-action-menu');
-      const panel=wrap?.querySelector('.row-action-panel');
-      if(!panel)return;
-      if(activeRowAction?.toggle===toggle){closeRowAction();return;}
-      closeRowAction();
-      placeRowAction(toggle,panel);
-      toggle.setAttribute('aria-expanded','true');
-      activeRowAction={toggle,panel};
-      return;
-    }
-    if(!e.target.closest('.row-action-panel'))closeRowAction();
-    else if(e.target.closest('a,button'))setTimeout(closeRowAction,0);
-  });
-  window.addEventListener('resize',closeRowAction,{passive:true});
-  window.addEventListener('scroll',closeRowAction,true);
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeRowAction();});
+  // Row actions use native <dialog> top-layer sheets in v1.10, so they do not depend on table overflow or Popper.
 
   // Progressive reveal for dense admin screens without adding a heavy animation library.
   if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

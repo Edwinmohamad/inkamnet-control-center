@@ -546,3 +546,26 @@ html[data-theme="light"] input[type="date"],html[data-theme="light"] input[type=
 @media(max-width:1599.98px){.command-kpis-v19{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:1199.98px){.dashboard-v19-grid,.dashboard-v19-lower,.dashboard-v19-bottom{grid-template-columns:1fr}.command-kpis-v19{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:767.98px){.command-kpis-v19,.priority-grid-v19,.command-recent-grid-v19{grid-template-columns:1fr}.site-summary-title{grid-template-columns:auto minmax(0,1fr)}.site-summary-title>b{grid-column:2}.site-summary-metrics,.site-summary-bar{margin-left:0}.duty-week-row{grid-template-columns:44px minmax(0,1fr) auto}.duty-proof-ok{display:none}}
+
+
+/* =========================================================
+   v1.10 — hardened universal row actions
+   Panels are portalled to body while open to escape all table overflow/stacking contexts.
+   ========================================================= */
+.row-action-panel.row-action-portal-active{display:block!important;position:fixed!important;z-index:6500!important;min-width:224px;max-width:calc(100vw - 20px);border:1px solid var(--line-2)!important;background:var(--panel)!important;box-shadow:0 28px 85px rgba(0,0,0,.42)!important;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.row-action-panel.row-action-portal-active .dropdown-item{cursor:pointer;width:100%;text-align:left}
+.customer-row-action,.invoice-action-dropdown,.cash-row-actions,.duty-row-actions{isolation:isolate}
+.cash-row-actions .row-action-panel,.duty-row-actions .row-action-panel{min-width:210px}
+.customer-package-price{white-space:nowrap;font-variant-numeric:tabular-nums}
+
+
+/* v1.10 native top-layer action dialogs — reliable even inside scrollable tables */
+.ink-action-dialog{width:min(390px,calc(100vw - 28px));max-height:min(82vh,680px);padding:0;border:1px solid var(--line-2);border-radius:18px;background:var(--panel);color:var(--text);box-shadow:0 35px 120px rgba(0,0,0,.55);overflow:hidden}
+.ink-action-dialog[open]{animation:inkDialogIn .18s ease both}
+.ink-action-dialog::backdrop{background:rgba(3,6,14,.72);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.ink-action-dialog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:17px 18px;border-bottom:1px solid var(--line);background:linear-gradient(120deg,rgba(var(--brand-rgb),.10),var(--panel) 48%,rgba(var(--brand-red-rgb),.04))}
+.ink-action-dialog-head small{display:block;color:#aa93ff;font-size:.48rem;font-weight:900;letter-spacing:.16em}.ink-action-dialog-head strong{display:block;margin-top:4px;font-family:var(--font-display);font-size:.82rem}.ink-action-dialog-head span{display:block;margin-top:3px;color:var(--muted);font-size:.53rem}
+.ink-dialog-close{width:34px;height:34px;flex:0 0 34px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2);color:var(--muted);display:grid;place-items:center}.ink-dialog-close:hover{color:var(--text);border-color:var(--line-2)}
+.ink-action-dialog-body{padding:8px;max-height:calc(82vh - 84px);overflow:auto}.ink-action-dialog-body form{margin:0}.ink-action-item{width:100%;min-height:54px;padding:9px 10px;border:0;border-radius:11px;background:transparent;color:var(--text);display:grid;grid-template-columns:34px minmax(0,1fr);align-items:center;gap:10px;text-decoration:none;text-align:left;cursor:pointer;transition:.16s}.ink-action-item>i{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:rgba(var(--brand-rgb),.09);color:#a991ff}.ink-action-item b{display:block;font-size:.65rem}.ink-action-item small{display:block;margin-top:2px;color:var(--muted);font-size:.49rem;font-weight:400}.ink-action-item:hover{background:var(--panel-3);color:var(--text);transform:translateX(2px)}.ink-action-item.success>i{background:rgba(46,214,161,.08);color:var(--success)}.ink-action-item.danger{color:var(--danger)}.ink-action-item.danger>i{background:rgba(255,90,89,.08);color:var(--danger)}.ink-action-separator{height:1px;background:var(--line);margin:6px 4px}.action-menu-labeled{width:auto!important;min-width:66px!important;padding:0 9px!important;display:inline-flex!important;align-items:center;justify-content:center;gap:5px}.action-menu-labeled span{font-size:.52rem;font-weight:800}.customer-action-cell{white-space:nowrap}.invoice-action-cell .action-menu-labeled{margin:auto}
+@keyframes inkDialogIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+@media(max-width:579.98px){.ink-action-dialog{width:calc(100vw - 18px)}.action-menu-labeled span{display:none}.action-menu-labeled{min-width:36px!important;padding:0!important}}

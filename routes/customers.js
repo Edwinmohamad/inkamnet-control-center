@@ -63,6 +63,26 @@ function autoCustomerEmail(customerCode){
   return `${local}@customer.inkamnet.local`;
 }
 
+async function nextImportedCustomerCode(conn, siteCode, dueDay, sequenceCache){
+  const due=Math.max(1,Math.min(28,Number(dueDay)||15));
+  const prefix=`${normalizeCodePart(siteCode)}-${String(due).padStart(2,'0')}-`;
+  let seq=sequenceCache.get(prefix);
+  if(seq==null){
+    const [[row]]=await conn.execute(`SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(customer_code,'-',-1) AS UNSIGNED)),0) seq FROM customers WHERE customer_code LIKE ?`,[`${prefix}%`]);
+    seq=Number(row?.seq||0)+1;
+  }
+  let code='';
+  while(seq<1000000){
+    code=`${prefix}${String(seq).padStart(3,'0')}`;
+    const [exists]=await conn.execute(`SELECT id FROM customers WHERE customer_code=? LIMIT 1`,[code]);
+    if(!exists.length)break;
+    seq++;
+  }
+  if(!code)throw new Error(`Tidak dapat membuat Customer ID untuk site ${siteCode}.`);
+  sequenceCache.set(prefix,seq+1);
+  return code;
+}
+
 function styleWorkbook(ws){
   ws.views=[{state:'frozen',ySplit:1}];
   ws.autoFilter={from:'A1',to:ws.getRow(1).getCell(ws.columnCount).address};
@@ -84,15 +104,15 @@ router.get('/template.xlsx', async(req,res)=>{
   const wb=new ExcelJS.Workbook();wb.creator='INKAMNET Control Center';wb.created=new Date();
   const ws=wb.addWorksheet('PELANGGAN');
   ws.columns=[
-    ['customer_code',18],['name',28],['phone',18],['email',28],['address',40],['sales_employee_code',18],['site_code',13],['package_name',24],['pppoe_username',24],['router_name',24],['cluster_name',24],['activation_date',17],['due_day',12],['grace_days',12],['customer_status',18],['prorata_enabled',18],['notes',35]
+    ['name',28],['phone',18],['email',28],['address',40],['sales_employee_code',18],['site_code',13],['package_name',24],['pppoe_username',24],['router_name',24],['cluster_name',24],['activation_date',17],['due_day',12],['grace_days',12],['customer_status',18],['prorata_enabled',18],['notes',35]
   ].map(([header,width])=>({header,key:header,width}));
   const sampleSite=sites[0]?.code||'KRW';
   const sampleSiteObj=sites.find(s=>s.code===sampleSite);
   const samplePackage=(packages.find(p=>p.site_id===null||Number(p.site_id)===Number(sampleSiteObj?.id))||packages[0])?.name||'20 Mbps';
-  ws.addRow({customer_code:`${sampleSite}-15-001`,name:'Contoh Pelanggan',phone:'081234567890',email:'',address:'Alamat pelanggan',sales_employee_code:'',site_code:sampleSite,package_name:samplePackage,pppoe_username:'contoh001',router_name:routers.find(r=>r.site_code===sampleSite)?.name||'',cluster_name:clusters.find(c=>c.site_code===sampleSite)?.name||'',activation_date:new Date().toISOString().slice(0,10),due_day:15,grace_days:2,customer_status:'active',prorata_enabled:'YA',notes:'HAPUS BARIS CONTOH INI sebelum import data asli'});
+  ws.addRow({name:'Contoh Pelanggan',phone:'081234567890',email:'',address:'Alamat pelanggan',sales_employee_code:'',site_code:sampleSite,package_name:samplePackage,pppoe_username:'contoh001',router_name:routers.find(r=>r.site_code===sampleSite)?.name||'',cluster_name:clusters.find(c=>c.site_code===sampleSite)?.name||'',activation_date:new Date().toISOString().slice(0,10),due_day:15,grace_days:2,customer_status:'active',prorata_enabled:'YA',notes:'HAPUS BARIS CONTOH INI sebelum import data asli'});
   styleWorkbook(ws);
   ws.getColumn('activation_date').numFmt='yyyy-mm-dd';
-  ws.getColumn('phone').numFmt='@';ws.getColumn('customer_code').numFmt='@';ws.getColumn('pppoe_username').numFmt='@';
+  ws.getColumn('phone').numFmt='@';ws.getColumn('pppoe_username').numFmt='@';
   for(let row=2;row<=1000;row++){
     ws.getCell(`N${row}`).dataValidation={type:'list',allowBlank:false,formulae:['"active,suspended,terminated"']};
     ws.getCell(`O${row}`).dataValidation={type:'list',allowBlank:true,formulae:['"YA,TIDAK"']};
@@ -102,14 +122,14 @@ router.get('/template.xlsx', async(req,res)=>{
   const info=wb.addWorksheet('PETUNJUK');info.columns=[{width:26},{width:95}];
   [
     ['INKAMNET CUSTOMER IMPORT','Isi sheet PELANGGAN lalu upload kembali melalui menu Pelanggan → Import Excel.'],
-    ['WAJIB','customer_code, name, site_code, package_name'],
+    ['WAJIB','name, site_code, package_name'],
     ['SITE','Gunakan kode site persis seperti daftar REFERENSI (contoh KRW/KBG/CLM).'],
     ['PACKAGE','Gunakan nama paket persis seperti daftar REFERENSI.'],
     ['ROUTER / CLUSTER','Opsional. Jika diisi, nama harus cocok dan harus berada pada site yang sama.'],
     ['Tanggal Aktivasi','Format YYYY-MM-DD, contoh 2026-08-16.'],
     ['Status','active / suspended / terminated.'],
     ['Prorata','YA atau TIDAK.'],
-    ['IMPORT MODE','Di web pilih: Lewati data yang sudah ada, atau Update berdasarkan customer_code.'],
+    ['CUSTOMER ID','Tidak perlu diisi. Sistem membuat Customer ID otomatis dari Site + jatuh tempo + nomor urut saat import.'],
     ['KEAMANAN','Import divalidasi lebih dulu. Jika ada baris error, seluruh import dibatalkan agar data tidak masuk setengah-setengah.']
   ].forEach(x=>info.addRow(x));
   info.getRow(1).font={bold:true,color:{argb:'FFF04030'},size:14};
@@ -141,21 +161,21 @@ router.post('/import', requireAdmin, async(req,res)=>{
   const ws=workbook.getWorksheet('PELANGGAN')||workbook.worksheets[0];if(!ws)throw new Error('Workbook tidak memiliki sheet pelanggan.');
   if(ws.rowCount>5001) throw new Error('Maksimal 5.000 pelanggan per sekali import. Pecah file menjadi beberapa batch.');
   const headers={};ws.getRow(1).eachCell((cell,col)=>{headers[String(plainCell(cell)).trim().toLowerCase()]=col;});
-  const required=['customer_code','name','site_code','package_name'];const missing=required.filter(h=>!headers[h]);if(missing.length)throw new Error(`Kolom wajib tidak ada: ${missing.join(', ')}`);
-  const [sites]=await db.query(`SELECT id,code FROM sites WHERE is_active=1`);const siteMap=new Map(sites.map(x=>[x.code.toUpperCase(),x.id]));
+  const required=['name','site_code','package_name'];const missing=required.filter(h=>!headers[h]);if(missing.length)throw new Error(`Kolom wajib tidak ada: ${missing.join(', ')}`);
+  const [sites]=await db.query(`SELECT s.id,s.code,COALESCE(s.default_due_day,st.default_due_day,15) default_due_day FROM sites s LEFT JOIN settings st ON st.id=1 WHERE s.is_active=1`);const siteMap=new Map(sites.map(x=>[x.code.toUpperCase(),x]));
   const [packages]=await db.query(`SELECT id,name,site_id FROM packages WHERE is_active=1`);
   const [routers]=await db.query(`SELECT id,name,site_id FROM routers WHERE is_active=1`);const [clusters]=await db.query(`SELECT id,name,site_id FROM clusters WHERE status!='inactive'`);const [sales]=await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales'`);
   const value=(row,key)=>headers[key]?plainCell(row.getCell(headers[key])):'';
-  const data=[],errors=[],seenCodes=new Set();
+  const data=[],errors=[];
   for(let n=2;n<=ws.rowCount;n++){
-    const row=ws.getRow(n);const code=String(value(row,'customer_code')||'').trim();const name=String(value(row,'name')||'').trim();
-    if(!code&&!name)continue;
+    const row=ws.getRow(n);const name=String(value(row,'name')||'').trim();
+    if(!name)continue;
     const siteCode=String(value(row,'site_code')||'').trim().toUpperCase(), packageName=String(value(row,'package_name')||'').trim();
-    const siteId=siteMap.get(siteCode);
+    const siteObj=siteMap.get(siteCode);const siteId=siteObj?.id;
     const packageKey=packageName.toLowerCase();
     const packageObj=packages.find(x=>x.name.trim().toLowerCase()===packageKey && Number(x.site_id)===Number(siteId)) || packages.find(x=>x.name.trim().toLowerCase()===packageKey && x.site_id===null);
     const packageId=packageObj?.id;
-    if(!code)errors.push(`Baris ${n}: customer_code kosong`);if(code&&seenCodes.has(code.toLowerCase()))errors.push(`Baris ${n}: customer_code '${code}' duplikat di file`);if(code)seenCodes.add(code.toLowerCase());if(!name)errors.push(`Baris ${n}: name kosong`);if(!siteId)errors.push(`Baris ${n}: site_code '${siteCode}' tidak ditemukan`);if(!packageId)errors.push(`Baris ${n}: package_name '${packageName}' tidak ditemukan / tidak tersedia untuk site ${siteCode}`);
+    if(!name)errors.push(`Baris ${n}: name kosong`);if(!siteId)errors.push(`Baris ${n}: site_code '${siteCode}' tidak ditemukan`);if(!packageId)errors.push(`Baris ${n}: package_name '${packageName}' tidak ditemukan / tidak tersedia untuk site ${siteCode}`);
     const status=String(value(row,'customer_status')||'active').trim().toLowerCase();if(!['active','suspended','terminated'].includes(status))errors.push(`Baris ${n}: customer_status tidak valid`);
     const dueRaw=value(row,'due_day'), graceRaw=value(row,'grace_days');const due=dueRaw===''?null:Number(dueRaw), grace=graceRaw===''?null:Number(graceRaw);
     if(due!==null&&(!Number.isInteger(due)||due<1||due>28))errors.push(`Baris ${n}: due_day harus 1-28`);if(grace!==null&&(!Number.isInteger(grace)||grace<0||grace>30))errors.push(`Baris ${n}: grace_days harus 0-30`);
@@ -164,21 +184,28 @@ router.post('/import', requireAdmin, async(req,res)=>{
     if(routerName&&!routerObj)errors.push(`Baris ${n}: router '${routerName}' tidak ditemukan di site ${siteCode}`);if(clusterName&&!clusterObj)errors.push(`Baris ${n}: cluster '${clusterName}' tidak ditemukan di site ${siteCode}`);
     const activationRaw=value(row,'activation_date'), activation=activationRaw?dateString(activationRaw):null;if(activationRaw&&!activation)errors.push(`Baris ${n}: activation_date tidak valid`);
     const salesCode=String(value(row,'sales_employee_code')||'').trim().toUpperCase();const salesObj=salesCode?sales.find(x=>String(x.employee_code).toUpperCase()===salesCode):null;if(salesCode&&!salesObj)errors.push(`Baris ${n}: sales_employee_code '${salesCode}' tidak ditemukan / bukan posisi Sales`);
-    data.push({row:n,customer_code:code,name,phone:phoneString(value(row,'phone')),email:String(value(row,'email')||'').trim()||null,address:String(value(row,'address')||'').trim()||null,sales_id:salesObj?.id||null,site_id:siteId,package_id:packageId,router_id:routerObj?.id||null,cluster_id:clusterObj?.id||null,pppoe_username:String(value(row,'pppoe_username')||'').trim()||null,activation_date:activation,due_day:due,grace_days:grace,customer_status:status,prorata_enabled:boolValue(value(row,'prorata_enabled'),true)?1:0,notes:String(value(row,'notes')||'').trim()||null});
+    data.push({row:n,name,phone:phoneString(value(row,'phone')),email:String(value(row,'email')||'').trim()||null,address:String(value(row,'address')||'').trim()||null,sales_id:salesObj?.id||null,site_id:siteId,site_code:siteCode,site_default_due_day:Number(siteObj?.default_due_day||15),package_id:packageId,router_id:routerObj?.id||null,cluster_id:clusterObj?.id||null,pppoe_username:String(value(row,'pppoe_username')||'').trim()||null,activation_date:activation,due_day:due,grace_days:grace,customer_status:status,prorata_enabled:boolValue(value(row,'prorata_enabled'),true)?1:0,notes:String(value(row,'notes')||'').trim()||null});
   }
   if(!data.length)throw new Error('Tidak ada data pelanggan pada file.');
   if(errors.length){req.session.flash={type:'danger',message:`Import dibatalkan. ${errors.slice(0,8).join(' | ')}${errors.length>8?` | +${errors.length-8} error lain`:''}`};return res.redirect('/customers');}
-  const mode=req.body.import_mode==='update'?'update':'skip';const conn=await db.getConnection();let inserted=0,updated=0,skipped=0;
-  try{await conn.beginTransaction();
-    for(const d of data){const [exists]=await conn.execute(`SELECT id FROM customers WHERE customer_code=? LIMIT 1`,[d.customer_code]);
-      if(exists.length&&mode==='skip'){skipped++;continue;}
-      if(exists.length){await conn.execute(`UPDATE customers SET name=?,phone=?,email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[d.name,d.phone,d.email,d.address,d.sales_id,d.site_id,d.router_id,d.cluster_id,d.package_id,d.pppoe_username,d.activation_date,d.due_day,d.grace_days,d.customer_status,d.prorata_enabled,d.notes,exists[0].id]);updated++;}
-      else{await conn.execute(`INSERT INTO customers(customer_code,name,phone,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,prorata_enabled,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unpaid','offline',?,?)`,[d.customer_code,d.name,d.phone,d.email,d.address,d.sales_id,d.site_id,d.router_id,d.cluster_id,d.package_id,d.pppoe_username,d.activation_date,d.due_day,d.grace_days,d.customer_status,d.prorata_enabled,d.notes]);inserted++;}
+  const conn=await db.getConnection();let inserted=0;let lockHeld=false;
+  try{
+    const [[lockRow]]=await conn.query(`SELECT GET_LOCK('inkamnet_customer_import_code',10) locked`);
+    if(Number(lockRow?.locked)!==1)throw new Error('Import sedang diproses oleh sesi lain. Coba lagi beberapa detik.');
+    lockHeld=true;
+    await conn.beginTransaction();
+    const sequenceCache=new Map();
+    for(const d of data){
+      const dueDay=d.due_day||d.site_default_due_day||15;
+      const customerCode=await nextImportedCustomerCode(conn,d.site_code,dueDay,sequenceCache);
+      const email=d.email||null;
+      await conn.execute(`INSERT INTO customers(customer_code,name,phone,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,prorata_enabled,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unpaid','offline',?,?)`,[customerCode,d.name,d.phone,email,d.address,d.sales_id,d.site_id,d.router_id,d.cluster_id,d.package_id,d.pppoe_username,d.activation_date,dueDay,d.grace_days,d.customer_status,d.prorata_enabled,d.notes]);
+      inserted++;
     }
     await conn.commit();
-  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
-  await audit({userId:req.session.user.id,action:'import',entityType:'customer',entityId:null,description:`Excel import: ${inserted} baru, ${updated} update, ${skipped} skip`,ip:req.ip});
-  req.session.flash={type:'success',message:`Import Excel selesai: ${inserted} pelanggan baru, ${updated} diperbarui, ${skipped} dilewati.`};return res.redirect('/customers');
+  }catch(e){try{await conn.rollback();}catch(_){}throw e;}finally{if(lockHeld){try{await conn.query(`DO RELEASE_LOCK('inkamnet_customer_import_code')`);}catch(_){}}conn.release();}
+  await audit({userId:req.session.user.id,action:'import',entityType:'customer',entityId:null,description:`Excel import: ${inserted} pelanggan baru dengan Customer ID otomatis`,ip:req.ip});
+  req.session.flash={type:'success',message:`Import Excel selesai: ${inserted} pelanggan baru. Customer ID dibuat otomatis berdasarkan Site + jatuh tempo + nomor urut.`};return res.redirect('/customers');
   } catch (err) {
     console.error('Customer XLSX import gagal:', err.message);
     req.session.flash={type:'danger',message:`Import Excel gagal: ${err.message}`};

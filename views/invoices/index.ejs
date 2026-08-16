@@ -61,16 +61,19 @@
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
             <td><%= formatDate(i.due_date) %></td>
             <td class="invoice-action-cell">
-              <div class="row-action-menu invoice-action-dropdown">
-                <button class="action-menu" type="button" data-row-action-toggle aria-label="Buka tindakan tagihan <%= i.invoice_number %>" aria-expanded="false"><i class="bi bi-three-dots-vertical"></i></button>
-                <div class="row-action-panel app-dropdown invoice-action-menu">
-                  <% if(Number(i.outstanding)>0){ %><button type="button" class="dropdown-item rounded-3" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i>Pembayaran</button><% } %>
-                  <a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i>Lihat Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i>Unduh Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/print" target="_blank"><i class="bi bi-printer"></i>Versi Cetak</a>
-                  <a class="dropdown-item rounded-3" href="/payments?q=<%= encodeURIComponent(i.invoice_number) %>"><i class="bi bi-clock-history"></i>Riwayat Pembayaran</a>
-                  <% if(wa){ %><a class="dropdown-item rounded-3 text-success-soft" target="_blank" rel="noopener" href="https://wa.me/<%= wa %>?text=<%= encodeURIComponent(reminder) %>"><i class="bi bi-whatsapp"></i>Kirim Pengingat</a><% } %>
-                  <% if(user.role==='admin' && Number(i.paid_amount)===0){ %><div class="dropdown-divider"></div><form method="post" action="/invoices/<%= i.id %>/delete" onsubmit="return confirm('Hapus tagihan <%= i.invoice_number %>? Hanya tagihan tanpa pembayaran yang dapat dihapus.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="dropdown-item rounded-3 text-danger"><i class="bi bi-trash3"></i>Hapus Tagihan</button></form><% } %>
+              <button class="action-menu action-menu-labeled" type="button" onclick="document.getElementById('invoiceAction<%= i.id %>').showModal()" aria-label="Buka tindakan tagihan <%= i.invoice_number %>"><i class="bi bi-three-dots-vertical"></i><span>Aksi</span></button>
+              <dialog class="ink-action-dialog" id="invoiceAction<%= i.id %>">
+                <div class="ink-action-dialog-head"><div><small>TAGIHAN</small><strong><%= i.customer_name %></strong><span><%= i.invoice_number %> · <%= monthNames[i.period_month-1] %> <%= i.period_year %></span></div><button class="ink-dialog-close" type="button" onclick="this.closest('dialog').close()" aria-label="Tutup"><i class="bi bi-x-lg"></i></button></div>
+                <div class="ink-action-dialog-body">
+                  <% if(Number(i.outstanding)>0){ %><button type="button" class="ink-action-item success" onclick="this.closest('dialog').close()" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i><span><b>Pembayaran</b><small>Catat pembayaran faktur ini</small></span></button><% } %>
+                  <a class="ink-action-item" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><span><b>Lihat Faktur PDF</b><small>Buka PDF di tab baru</small></span></a>
+                  <a class="ink-action-item" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i><span><b>Unduh Faktur PDF</b><small>Simpan PDF ke perangkat</small></span></a>
+                  <a class="ink-action-item" href="/invoices/<%= i.id %>/print" target="_blank"><i class="bi bi-printer"></i><span><b>Versi Cetak</b><small>Tampilan siap print</small></span></a>
+                  <a class="ink-action-item" href="/payments?q=<%= encodeURIComponent(i.invoice_number) %>"><i class="bi bi-clock-history"></i><span><b>Riwayat Pembayaran</b><small>Lihat transaksi faktur</small></span></a>
+                  <% if(wa){ %><a class="ink-action-item success" target="_blank" rel="noopener" href="https://wa.me/<%= wa %>?text=<%= encodeURIComponent(reminder) %>"><i class="bi bi-whatsapp"></i><span><b>Kirim Pengingat</b><small>WhatsApp pelanggan</small></span></a><% } %>
+                  <% if(user.role==='admin' && Number(i.paid_amount)===0){ %><div class="ink-action-separator"></div><form method="post" action="/invoices/<%= i.id %>/delete" onsubmit="return confirm('Hapus tagihan <%= i.invoice_number %>? Hanya tagihan tanpa pembayaran yang dapat dihapus.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="ink-action-item danger" type="submit"><i class="bi bi-trash3"></i><span><b>Hapus Tagihan</b><small>Hanya faktur tanpa pembayaran</small></span></button></form><% } %>
                 </div>
-              </div>
+              </dialog>
             </td>
           </tr>
           <% }) %>

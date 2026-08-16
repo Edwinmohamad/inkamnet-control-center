@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.9.0 - PSB/site dashboard intelligence, reliable customer/invoice actions, automatic payment references, and purchase-source cash tracking",
+  "description": "INKAMNET Control Center v1.10.0 - hardened universal action menus, automatic customer IDs for XLSX import, explicit package price visibility, and reliable cash actions",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
