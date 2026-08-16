@@ -31,13 +31,13 @@ PORT_VALUE=$(grep -E '^PORT=' .env | tail -1 | cut -d= -f2- | tr -d '\r' || true
 APP_URL_VALUE=$(grep -E '^APP_URL=' .env | tail -1 | cut -d= -f2- | tr -d '\r' || true)
 [ -n "$PORT_VALUE" ] || PORT_VALUE=3200
 
-mkdir -p storage/payment-proofs storage/profile-photos storage/cash-proofs
-chmod 700 storage storage/payment-proofs storage/profile-photos storage/cash-proofs 2>/dev/null || true
+mkdir -p storage/payment-proofs storage/profile-photos storage/cash-proofs storage/ticket-attachments storage/server-duty-proofs
+chmod 700 storage storage/payment-proofs storage/profile-photos storage/cash-proofs storage/ticket-attachments storage/server-duty-proofs 2>/dev/null || true
 
 echo "Validasi Docker Compose..."
 docker compose config >/dev/null
 
-echo "Build dan start INKAMNET Control Center v1.6.0..."
+echo "Build dan start INKAMNET Control Center v1.8.0..."
 docker compose up -d --build
 
 echo "Menunggu container sehat..."

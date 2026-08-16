@@ -41,3 +41,11 @@ temp/
 
 # Docker runtime
 docker-data/
+
+# Ticket photo attachments
+storage/ticket-attachments/*
+!storage/ticket-attachments/.gitkeep
+
+# Server duty proof photos
+storage/server-duty-proofs/*
+!storage/server-duty-proofs/.gitkeep

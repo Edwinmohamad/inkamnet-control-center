@@ -123,10 +123,10 @@
   }
 
 
-  // Keep invoice action menus perfectly aligned and outside table overflow clipping.
-  document.querySelectorAll('.invoice-action-dropdown').forEach(drop => {
+  // Keep table action menus aligned and outside overflow clipping.
+  document.querySelectorAll('.invoice-action-dropdown,.portal-action-dropdown').forEach(drop => {
     const toggle=drop.querySelector('[data-bs-toggle="dropdown"]');
-    const menu=drop.querySelector('.invoice-action-menu');
+    const menu=drop.querySelector('.invoice-action-menu,.portal-action-menu');
     if(!toggle||!menu)return;
     const home=menu.parentNode;
     const placeMenu=()=>{

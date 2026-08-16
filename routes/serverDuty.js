@@ -1,8 +1,11 @@
 const express = require('express');
+const path = require('path');
 const db = require('../config/db');
 const { audit } = require('../services/auditService');
 const { requireAdmin } = require('../middleware/auth');
+const { savePhoto, removePhoto, sendPhoto } = require('../services/photoAttachmentService');
 const router = express.Router();
+const DUTY_PROOF_DIR=path.join(__dirname,'..','storage','server-duty-proofs');
 
 function isoDate(d) {
   const x = new Date(d);
@@ -22,10 +25,11 @@ router.get('/', async (req, res) => {
   const end = new Date(start); end.setDate(end.getDate()+6);
   const weekEnd = isoDate(end);
   const [duties] = await db.execute(`
-    SELECT d.*, DATE_FORMAT(d.duty_date,'%Y-%m-%d') duty_date_key, u.name account_name, s.code site_code
+    SELECT d.*, DATE_FORMAT(d.duty_date,'%Y-%m-%d') duty_date_key, u.name account_name, s.code site_code, pu.name proof_uploader_name
     FROM server_duty_schedules d
     LEFT JOIN users u ON u.id=d.user_id
     LEFT JOIN sites s ON s.id=d.site_id
+    LEFT JOIN users pu ON pu.id=d.proof_uploaded_by
     WHERE d.duty_date BETWEEN ? AND ?
     ORDER BY d.duty_date, COALESCE(d.start_time,'23:59:59'), d.staff_name
   `,[weekStart,weekEnd]);
@@ -35,7 +39,6 @@ router.get('/', async (req, res) => {
   const prev=new Date(start);prev.setDate(prev.getDate()-7); const next=new Date(start);next.setDate(next.getDate()+7);
   res.render('server-duty/index',{title:'Jadwal Piket Server',duties,staff,sites,days,weekStart,weekEnd,prevWeek:isoDate(prev),nextWeek:isoDate(next)});
 });
-
 
 router.post('/generate-rotation', requireAdmin, async(req,res)=>{
   const rotation=['Padilah','Jon','Bopung','Edwin','Agung'];
@@ -86,8 +89,27 @@ router.post('/:id/status', async(req,res)=>{
   res.redirect(`/server-duty?week=${encodeURIComponent(req.body.week||'')}`);
 });
 
+router.post('/:id/proof', async(req,res)=>{
+  if(!req.file){req.session.flash={type:'danger',message:'Pilih foto bukti piket terlebih dahulu.'};return res.redirect(`/server-duty?week=${encodeURIComponent(req.body.week||'')}`);}
+  const [rows]=await db.execute(`SELECT id,proof_path FROM server_duty_schedules WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length)return res.status(404).send('Jadwal piket tidak ditemukan.');
+  let saved=null;
+  try{
+    saved=await savePhoto(req.file,DUTY_PROOF_DIR,'duty');
+    await db.execute(`UPDATE server_duty_schedules SET proof_path=?,proof_original_name=?,proof_mime=?,proof_size=?,proof_uploaded_by=?,proof_uploaded_at=NOW(),status='present' WHERE id=?`,[saved.filename,saved.originalName,saved.mime,saved.size,req.session.user.id,req.params.id]);
+    if(rows[0].proof_path)await removePhoto(DUTY_PROOF_DIR,rows[0].proof_path);
+    await audit({userId:req.session.user.id,action:'proof',entityType:'server_duty',entityId:req.params.id,description:'Upload bukti piket dan tandai hadir',ip:req.ip});
+    req.session.flash={type:'success',message:'Bukti piket berhasil diupload dan status ditandai Hadir.'};
+    res.redirect(`/server-duty?week=${encodeURIComponent(req.body.week||'')}`);
+  }catch(e){if(saved)await removePhoto(DUTY_PROOF_DIR,saved.filename);throw e;}
+});
+
+router.get('/:id/proof',async(req,res)=>{const [rows]=await db.execute(`SELECT proof_path,proof_original_name,proof_mime FROM server_duty_schedules WHERE id=? LIMIT 1`,[req.params.id]);return sendPhoto(res,DUTY_PROOF_DIR,rows[0]);});
+
 router.post('/:id/delete', requireAdmin, async(req,res)=>{
+  const [rows]=await db.execute(`SELECT proof_path FROM server_duty_schedules WHERE id=? LIMIT 1`,[req.params.id]);
   await db.execute(`DELETE FROM server_duty_schedules WHERE id=?`,[req.params.id]);
+  if(rows[0]?.proof_path)await removePhoto(DUTY_PROOF_DIR,rows[0].proof_path);
   await audit({userId:req.session.user.id,action:'delete',entityType:'server_duty',entityId:req.params.id,description:'Hapus jadwal piket',ip:req.ip});
   req.session.flash={type:'success',message:'Jadwal piket dihapus.'};
   res.redirect(`/server-duty?week=${encodeURIComponent(req.body.week||'')}`);

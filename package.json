@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.7.0 - precision billing UI, professional PDF reports, site packages, WhatsApp contacts, focused dashboard, and hardened invoice refresh",
+  "description": "INKAMNET Control Center v1.8.0 - field photo evidence, customer action center, fully manual cash categories, and corporate PDF invoice styling",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

@@ -7,3 +7,7 @@ storage/profile-photos/*
 backups/
 *.sql
 *.sql.gz
+
+storage/cash-proofs/*
+storage/ticket-attachments/*
+storage/server-duty-proofs/*

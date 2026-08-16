@@ -23,7 +23,7 @@
   <div class="data-card">
     <div class="data-card-head"><div><h3>Database Pelanggan</h3><small><%= customers.length %> data ditemukan</small></div><div class="toolbar-right"><span class="status-badge purple"><%= customers.length %> rows</span></div></div>
     <div class="table-responsive">
-      <table class="app-table"><thead><tr><th>Customer</th><th>Sales</th><th>Site / Cluster</th><th>Paket</th><th>PPPoE</th><th>Billing</th><th>Network</th><th>Kontak</th><th></th></tr></thead><tbody>
+      <table class="app-table"><thead><tr><th>Customer</th><th>Sales</th><th>Site / Cluster</th><th>Paket</th><th>PPPoE</th><th>Billing</th><th>Network</th><th>Kontak</th><th class="text-center">Tindakan</th></tr></thead><tbody>
       <% customers.forEach(c=>{ const wa=String(c.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); %><tr>
         <td><a class="cell-main text-decoration-none" href="/customers/<%= c.id %>"><%= c.name %></a><span class="cell-sub"><%= c.customer_code %></span></td>
         <td><span class="cell-main"><%= c.sales_name || 'Direct' %></span><span class="cell-sub"><%= c.sales_code || 'Tanpa sales' %></span></td>
@@ -33,7 +33,16 @@
         <td><span class="status-badge <%= c.billing_status==='paid'?'green':c.billing_status==='overdue'?'red':'orange' %>"><%= c.billing_status %></span></td>
         <td><span class="status-badge <%= c.network_status==='online'?'green':c.network_status==='isolated'?'red':'gray' %>"><%= c.network_status %></span></td>
         <td><% if(wa.length>=9){ %><a class="customer-wa-link" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer" title="Buka WhatsApp <%= c.name %>"><i class="bi bi-whatsapp"></i><span><%= c.phone %></span></a><% }else{ %><span class="cell-main">-</span><% } %><span class="cell-sub"><%= c.address || '-' %></span></td>
-        <td><a class="action-menu text-decoration-none" href="/customers/<%= c.id %>/edit"><i class="bi bi-pencil-square"></i></a></td>
+        <td class="text-center"><div class="dropdown portal-action-dropdown"><button class="action-menu" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-three-dots"></i></button><div class="dropdown-menu app-dropdown dropdown-menu-end p-2 portal-action-menu">
+          <a class="dropdown-item rounded-3" href="/customers/<%= c.id %>"><i class="bi bi-person-vcard me-2"></i>Detail Pelanggan</a>
+          <a class="dropdown-item rounded-3" href="/customers/<%= c.id %>/edit"><i class="bi bi-pencil-square me-2"></i>Edit</a>
+          <div class="dropdown-divider"></div>
+          <% if(c.open_invoice_id){ %><a class="dropdown-item rounded-3 text-success" href="/payments?invoice_id=<%= c.open_invoice_id %>"><i class="bi bi-wallet2 me-2"></i>Pembayaran</a><% }else{ %><a class="dropdown-item rounded-3" href="/invoices?customer=<%= c.id %>"><i class="bi bi-receipt me-2"></i>Cek Tagihan</a><% } %>
+          <a class="dropdown-item rounded-3" href="/payments?q=<%= encodeURIComponent(c.customer_code) %>"><i class="bi bi-clock-history me-2"></i>Cek Pembayaran</a>
+          <a class="dropdown-item rounded-3" href="/invoices?customer=<%= c.id %>"><i class="bi bi-receipt-cutoff me-2"></i>Rincian Tagihan</a>
+          <% if(wa.length>=9){ %><a class="dropdown-item rounded-3" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp me-2"></i>WhatsApp</a><% } %>
+          <% if(user.role==='admin' && c.customer_status!=='terminated'){ %><div class="dropdown-divider"></div><form method="post" action="/customers/<%= c.id %>/delete" onsubmit="return confirm('Arsipkan pelanggan ini? Riwayat tagihan dan pembayaran tetap disimpan.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="dropdown-item rounded-3 text-danger" type="submit"><i class="bi bi-archive me-2"></i>Hapus / Arsipkan</button></form><% } %>
+        </div></div></td>
       </tr><% }) %>
       <% if(!customers.length){ %><tr><td colspan="9"><div class="empty-state"><i class="bi bi-people"></i><strong>Data pelanggan tidak ditemukan</strong><small>Coba ubah filter atau tambahkan pelanggan baru.</small></div></td></tr><% } %>
       </tbody></table>

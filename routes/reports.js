@@ -23,7 +23,7 @@ async function baseOptions(){
   const [sites]=await db.query(`SELECT code,name FROM sites WHERE is_active=1 ORDER BY code`);
   const [packages]=await db.query(`SELECT p.id,p.name,p.site_id,s.code site_code FROM packages p LEFT JOIN sites s ON s.id=p.site_id WHERE p.is_active=1 ORDER BY COALESCE(s.code,'ZZZ'),p.price,p.name`);
   const [customers]=await db.query(`SELECT c.id,c.customer_code,c.name,s.code site_code,cl.name cluster_name FROM customers c JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE c.customer_status!='terminated' ORDER BY s.code,cl.name,c.name`);
-  const [categories]=await db.query(`SELECT id,name,type FROM cash_categories WHERE is_active=1 ORDER BY type,name`);
+  const [categories]=await db.query(`SELECT id,name,type FROM cash_categories WHERE is_active=1 AND COALESCE(is_system,0)=0 ORDER BY type,name`);
   return{sites,packages,customers,categories};
 }
 

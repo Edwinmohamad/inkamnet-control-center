@@ -27,6 +27,7 @@ router.post('/charges/:id/toggle',async(req,res)=>{await db.execute(`UPDATE addi
 router.get('/cash/categories',async(req,res)=>{
   const [categories]=await db.query(`SELECT cc.*,s.code site_code,COUNT(ct.id) usage_count
     FROM cash_categories cc LEFT JOIN sites s ON s.id=cc.site_id LEFT JOIN cash_transactions ct ON ct.category_id=cc.id
+    WHERE COALESCE(cc.is_system,0)=0
     GROUP BY cc.id,s.code ORDER BY cc.type,cc.name`);
   const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
   res.render('finance/cash-categories',{title:'Kategori Kas',categories,sites});
@@ -37,16 +38,16 @@ router.post('/cash/categories',async(req,res)=>{
   let code=normalizeCategoryCode(b.code||name,type==='income'?'INC':'EXP');
   const [dup]=await db.execute(`SELECT id FROM cash_categories WHERE code=? LIMIT 1`,[code]);
   if(dup.length)code=`${code.slice(0,7)}${String(Date.now()).slice(-3)}`;
-  await db.execute(`INSERT INTO cash_categories(code,name,type,site_id,description,is_active) VALUES(?,?,?,?,?,1)`,[code,name,type,b.site_id||null,b.description||null]);
+  await db.execute(`INSERT INTO cash_categories(code,name,type,site_id,description,is_active,is_system) VALUES(?,?,?,?,?,1,0)`,[code,name,type,b.site_id||null,b.description||null]);
   req.session.flash={type:'success',message:`Kategori kas ${name} ditambahkan dengan kode ${code}.`};
   res.redirect('/cash/categories');
 });
 router.post('/cash/categories/:id/delete',requireAdmin,async(req,res)=>{
-  const [rows]=await db.execute(`SELECT id,name FROM cash_categories WHERE id=? LIMIT 1`,[req.params.id]);
+  const [rows]=await db.execute(`SELECT id,name,COALESCE(is_system,0) is_system FROM cash_categories WHERE id=? LIMIT 1`,[req.params.id]);
   if(!rows.length){req.session.flash={type:'warning',message:'Kategori kas tidak ditemukan.'};return res.redirect('/cash/categories');}
   const category=rows[0];
-  if(['Pendapatan Billing','Setoran Cash Pelanggan'].includes(category.name)){
-    req.session.flash={type:'warning',message:`Kategori ${category.name} dipakai otomatis oleh sistem pembayaran dan tidak dapat dihapus.`};
+  if(Number(category.is_system)===1){
+    req.session.flash={type:'warning',message:'Kategori internal sistem tidak dapat dihapus dari menu manual.'};
     return res.redirect('/cash/categories');
   }
   const [[usage]]=await db.execute(`SELECT COUNT(*) total FROM cash_transactions WHERE category_id=?`,[category.id]);
@@ -63,7 +64,7 @@ router.get('/cash',async(req,res)=>{
   const now=new Date();const month=intInRange(req.query.month,1,12,now.getMonth()+1);const year=intInRange(req.query.year,2020,2100,now.getFullYear());const site=String(req.query.site||'').trim();const q=String(req.query.q||'').trim();
   let sql=`SELECT ct.*,cc.code category_code,cc.name category_name,cc.type category_type,s.code site_code,pu.name proof_uploader_name FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id LEFT JOIN sites s ON s.id=ct.site_id LEFT JOIN users pu ON pu.id=ct.proof_uploaded_by WHERE MONTH(ct.transaction_date)=? AND YEAR(ct.transaction_date)=?`;
   const params=[month,year];if(site){sql+=` AND s.code=?`;params.push(site);}if(q){sql+=` AND (ct.transaction_code LIKE ? OR ct.name LIKE ? OR ct.notes LIKE ? OR cc.name LIKE ? OR cc.code LIKE ?)`;const like=`%${q}%`;params.push(like,like,like,like,like);}sql+=` ORDER BY ct.transaction_date DESC,ct.id DESC`;
-  const [transactions]=await db.execute(sql,params);const [categories]=await db.query(`SELECT * FROM cash_categories WHERE is_active=1 ORDER BY type,name`);const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
+  const [transactions]=await db.execute(sql,params);const [categories]=await db.query(`SELECT * FROM cash_categories WHERE is_active=1 AND COALESCE(is_system,0)=0 ORDER BY type,name`);const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
   const summarySql=`SELECT COALESCE(SUM(CASE WHEN cc.type='income' THEN ct.amount ELSE 0 END),0) income,COALESCE(SUM(CASE WHEN cc.type='expense' THEN ct.amount ELSE 0 END),0) expense FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id LEFT JOIN sites s ON s.id=ct.site_id WHERE MONTH(ct.transaction_date)=? AND YEAR(ct.transaction_date)=?${site?` AND s.code=?`:''}`;
   const [[summary]]=await db.execute(summarySql,[month,year,...(site?[site]:[])]);summary.balance=Number(summary.income)-Number(summary.expense);
   const [[collection]]=await db.execute(`SELECT COALESCE(SUM(CASE WHEN p.method='cash' AND p.status='confirmed' AND p.settlement_status='held_by_staff' THEN p.amount ELSE 0 END),0) cash_held,COUNT(CASE WHEN p.method='cash' AND p.status='confirmed' AND p.settlement_status='held_by_staff' THEN 1 END) held_count FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id LEFT JOIN sites s ON s.id=c.site_id WHERE MONTH(p.paid_at)=? AND YEAR(p.paid_at)=?${site?` AND s.code=?`:''}`,[month,year,...(site?[site]:[])]);

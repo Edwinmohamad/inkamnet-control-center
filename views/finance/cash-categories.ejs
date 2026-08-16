@@ -3,7 +3,7 @@
     <div>
       <div class="module-kicker">CASH FLOW CONFIG</div>
       <h1>Kategori Kas</h1>
-      <p>Kategori dibuat manual. Tentukan sendiri nama, jenis, site, dan kode prefix transaksi.</p>
+      <p>Semua kategori kas operasional dibuat manual. Kategori internal billing tidak ditampilkan di menu ini.</p>
     </div>
     <div class="module-actions"><button class="btn-tech primary" data-bs-toggle="modal" data-bs-target="#categoryModal"><i class="bi bi-plus-lg"></i>Tambah Kategori</button></div>
   </div>
@@ -13,25 +13,25 @@
     <article class="metric-card red"><div class="metric-top"><span class="metric-label">Pengeluaran</span><span class="metric-icon"><i class="bi bi-arrow-up-right-circle-fill"></i></span></div><strong><%= categories.filter(c=>c.type==='expense').length %></strong><small>Kategori pengeluaran manual</small></article>
   </div>
 
+  <div class="cash-category-guide mb-3"><div><i class="bi bi-lightbulb-fill"></i><strong>Contoh kategori yang bisa kamu buat</strong></div><span>Liability / Pengeluaran Pokok Bulanan</span><span>Petty Cash</span><span>Bandwidth / ISP</span><span>Listrik & Utilitas</span><span>Gaji / Honor</span><span>Transportasi</span><span>Maintenance</span><span>Sewa</span><span>Pajak / Administrasi</span><span>Lain-lain</span><small>Contoh ini hanya referensi — sistem tidak membuat kategori otomatis.</small></div>
+
   <div class="data-card">
     <div class="data-card-head"><div><h3>Daftar Kategori Kas</h3><small>Kode kategori menjadi prefix nomor transaksi, contoh OPS-202608-000123.</small></div></div>
     <div class="table-responsive">
       <table class="app-table">
         <thead><tr><th>Kode</th><th>Nama</th><th>Jenis</th><th>Site</th><th>Keterangan</th><th>Dipakai</th><th>Status</th><th class="text-end">Tindakan</th></tr></thead>
         <tbody>
-          <% categories.forEach(c=>{ const systemCategory=['Pendapatan Billing','Setoran Cash Pelanggan'].includes(c.name); %>
+          <% categories.forEach(c=>{ %>
           <tr>
             <td><code class="cash-category-code"><%= c.code||'-' %></code></td>
-            <td><span class="cell-main"><%= c.name %></span><% if(systemCategory){ %><span class="cell-sub">Kategori sistem pembayaran</span><% } %></td>
+            <td><span class="cell-main"><%= c.name %></span><span class="cell-sub">Kategori manual</span></td>
             <td><span class="status-badge <%= c.type==='income'?'green':'red' %>"><%= c.type==='income'?'Pendapatan':'Pengeluaran' %></span></td>
             <td><span class="status-badge purple"><%= c.site_code||'GLOBAL' %></span></td>
             <td><%= c.description||'-' %></td>
             <td><span class="cell-main"><%= Number(c.usage_count||0) %></span><span class="cell-sub">transaksi</span></td>
             <td><span class="status-badge <%= c.is_active?'green':'gray' %>"><%= c.is_active?'aktif':'nonaktif' %></span></td>
             <td class="text-end">
-              <% if(systemCategory){ %>
-                <span class="status-badge purple"><i class="bi bi-lock-fill"></i>Sistem</span>
-              <% } else if(user.role==='admin'){ %>
+              <% if(user.role==='admin'){ %>
                 <form method="post" action="/cash/categories/<%= c.id %>/delete" class="d-inline" onsubmit="return confirm('Hapus kategori ini? Kategori yang sudah dipakai transaksi tidak dapat dihapus.')">
                   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                   <button class="btn-tech danger compact" type="submit"><i class="bi bi-trash3"></i>Hapus</button>
@@ -55,7 +55,7 @@
       <div class="modal-body">
         <div class="row g-3">
           <div class="col-4"><label class="form-label">Kode</label><input class="form-control text-uppercase" name="code" maxlength="10" placeholder="OPS"><div class="form-help">Boleh kosong, kode dibuat otomatis dari nama.</div></div>
-          <div class="col-8"><label class="form-label">Nama</label><input class="form-control" name="name" required placeholder="Contoh: BBM Teknisi"></div>
+          <div class="col-8"><label class="form-label">Nama</label><input class="form-control" name="name" required placeholder="Contoh: Liability / Pengeluaran Pokok Bulanan"></div>
           <div class="col-6"><label class="form-label">Jenis</label><select class="form-select" name="type"><option value="expense" selected>Pengeluaran</option><option value="income">Pendapatan</option></select></div>
           <div class="col-6"><label class="form-label">Site</label><select class="form-select" name="site_id"><option value="">Global</option><% sites.forEach(s=>{ %><option value="<%= s.id %>"><%= s.code %> · <%= s.name %></option><% }) %></select></div>
           <div class="col-12"><label class="form-label">Deskripsi</label><textarea class="form-control" name="description" rows="3" placeholder="Keterangan kategori..."></textarea></div>

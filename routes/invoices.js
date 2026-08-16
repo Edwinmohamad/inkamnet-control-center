@@ -2,7 +2,7 @@ const express=require('express');
 const db=require('../config/db');
 const { generateMonthlyInvoices }=require('../services/invoiceService');
 const { requireAdmin }=require('../middleware/auth');
-const { createReportPdf, rupiah, date, COLORS }=require('../services/reportPdf');
+const { createCorporateInvoicePdf }=require('../services/reportPdf');
 const router=express.Router();
 
 const MONTH_NAMES=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
@@ -99,9 +99,9 @@ router.post('/generate',async(req,res)=>{
 router.get('/:id/pdf',async(req,res)=>{
   const [rows]=await db.execute(`SELECT i.*,c.customer_code,c.name customer_name,c.phone,c.address,p.name package_name,s.code site_code,s.name site_name,cl.name cluster_name FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN packages p ON p.id=c.package_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE i.id=? LIMIT 1`,[req.params.id]);
   if(!rows.length)return res.status(404).send('Tagihan tidak ditemukan.');const x=rows[0];
-  const [bankRows]=await db.query(`SELECT bank_name,account_name,account_number FROM banks WHERE is_active=1 ORDER BY id LIMIT 1`);const bank=bankRows[0];
-  const bankText=bank?` | Pembayaran ${bank.bank_name} ${bank.account_number} a.n. ${bank.account_name}`:'';
-  createReportPdf(res,{title:`FAKTUR TAGIHAN ${x.invoice_number}`,subtitle:`${x.customer_code} - ${x.customer_name} | ${x.site_code} · Cluster ${x.cluster_name||'-'} | Periode ${MONTH_NAMES[x.period_month-1]} ${x.period_year}${bankText}`,filename:`faktur-${x.invoice_number.replace(/[^A-Za-z0-9_-]/g,'-')}.pdf`,summaryItems:[{label:'TOTAL TAGIHAN',value:rupiah(x.total),color:COLORS.purple},{label:'TERBAYAR',value:rupiah(x.paid_amount),color:COLORS.green},{label:'SISA',value:rupiah(x.outstanding),color:Number(x.outstanding)>0?COLORS.red:COLORS.green},{label:'JATUH TEMPO',value:date(x.due_date)}],columns:[{label:'DESKRIPSI',width:3,value:()=>`${x.package_name} - Layanan Internet INKAMNET`},{label:'JUMLAH',width:.7,value:()=>1},{label:'NOMINAL',width:1.4,value:()=>rupiah(x.subtotal)},{label:'STATUS',width:1.1,value:()=>String(x.status).toUpperCase()}],rows:[x],disposition:req.query.download==='1'?'attachment':'inline'});
+  const [bankRows]=await db.query(`SELECT bank_name,account_name,account_number FROM banks WHERE is_active=1 ORDER BY id LIMIT 1`);
+  const [payments]=await db.execute(`SELECT amount,method,reference,status,paid_at FROM payments WHERE invoice_id=? ORDER BY paid_at`,[req.params.id]);
+  createCorporateInvoicePdf(res,{invoice:x,bank:bankRows[0]||null,payments,filename:`invoice-${x.invoice_number.replace(/[^A-Za-z0-9_-]/g,'-')}.pdf`,disposition:req.query.download==='1'?'attachment':'inline'});
 });
 
 router.get('/:id/print',async(req,res)=>{

@@ -155,4 +155,40 @@ async function ensureV17Schema() {
   await db.query(`ALTER TABLE packages ADD INDEX IF NOT EXISTS idx_packages_site(site_id)`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema };
+async function ensureV18Schema() {
+  // Lampiran foto ticket dan progress harian.
+  await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS attachment_path VARCHAR(255) NULL AFTER description`);
+  await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS attachment_original_name VARCHAR(255) NULL AFTER attachment_path`);
+  await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS attachment_mime VARCHAR(100) NULL AFTER attachment_original_name`);
+  await db.query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS attachment_size BIGINT UNSIGNED NULL AFTER attachment_mime`);
+  await db.query(`ALTER TABLE ticket_updates ADD COLUMN IF NOT EXISTS attachment_path VARCHAR(255) NULL AFTER note`);
+  await db.query(`ALTER TABLE ticket_updates ADD COLUMN IF NOT EXISTS attachment_original_name VARCHAR(255) NULL AFTER attachment_path`);
+  await db.query(`ALTER TABLE ticket_updates ADD COLUMN IF NOT EXISTS attachment_mime VARCHAR(100) NULL AFTER attachment_original_name`);
+  await db.query(`ALTER TABLE ticket_updates ADD COLUMN IF NOT EXISTS attachment_size BIGINT UNSIGNED NULL AFTER attachment_mime`);
+
+  // Bukti piket server.
+  await db.query(`ALTER TABLE server_duty_schedules ADD COLUMN IF NOT EXISTS proof_path VARCHAR(255) NULL AFTER notes`);
+  await db.query(`ALTER TABLE server_duty_schedules ADD COLUMN IF NOT EXISTS proof_original_name VARCHAR(255) NULL AFTER proof_path`);
+  await db.query(`ALTER TABLE server_duty_schedules ADD COLUMN IF NOT EXISTS proof_mime VARCHAR(100) NULL AFTER proof_original_name`);
+  await db.query(`ALTER TABLE server_duty_schedules ADD COLUMN IF NOT EXISTS proof_size BIGINT UNSIGNED NULL AFTER proof_mime`);
+  await db.query(`ALTER TABLE server_duty_schedules ADD COLUMN IF NOT EXISTS proof_uploaded_by BIGINT UNSIGNED NULL AFTER proof_size`);
+  await db.query(`ALTER TABLE server_duty_schedules ADD COLUMN IF NOT EXISTS proof_uploaded_at DATETIME NULL AFTER proof_uploaded_by`);
+
+  // Kategori kas yang terlihat di UI sepenuhnya manual. Kategori internal billing tetap ada hanya untuk integritas jurnal otomatis dan disembunyikan dari UI.
+  await db.query(`ALTER TABLE cash_categories ADD COLUMN IF NOT EXISTS is_system TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active`);
+  await db.query(`UPDATE cash_categories SET is_system=1 WHERE name IN ('Pendapatan Billing','Setoran Cash Pelanggan')`);
+  await db.query(`INSERT INTO cash_categories(code,name,type,description,is_active,is_system)
+    SELECT 'BILL','Pendapatan Billing','income','Kategori internal jurnal pembayaran pelanggan',1,1
+    WHERE NOT EXISTS (SELECT 1 FROM cash_categories WHERE name='Pendapatan Billing')`);
+  await db.query(`INSERT INTO cash_categories(code,name,type,description,is_active,is_system)
+    SELECT 'SETOR','Setoran Cash Pelanggan','income','Kategori internal setoran cash pelanggan',1,1
+    WHERE NOT EXISTS (SELECT 1 FROM cash_categories WHERE name='Setoran Cash Pelanggan')`);
+  const [[legacyUsage]] = await db.query(`SELECT COUNT(*) total FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id WHERE cc.name='Pengeluaran Operasional'`);
+  if (Number(legacyUsage.total||0) === 0) {
+    await db.query(`DELETE FROM cash_categories WHERE name='Pengeluaran Operasional'`);
+  } else {
+    await db.query(`UPDATE cash_categories SET is_system=1,is_active=0 WHERE name='Pengeluaran Operasional'`);
+  }
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema };

@@ -78,6 +78,8 @@ jobs:
             --exclude='storage/payment-proofs/' \
             --exclude='storage/profile-photos/' \
             --exclude='storage/cash-proofs/' \
+            --exclude='storage/ticket-attachments/' \
+            --exclude='storage/server-duty-proofs/' \
             "$GITHUB_WORKSPACE/" "$PROD_DIR/"
           test -f "$PROD_DIR/.env"
 

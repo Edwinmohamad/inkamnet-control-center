@@ -16,10 +16,12 @@ const customerExcelUpload = require('./middleware/customerExcelUpload');
 const clusterExcelUpload = require('./middleware/clusterExcelUpload');
 const profilePhotoUpload = require('./middleware/profilePhotoUpload');
 const cashProofUpload = require('./middleware/cashProofUpload');
+const ticketPhotoUpload = require('./middleware/ticketPhotoUpload');
+const dutyProofUpload = require('./middleware/dutyProofUpload');
 const { requireAuth } = require('./middleware/auth');
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema } = require('./services/schemaService');
 
 const app = express();
 app.set('view engine', 'ejs');
@@ -120,6 +122,31 @@ app.use('/cash', (req, res, next) => {
   }
   next();
 });
+app.use('/tickets', (req, res, next) => {
+  if (['POST','PUT','PATCH'].includes(req.method) && req.is('multipart/form-data')) {
+    return ticketPhotoUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'Lampiran ticket maksimal 6 MB.' : err.message };
+        const match=req.path.match(/^\/(\d+)/);
+        return res.redirect(match?`/tickets/${match[1]}`:'/tickets');
+      }
+      next();
+    });
+  }
+  next();
+});
+app.use('/server-duty', (req, res, next) => {
+  if (['POST','PUT','PATCH'].includes(req.method) && req.is('multipart/form-data')) {
+    return dutyProofUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'Bukti piket maksimal 6 MB.' : err.message };
+        return res.redirect('/server-duty');
+      }
+      next();
+    });
+  }
+  next();
+});
 app.use(csrf);
 
 // Lightweight health endpoint used by Docker/operations monitoring.
@@ -174,6 +201,7 @@ async function bootstrap() {
   await ensureV15Schema();
   await ensureV16Schema();
   await ensureV17Schema();
+  await ensureV18Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
