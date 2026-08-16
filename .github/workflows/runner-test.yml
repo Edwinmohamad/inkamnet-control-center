@@ -1,0 +1,26 @@
+name: Runner Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+      - name: Check CasaOS Runner
+        shell: bash
+        run: |
+          echo "=== RUNNER CONNECTED ==="
+          hostname
+          whoami
+
+          echo "=== DOCKER ==="
+          docker --version
+          docker compose version
+
+          echo "=== INKAMNET FINAL ==="
+          curl -fsS http://127.0.0.1:3300/healthz
+          echo
+
+          echo "=== TEST SUCCESS ==="
