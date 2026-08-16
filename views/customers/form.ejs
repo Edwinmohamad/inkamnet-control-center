@@ -11,7 +11,7 @@
 <div class="col-12"><label class="form-label">Alamat</label><textarea class="form-control" rows="3" name="address"><%= customer?.address || '' %></textarea></div>
 </div><hr style="border-color:var(--line);margin:24px 0"><div class="module-kicker">SERVICE & NETWORK</div><div class="row g-3">
 <div class="col-md-4"><label class="form-label">Site *</label><select class="form-select" name="site_id" id="customerSite" required><% sites.forEach(s=>{ %><option value="<%= s.id %>" data-code="<%= s.code %>" <%= String(customer?.site_id||'')===String(s.id)?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
-<div class="col-md-4"><label class="form-label">Paket *</label><select class="form-select" name="package_id" required><% packages.forEach(p=>{ %><option value="<%= p.id %>" <%= String(customer?.package_id||'')===String(p.id)?'selected':'' %>><%= p.name %> · <%= formatRupiah(p.price) %></option><% }) %></select></div>
+<div class="col-md-4"><label class="form-label">Paket *</label><select class="form-select" name="package_id" id="customerPackage" required><% packages.forEach(p=>{ %><option value="<%= p.id %>" data-site-id="<%= p.site_id||'' %>" <%= String(customer?.package_id||'')===String(p.id)?'selected':'' %>><%= p.site_code?`${p.site_code} · `:'GLOBAL · ' %><%= p.name %> · <%= formatRupiah(p.price) %></option><% }) %></select><div class="form-help">Hanya paket yang sesuai dengan Site pelanggan yang dapat dipilih.</div></div>
 <div class="col-md-4"><label class="form-label">Cluster / ODP</label><select class="form-select" name="cluster_id"><option value="">Belum dipilih</option><% clusters.forEach(cl=>{ %><option value="<%= cl.id %>" <%= String(customer?.cluster_id||'')===String(cl.id)?'selected':'' %>><%= cl.site_code %> · <%= cl.name %></option><% }) %></select></div>
 <div class="col-md-4"><label class="form-label">Sales</label><select class="form-select" name="sales_id"><option value="">Tanpa Sales / Direct</option><% sales.forEach(s=>{ %><option value="<%= s.id %>" <%= String(customer?.sales_id||'')===String(s.id)?'selected':'' %>><%= s.employee_code %> · <%= s.name %></option><% }) %></select><div class="form-help">Sumber data dari Pengaturan → Karyawan dengan posisi kategori Sales.</div></div>
 <div class="col-md-6"><label class="form-label">Router MikroTik</label><select class="form-select" name="router_id"><option value="">Belum dipilih</option><% routers.forEach(r=>{ %><option value="<%= r.id %>" <%= String(customer?.router_id||'')===String(r.id)?'selected':'' %>><%= r.site_code %> · <%= r.name %></option><% }) %></select></div>
@@ -27,11 +27,12 @@
 </section>
 <script>
 (()=>{
-  const site=document.getElementById('customerSite'), due=document.getElementById('customerDueDay'), code=document.getElementById('customerCode'), btn=document.getElementById('generateCustomerCode'), mode=document.getElementById('emailMode'), email=document.getElementById('customerEmail');
+  const site=document.getElementById('customerSite'), pkg=document.getElementById('customerPackage'), due=document.getElementById('customerDueDay'), code=document.getElementById('customerCode'), btn=document.getElementById('generateCustomerCode'), mode=document.getElementById('emailMode'), email=document.getElementById('customerEmail');
   const autoEmail=()=>{if(mode.value!=='auto')return;const local=(code.value||'pelanggan').toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,48)||'pelanggan';email.value=local+'@customer.inkamnet.local';email.readOnly=true;};
+  const syncPackages=()=>{if(!pkg||!site)return;const siteId=String(site.value||'');let selectedVisible=false,firstVisible=null;[...pkg.options].forEach(opt=>{const target=String(opt.dataset.siteId||'');const visible=!target||target===siteId;opt.hidden=!visible;opt.disabled=!visible;if(visible&&!firstVisible)firstVisible=opt;if(visible&&opt.selected)selectedVisible=true;});if(!selectedVisible&&firstVisible){pkg.value=firstVisible.value;}};
   const syncMode=()=>{email.readOnly=mode.value==='auto';if(mode.value==='auto')autoEmail();else email.focus();};
-  mode.addEventListener('change',syncMode);code.addEventListener('input',autoEmail);
+  mode.addEventListener('change',syncMode);code.addEventListener('input',autoEmail);site.addEventListener('change',syncPackages);
   btn.addEventListener('click',async()=>{btn.disabled=true;const old=btn.innerHTML;btn.innerHTML='<span class="spinner-border spinner-border-sm"></span> Generate';try{const q=new URLSearchParams({site_id:site.value});if(due.value)q.set('due_day',due.value);const r=await fetch('/customers/generate-code?'+q.toString());const j=await r.json();if(!r.ok)throw new Error(j.error||'Generate ID gagal');code.value=j.code;if(!due.value)due.value=j.due_day;autoEmail();code.classList.add('is-valid');setTimeout(()=>code.classList.remove('is-valid'),1200);}catch(e){alert(e.message);}finally{btn.disabled=false;btn.innerHTML=old;}});
-  syncMode();
+  syncPackages();syncMode();
 })();
 </script>

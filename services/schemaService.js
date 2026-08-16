@@ -149,4 +149,10 @@ async function ensureV16Schema() {
   await db.query(`ALTER TABLE cash_transactions ADD UNIQUE INDEX IF NOT EXISTS uniq_cash_transaction_code(transaction_code)`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema };
+async function ensureV17Schema() {
+  // Paket internet dapat dibedakan per site. Data lama tetap valid sebagai paket global (site_id NULL).
+  await db.query(`ALTER TABLE packages ADD COLUMN IF NOT EXISTS site_id BIGINT UNSIGNED NULL AFTER id`);
+  await db.query(`ALTER TABLE packages ADD INDEX IF NOT EXISTS idx_packages_site(site_id)`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema };

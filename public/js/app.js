@@ -122,4 +122,36 @@
     document.querySelectorAll('[title]').forEach(el=>{const v=el.getAttribute('title');if(UI_EN.has(v))el.setAttribute('title',UI_EN.get(v));});
   }
 
+
+  // Keep invoice action menus perfectly aligned and outside table overflow clipping.
+  document.querySelectorAll('.invoice-action-dropdown').forEach(drop => {
+    const toggle=drop.querySelector('[data-bs-toggle="dropdown"]');
+    const menu=drop.querySelector('.invoice-action-menu');
+    if(!toggle||!menu)return;
+    const home=menu.parentNode;
+    const placeMenu=()=>{
+      if(!menu.classList.contains('show'))return;
+      if(menu.parentNode!==document.body)document.body.appendChild(menu);
+      menu.classList.add('invoice-menu-portal');
+      const r=toggle.getBoundingClientRect();
+      const w=Math.max(218,menu.getBoundingClientRect().width||218);
+      const h=menu.getBoundingClientRect().height||260;
+      const left=Math.min(window.innerWidth-w-8,Math.max(8,r.right-w));
+      const belowSpace=window.innerHeight-r.bottom;
+      const top=belowSpace>=h+12?Math.min(window.innerHeight-h-8,r.bottom+8):Math.max(8,r.top-h-8);
+      Object.assign(menu.style,{left:`${left}px`,top:`${top}px`,right:'auto',bottom:'auto',transform:'none'});
+    };
+    drop.addEventListener('shown.bs.dropdown',()=>{placeMenu();window.addEventListener('resize',placeMenu,{passive:true});window.addEventListener('scroll',placeMenu,true)});
+    drop.addEventListener('hide.bs.dropdown',()=>{window.removeEventListener('resize',placeMenu);window.removeEventListener('scroll',placeMenu,true)});
+    drop.addEventListener('hidden.bs.dropdown',()=>{menu.classList.remove('invoice-menu-portal');menu.removeAttribute('style');if(menu.parentNode!==home)home.appendChild(menu)});
+  });
+
+  // Progressive reveal for dense admin screens without adding a heavy animation library.
+  if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{
+      if(entry.isIntersecting){entry.target.classList.add('ink-viewport-visible');observer.unobserve(entry.target)}
+    }),{threshold:.08,rootMargin:'0px 0px -24px 0px'});
+    document.querySelectorAll('.command-panel,.command-kpi,.command-pulse,.plan-card,.data-card,.filter-card').forEach(el=>observer.observe(el));
+  }
+
 })();

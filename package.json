@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.6.1 - invoice hotfix, manual cash categories, and calendar picker UX",
+  "description": "INKAMNET Control Center v1.7.0 - precision billing UI, professional PDF reports, site packages, WhatsApp contacts, focused dashboard, and hardened invoice refresh",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

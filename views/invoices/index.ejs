@@ -7,7 +7,7 @@
     </div>
     <div class="module-actions">
       <a class="btn-tech" href="/reports?view=invoice"><i class="bi bi-file-earmark-text"></i>Faktur</a><a class="btn-tech" href="/payments"><i class="bi bi-wallet2"></i>Pembayaran</a>
-      <button class="btn-tech primary" type="button" data-bs-toggle="modal" data-bs-target="#generateInvoiceModal"><i class="bi bi-stars"></i>Buat Tagihan</button>
+      <button class="btn-tech primary" type="button" data-bs-toggle="modal" data-bs-target="#generateInvoiceModal"><i class="bi bi-arrow-repeat"></i>Refresh / Generate Tagihan</button>
     </div>
   </div>
 
@@ -47,7 +47,7 @@
     </div>
     <div class="table-responsive">
       <table class="app-table invoice-table">
-        <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Sisa</th><th>Site</th><th>Jatuh Tempo</th><th class="text-end">Tindakan</th></tr></thead>
+        <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Sisa</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
           <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62'); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; %>
           <tr>
@@ -60,9 +60,9 @@
             <td class="money <%= Number(i.outstanding)>0?'text-danger-soft':'text-success-soft' %>"><%= formatRupiah(i.outstanding) %></td>
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
             <td><%= formatDate(i.due_date) %></td>
-            <td class="text-end">
+            <td class="invoice-action-cell">
               <div class="dropdown invoice-action-dropdown">
-                <button class="action-menu dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" aria-expanded="false"><i class="bi bi-list"></i></button>
+                <button class="action-menu dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-boundary="viewport" data-bs-display="dynamic" data-bs-offset="0,8" aria-label="Buka tindakan tagihan <%= i.invoice_number %>" aria-expanded="false"><i class="bi bi-three-dots-vertical"></i></button>
                 <div class="dropdown-menu dropdown-menu-end app-dropdown invoice-action-menu p-2">
                   <% if(Number(i.outstanding)>0){ %><button type="button" class="dropdown-item rounded-3" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-wallet2"></i>Pembayaran</button><% } %>
                   <a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i>Lihat Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i>Unduh Faktur PDF</a><a class="dropdown-item rounded-3" href="/invoices/<%= i.id %>/print" target="_blank"><i class="bi bi-printer"></i>Versi Cetak</a>
@@ -74,7 +74,7 @@
             </td>
           </tr>
           <% }) %>
-          <% if(!invoices.length){ %><tr><td colspan="10"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Buat Tagihan.</small></div></td></tr><% } %>
+          <% if(!invoices.length){ %><tr><td colspan="10"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Refresh / Generate Tagihan.</small></div></td></tr><% } %>
         </tbody>
       </table>
     </div>
@@ -85,17 +85,17 @@
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <form method="post" action="/invoices/generate" class="modal-content">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <div class="modal-header"><div><div class="module-kicker">PEMBUAT TAGIHAN</div><h5 class="modal-title">Buat Tagihan Pelanggan</h5></div><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><div><div class="module-kicker">PEMBUAT TAGIHAN</div><h5 class="modal-title">Refresh / Buat Tagihan</h5></div><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <div class="generate-note"><i class="bi bi-shield-check"></i><div><strong>Aman dari tagihan ganda</strong><small>Pelanggan yang sudah memiliki tagihan pada periode yang sama otomatis dilewati.</small></div></div>
+        <div class="generate-note"><i class="bi bi-shield-check"></i><div><strong>Idempotent - aman dijalankan ulang</strong><small>Pilih bulan/tahun lalu jalankan kapan saja untuk menangkap pelanggan baru. Tagihan existing, termasuk yang sudah LUNAS, tidak akan dibuat ulang atau di-reset.</small></div></div>
         <div class="row g-3 mt-1">
           <div class="col-md-4"><label class="form-label">Bulan</label><select class="form-select" name="month" required><% monthNames.forEach((m,i)=>{ %><option value="<%= i+1 %>" <%= filters.month===i+1?'selected':'' %>><%= m %></option><% }) %></select></div>
           <div class="col-md-4"><label class="form-label">Tahun</label><input class="form-control" type="number" name="year" min="2020" max="2100" value="<%= filters.year %>" required></div>
           <div class="col-md-4"><label class="form-label">Site (opsional)</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %></option><% }) %></select></div>
-          <div class="col-12"><label class="form-label">Pelanggan</label><select class="form-select" name="customer_id"><option value="">Semua pelanggan aktif</option><% customers.forEach(c=>{ %><option value="<%= c.id %>"><%= c.site_code %> · Cluster <%= c.cluster_name||'-' %> · <%= c.customer_code %> · <%= c.name %></option><% }) %></select><div class="form-help">Pilih satu pelanggan bila hanya ingin membuat tagihan untuk pelanggan tersebut.</div></div>
+          <div class="col-12"><label class="form-label">Pelanggan</label><select class="form-select" name="customer_id"><option value="">Semua pelanggan aktif</option><% customers.forEach(c=>{ %><option value="<%= c.id %>"><%= c.site_code %> · Cluster <%= c.cluster_name||'-' %> · <%= c.customer_code %> · <%= c.name %></option><% }) %></select><div class="form-help">Kosongkan untuk refresh seluruh pelanggan aktif. Pelanggan dengan tanggal aktivasi setelah periode yang dipilih tidak akan ditagih.</div></div>
         </div>
       </div>
-      <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-stars"></i>Buat Sekarang</button></div>
+      <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-arrow-repeat"></i>Refresh / Generate</button></div>
     </form>
   </div>
 </div>

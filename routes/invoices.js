@@ -91,7 +91,7 @@ router.post('/generate',async(req,res)=>{
   const siteCode=String(req.body.site||'').trim()||null;
   const result=await generateMonthlyInvoices(periodDate(year,month),true,req.session.user.id,{customerId,siteCode});
   const target=customerId?'pelanggan terpilih':siteCode?`site ${siteCode}`:'seluruh pelanggan aktif';
-  req.session.flash={type:'success',message:`Generate ${MONTH_NAMES[month-1]} ${year} untuk ${target}: ${result.created} tagihan dibuat, ${result.skipped} dilewati.`};
+  req.session.flash={type:'success',message:`Refresh tagihan ${MONTH_NAMES[month-1]} ${year} untuk ${target}: ${result.created} tagihan baru dibuat. ${result.existingPaid||0} tagihan lunas dipertahankan, ${result.existingOpen||0} tagihan existing dipertahankan, total ${result.skipped} dilewati. Tidak ada tagihan existing yang di-reset.`};
   res.redirect(`/invoices?month=${month}&year=${year}${siteCode?`&site=${encodeURIComponent(siteCode)}`:''}${customerId?`&customer=${customerId}`:''}`);
 });
 

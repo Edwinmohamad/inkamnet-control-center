@@ -22,7 +22,8 @@ function calcProrata(price, activationDate, year, monthIndex) {
 async function nextInvoiceNumber(conn, siteCode, year, monthIndex) {
   const ym = `${year}/${String(monthIndex + 1).padStart(2, '0')}`;
   const [rows] = await conn.execute(
-    `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_number,'/',-1) AS UNSIGNED)),0) AS max_seq FROM invoices WHERE period_year=? AND period_month=?`,
+    `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(invoice_number,'/',-1) AS UNSIGNED)),0) AS max_seq
+     FROM invoices WHERE period_year=? AND period_month=?`,
     [year, monthIndex + 1]
   );
   const seq = String(Number(rows[0].max_seq) + 1).padStart(6, '0');
@@ -30,24 +31,36 @@ async function nextInvoiceNumber(conn, siteCode, year, monthIndex) {
 }
 
 /**
- * Generate invoice bulanan.
- * options.customerId membatasi generate ke satu pelanggan.
- * options.siteCode membatasi generate ke satu site.
+ * Generate/refresh tagihan bulanan secara idempotent.
+ * - Satu customer hanya boleh memiliki satu invoice per periode (DB unique key + application check).
+ * - Invoice yang sudah ada, termasuk PAID, tidak pernah di-reset / dibuat ulang.
+ * - force=true hanya melewati batas hari generate, bukan melewati proteksi duplicate.
+ * - Pelanggan yang aktivasi setelah akhir periode tidak akan dibuatkan tagihan periode lama.
  */
 async function generateMonthlyInvoices(referenceDate = new Date(), force = false, actorUserId = null, options = {}) {
   const year = referenceDate.getFullYear();
   const monthIndex = referenceDate.getMonth();
+  const month = monthIndex + 1;
   const todayOnly = new Date(year, monthIndex, referenceDate.getDate());
+  const periodEnd = `${year}-${String(month).padStart(2,'0')}-${String(lastDayOfMonth(year,monthIndex)).padStart(2,'0')}`;
+  const lockName = `inkamnet:invoice:${year}-${String(month).padStart(2,'0')}`;
   const conn = await db.getConnection();
   let created = 0;
   let skipped = 0;
   let eligible = 0;
+  let existingPaid = 0;
+  let existingOpen = 0;
+  let skippedSchedule = 0;
+  let lockAcquired = false;
 
   try {
+    const [[lockRow]] = await conn.execute(`SELECT GET_LOCK(?,10) AS locked`,[lockName]);
+    if (Number(lockRow?.locked) !== 1) throw new Error('Generate tagihan sedang dijalankan proses lain. Coba lagi beberapa detik.');
+    lockAcquired = true;
     await conn.beginTransaction();
 
-    const where = [`c.customer_status='active'`];
-    const params = [];
+    const where = [`c.customer_status='active'`, `(c.activation_date IS NULL OR c.activation_date<=?)`];
+    const params = [periodEnd];
     if (options.customerId) {
       where.push('c.id=?');
       params.push(Number(options.customerId));
@@ -73,17 +86,22 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
     eligible = customers.length;
 
     for (const c of customers) {
+      const [exists] = await conn.execute(
+        `SELECT id,status,paid_amount,outstanding FROM invoices WHERE customer_id=? AND period_year=? AND period_month=? LIMIT 1`,
+        [c.id, year, month]
+      );
+      if (exists.length) {
+        skipped++;
+        if (exists[0].status === 'paid' || Number(exists[0].outstanding) <= 0) existingPaid++;
+        else existingOpen++;
+        continue;
+      }
+
       const dueDay = Math.min(Number(c.effective_due_day), lastDayOfMonth(year, monthIndex));
       const dueDate = new Date(year, monthIndex, dueDay);
       const generateFrom = new Date(dueDate);
       generateFrom.setDate(generateFrom.getDate() - Number(c.generate_days || 3));
-      if (!force && todayOnly < generateFrom) { skipped++; continue; }
-
-      const [exists] = await conn.execute(
-        `SELECT id FROM invoices WHERE customer_id=? AND period_year=? AND period_month=? LIMIT 1`,
-        [c.id, year, monthIndex + 1]
-      );
-      if (exists.length) { skipped++; continue; }
+      if (!force && todayOnly < generateFrom) { skipped++; skippedSchedule++; continue; }
 
       let amount = Number(c.package_price);
       let isProrata = 0;
@@ -96,29 +114,36 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
       }
 
       const invoiceNumber = await nextInvoiceNumber(conn, c.site_code, year, monthIndex);
-      await conn.execute(`
-        INSERT INTO invoices
-        (invoice_number, customer_id, period_year, period_month, invoice_date, due_date,
-         subtotal, total, outstanding, status, is_prorata, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)
-      `, [invoiceNumber, c.id, year, monthIndex + 1, toSqlDate(referenceDate), toSqlDate(dueDate), amount, amount, amount, isProrata, actorUserId]);
-      created++;
+      try {
+        await conn.execute(`
+          INSERT INTO invoices
+          (invoice_number, customer_id, period_year, period_month, invoice_date, due_date,
+           subtotal, total, outstanding, status, is_prorata, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)
+        `, [invoiceNumber, c.id, year, month, toSqlDate(referenceDate), toSqlDate(dueDate), amount, amount, amount, isProrata, actorUserId]);
+        created++;
+      } catch (err) {
+        // Proteksi terakhir jika request paralel / cron sempat membuat customer-period yang sama.
+        if (err && err.code === 'ER_DUP_ENTRY') { skipped++; existingOpen++; continue; }
+        throw err;
+      }
     }
 
     await conn.commit();
     await db.execute(
       `INSERT INTO automation_logs (job_name, status, message) VALUES ('generate_monthly_invoices','success',?)`,
-      [`Period ${year}-${String(monthIndex + 1).padStart(2,'0')} · created ${created}, skipped ${skipped}, eligible ${eligible}${options.customerId?` · customer ${options.customerId}`:''}${options.siteCode?` · site ${options.siteCode}`:''}`]
+      [`Period ${year}-${String(month).padStart(2,'0')} · created ${created}, skipped ${skipped}, paid preserved ${existingPaid}, open preserved ${existingOpen}, schedule skipped ${skippedSchedule}, eligible ${eligible}${options.customerId?` · customer ${options.customerId}`:''}${options.siteCode?` · site ${options.siteCode}`:''}`]
     );
-    return { created, skipped, eligible };
+    return { created, skipped, eligible, existingPaid, existingOpen, skippedSchedule };
   } catch (err) {
-    await conn.rollback();
+    try { await conn.rollback(); } catch (_) {}
     await db.execute(
       `INSERT INTO automation_logs (job_name, status, message) VALUES ('generate_monthly_invoices','failed',?)`,
       [String(err.message).slice(0, 1000)]
     ).catch(() => {});
     throw err;
   } finally {
+    if (lockAcquired) await conn.execute(`SELECT RELEASE_LOCK(?)`,[lockName]).catch(()=>{});
     conn.release();
   }
 }

@@ -7,7 +7,7 @@ const router = express.Router();
 
 async function options() {
   const [sites] = await db.query(`SELECT id, code, name FROM sites WHERE is_active=1 ORDER BY code`);
-  const [packages] = await db.query(`SELECT id, name, speed_label, price FROM packages WHERE is_active=1 ORDER BY price`);
+  const [packages] = await db.query(`SELECT p.id,p.name,p.speed_label,p.price,p.site_id,s.code site_code FROM packages p LEFT JOIN sites s ON s.id=p.site_id WHERE p.is_active=1 ORDER BY COALESCE(s.code,'ZZZ'),p.price,p.name`);
   const [routers] = await db.query(`SELECT r.id,r.name,s.code site_code FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.is_active=1 ORDER BY s.code,r.name`);
   const [clusters] = await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const [sales] = await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales' ORDER BY e.name`);
@@ -86,7 +86,9 @@ router.get('/template.xlsx', async(req,res)=>{
   ws.columns=[
     ['customer_code',18],['name',28],['phone',18],['email',28],['address',40],['sales_employee_code',18],['site_code',13],['package_name',24],['pppoe_username',24],['router_name',24],['cluster_name',24],['activation_date',17],['due_day',12],['grace_days',12],['customer_status',18],['prorata_enabled',18],['notes',35]
   ].map(([header,width])=>({header,key:header,width}));
-  const sampleSite=sites[0]?.code||'KRW', samplePackage=packages[0]?.name||'20 Mbps';
+  const sampleSite=sites[0]?.code||'KRW';
+  const sampleSiteObj=sites.find(s=>s.code===sampleSite);
+  const samplePackage=(packages.find(p=>p.site_id===null||Number(p.site_id)===Number(sampleSiteObj?.id))||packages[0])?.name||'20 Mbps';
   ws.addRow({customer_code:`${sampleSite}-15-001`,name:'Contoh Pelanggan',phone:'081234567890',email:'',address:'Alamat pelanggan',sales_employee_code:'',site_code:sampleSite,package_name:samplePackage,pppoe_username:'contoh001',router_name:routers.find(r=>r.site_code===sampleSite)?.name||'',cluster_name:clusters.find(c=>c.site_code===sampleSite)?.name||'',activation_date:new Date().toISOString().slice(0,10),due_day:15,grace_days:2,customer_status:'active',prorata_enabled:'YA',notes:'HAPUS BARIS CONTOH INI sebelum import data asli'});
   styleWorkbook(ws);
   ws.getColumn('activation_date').numFmt='yyyy-mm-dd';
@@ -141,7 +143,7 @@ router.post('/import', requireAdmin, async(req,res)=>{
   const headers={};ws.getRow(1).eachCell((cell,col)=>{headers[String(plainCell(cell)).trim().toLowerCase()]=col;});
   const required=['customer_code','name','site_code','package_name'];const missing=required.filter(h=>!headers[h]);if(missing.length)throw new Error(`Kolom wajib tidak ada: ${missing.join(', ')}`);
   const [sites]=await db.query(`SELECT id,code FROM sites WHERE is_active=1`);const siteMap=new Map(sites.map(x=>[x.code.toUpperCase(),x.id]));
-  const [packages]=await db.query(`SELECT id,name FROM packages WHERE is_active=1`);const packageMap=new Map(packages.map(x=>[x.name.trim().toLowerCase(),x.id]));
+  const [packages]=await db.query(`SELECT id,name,site_id FROM packages WHERE is_active=1`);
   const [routers]=await db.query(`SELECT id,name,site_id FROM routers WHERE is_active=1`);const [clusters]=await db.query(`SELECT id,name,site_id FROM clusters WHERE status!='inactive'`);const [sales]=await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales'`);
   const value=(row,key)=>headers[key]?plainCell(row.getCell(headers[key])):'';
   const data=[],errors=[],seenCodes=new Set();
@@ -149,8 +151,11 @@ router.post('/import', requireAdmin, async(req,res)=>{
     const row=ws.getRow(n);const code=String(value(row,'customer_code')||'').trim();const name=String(value(row,'name')||'').trim();
     if(!code&&!name)continue;
     const siteCode=String(value(row,'site_code')||'').trim().toUpperCase(), packageName=String(value(row,'package_name')||'').trim();
-    const siteId=siteMap.get(siteCode), packageId=packageMap.get(packageName.toLowerCase());
-    if(!code)errors.push(`Baris ${n}: customer_code kosong`);if(code&&seenCodes.has(code.toLowerCase()))errors.push(`Baris ${n}: customer_code '${code}' duplikat di file`);if(code)seenCodes.add(code.toLowerCase());if(!name)errors.push(`Baris ${n}: name kosong`);if(!siteId)errors.push(`Baris ${n}: site_code '${siteCode}' tidak ditemukan`);if(!packageId)errors.push(`Baris ${n}: package_name '${packageName}' tidak ditemukan`);
+    const siteId=siteMap.get(siteCode);
+    const packageKey=packageName.toLowerCase();
+    const packageObj=packages.find(x=>x.name.trim().toLowerCase()===packageKey && Number(x.site_id)===Number(siteId)) || packages.find(x=>x.name.trim().toLowerCase()===packageKey && x.site_id===null);
+    const packageId=packageObj?.id;
+    if(!code)errors.push(`Baris ${n}: customer_code kosong`);if(code&&seenCodes.has(code.toLowerCase()))errors.push(`Baris ${n}: customer_code '${code}' duplikat di file`);if(code)seenCodes.add(code.toLowerCase());if(!name)errors.push(`Baris ${n}: name kosong`);if(!siteId)errors.push(`Baris ${n}: site_code '${siteCode}' tidak ditemukan`);if(!packageId)errors.push(`Baris ${n}: package_name '${packageName}' tidak ditemukan / tidak tersedia untuk site ${siteCode}`);
     const status=String(value(row,'customer_status')||'active').trim().toLowerCase();if(!['active','suspended','terminated'].includes(status))errors.push(`Baris ${n}: customer_status tidak valid`);
     const dueRaw=value(row,'due_day'), graceRaw=value(row,'grace_days');const due=dueRaw===''?null:Number(dueRaw), grace=graceRaw===''?null:Number(graceRaw);
     if(due!==null&&(!Number.isInteger(due)||due<1||due>28))errors.push(`Baris ${n}: due_day harus 1-28`);if(grace!==null&&(!Number.isInteger(grace)||grace<0||grace>30))errors.push(`Baris ${n}: grace_days harus 0-30`);
@@ -207,8 +212,13 @@ router.post('/', async (req, res) => {
   if(!customerCode){req.session.flash={type:'danger',message:'Customer ID wajib diisi / Generate ID terlebih dahulu.'};return res.redirect('/customers/new');}
   const [dup]=await db.execute(`SELECT id FROM customers WHERE customer_code=? LIMIT 1`,[customerCode]);
   if(dup.length){req.session.flash={type:'danger',message:`Customer ID ${customerCode} sudah digunakan.`};return res.redirect('/customers/new');}
+  const siteId=Number(b.site_id||0),packageId=Number(b.package_id||0);
+  const [packageRows]=await db.execute(`SELECT id,site_id FROM packages WHERE id=? AND is_active=1 LIMIT 1`,[packageId]);
+  if(!packageRows.length || (packageRows[0].site_id!==null && Number(packageRows[0].site_id)!==siteId)){
+    req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect('/customers/new');
+  }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
-  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,prorata_enabled,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[customerCode,b.name,b.phone||null,email,b.address||null,b.sales_id||null,b.site_id,b.router_id||null,b.cluster_id||null,b.package_id,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid','offline',b.prorata_enabled?1:0,b.notes||null]);
+  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,prorata_enabled,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[customerCode,b.name,b.phone||null,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid','offline',b.prorata_enabled?1:0,b.notes||null]);
   await audit({userId:req.session.user.id,action:'create',entityType:'customer',entityId:result.insertId,description:`Tambah ${customerCode} - ${b.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan berhasil ditambahkan dengan Customer ID ${customerCode}.`};res.redirect('/customers');
 });
@@ -217,8 +227,13 @@ router.post('/:id',async(req,res)=>{
   const b=req.body; const customerCode=String(b.customer_code||'').trim().toUpperCase();
   const [dup]=await db.execute(`SELECT id FROM customers WHERE customer_code=? AND id<>? LIMIT 1`,[customerCode,req.params.id]);
   if(dup.length){req.session.flash={type:'danger',message:`Customer ID ${customerCode} sudah digunakan pelanggan lain.`};return res.redirect(`/customers/${req.params.id}/edit`);}
+  const siteId=Number(b.site_id||0),packageId=Number(b.package_id||0);
+  const [packageRows]=await db.execute(`SELECT id,site_id FROM packages WHERE id=? AND is_active=1 LIMIT 1`,[packageId]);
+  if(!packageRows.length || (packageRows[0].site_id!==null && Number(packageRows[0].site_id)!==siteId)){
+    req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect(`/customers/${req.params.id}/edit`);
+  }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
-  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,email,b.address||null,b.sales_id||null,b.site_id,b.router_id||null,b.cluster_id||null,b.package_id,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
+  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
   await audit({userId:req.session.user.id,action:'update',entityType:'customer',entityId:req.params.id,description:`Update ${customerCode} - ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Data pelanggan diperbarui.'};res.redirect('/customers');
 });
 router.get('/:id',async(req,res)=>{const [rows]=await db.execute(`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,r.name router_name,cl.name cluster_name,se.name sales_name FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE c.id=?`,[req.params.id]);if(!rows.length)return res.status(404).send('Pelanggan tidak ditemukan');const [invoices]=await db.execute(`SELECT * FROM invoices WHERE customer_id=? ORDER BY period_year DESC,period_month DESC`,[req.params.id]);res.render('customers/detail',{title:rows[0].name,customer:rows[0],invoices});});
