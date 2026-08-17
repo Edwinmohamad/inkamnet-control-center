@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { validateWhatsapp } = require('./whatsappService');
 
 async function ensureV14Schema() {
   await db.query(`
@@ -256,4 +257,29 @@ async function ensureV22Schema() {
     WHERE u.username='masteradminn' AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.user_id=u.id)`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema };
+async function ensureV23Schema() {
+  // Data vendor tersimpan terstruktur agar durasi jasa dapat diaudit dan dianalisis.
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS vendor_name VARCHAR(180) NULL AFTER purchase_shop_name`);
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS vendor_duration DECIMAL(8,2) NULL AFTER vendor_name`);
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS vendor_duration_unit ENUM('hour','day') NULL AFTER vendor_duration`);
+  await db.query(`INSERT INTO cash_categories(code,name,type,description,is_active,is_system)
+    SELECT 'VENDOR','Vendor','expense','Jasa vendor atau tenaga eksternal',1,0
+    WHERE NOT EXISTS (SELECT 1 FROM cash_categories WHERE code='VENDOR' OR LOWER(name)='vendor')`);
+
+  // Nomor WhatsApp dinormalisasi dan divalidasi sistem saat startup; tidak ada status manual.
+  await db.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS whatsapp_normalized VARCHAR(24) NULL AFTER whatsapp_status`);
+  const [customers] = await db.query(`SELECT id,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at FROM customers`);
+  for (let offset = 0; offset < customers.length; offset += 250) {
+    const chunk = customers.slice(offset, offset + 250);
+    for (const customer of chunk) {
+      const result = validateWhatsapp(customer.phone);
+      const nextStatus = result.valid ? 'valid' : 'invalid';
+      if (customer.whatsapp_status === nextStatus && String(customer.whatsapp_normalized || '') === String(result.normalized || '') && customer.whatsapp_verified_at) continue;
+      await db.execute(`UPDATE customers SET whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL WHERE id=?`, [
+        nextStatus, result.normalized, customer.id
+      ]);
+    }
+  }
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema };

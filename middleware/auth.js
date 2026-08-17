@@ -81,6 +81,15 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireMasterAdmin(req, res, next) {
+  if (!req.session.user) return res.redirect('/login');
+  if (!isMasterAdminRole(req.session.user.role)) {
+    req.session.flash = { type: 'danger', message: 'Approval pembayaran hanya dapat dilakukan oleh Master Admin.' };
+    return res.redirect('/payments');
+  }
+  next();
+}
+
 module.exports = {
   PERMISSIONS,
   DEFAULT_PERMISSIONS,
@@ -91,5 +100,6 @@ module.exports = {
   loadPermissions,
   requireAuth,
   requireAdmin,
+  requireMasterAdmin,
   requirePermission
 };

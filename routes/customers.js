@@ -3,7 +3,8 @@ const ExcelJS = require('exceljs');
 const db = require('../config/db');
 const { audit } = require('../services/auditService');
 const { requireAdmin } = require('../middleware/auth');
-const { syncActiveCustomers } = require('../services/nmsService');
+const { syncActiveCustomers, customerSyncSuggestions, syncSecret } = require('../services/nmsService');
+const { validateWhatsapp } = require('../services/whatsappService');
 const router = express.Router();
 
 async function options() {
@@ -16,7 +17,7 @@ async function options() {
 }
 
 function customerFilter(req) {
-  return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', status:req.query.status||'', network:req.query.network||'' };
+  return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', sales:req.query.sales||'', status:req.query.status||'', network:req.query.network||'' };
 }
 function customerSql(filters) {
   let sql=`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,p.speed_label,r.name router_name,cl.name cluster_name,se.name sales_name,se.employee_code sales_code,(SELECT i.id FROM invoices i WHERE i.customer_id=c.id AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY i.period_year DESC,i.period_month DESC,i.id DESC LIMIT 1) open_invoice_id FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE 1=1`;
@@ -24,6 +25,7 @@ function customerSql(filters) {
   if(filters.q){sql+=` AND (c.customer_code LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ? OR c.pppoe_username LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;params.push(...Array(7).fill(`%${filters.q}%`));}
   if(filters.site){sql+=` AND s.code=?`;params.push(filters.site);}
   if(filters.cluster){sql+=` AND c.cluster_id=?`;params.push(Number(filters.cluster));}
+  if(filters.sales){sql+=` AND c.sales_id=?`;params.push(Number(filters.sales));}
   if(filters.status==='inactive'){sql+=` AND c.customer_status<>'active'`;}else if(filters.status){sql+=` AND c.customer_status=?`;params.push(filters.status);}
   if(filters.network==='unlinked'){sql+=` AND (c.pppoe_username IS NULL OR c.router_id IS NULL)`;}else if(filters.network==='problem'){sql+=` AND c.network_status IN ('offline','router_unreachable')`;}else if(['online','offline','isolated','router_unreachable'].includes(filters.network)){sql+=` AND c.network_status=?`;params.push(filters.network);}
   sql+=` ORDER BY c.id DESC`;
@@ -59,14 +61,6 @@ function phoneString(v){
   if(/^8\d{7,14}$/.test(s)) s='0'+s;
   return s;
 }
-function normalizeWhatsapp(value){
-  let digits=String(value||'').replace(/\D/g,'');
-  if(digits.startsWith('0'))digits=`62${digits.slice(1)}`;
-  else if(digits.startsWith('8'))digits=`62${digits}`;
-  return /^628[1-9]\d{7,11}$/.test(digits)?digits:'';
-}
-function whatsappState(value){return normalizeWhatsapp(value)?'unverified':'invalid';}
-
 function normalizeCodePart(value){return String(value||'').trim().toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-+|-+$/g,'');}
 function autoCustomerEmail(customerCode){
   const local=String(customerCode||'pelanggan').toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,48)||'pelanggan';
@@ -106,8 +100,9 @@ router.get('/', async (req, res) => {
   const [customers]=await db.execute(sql,params);
   const [sites]=await db.query(`SELECT code,name FROM sites ORDER BY code`);
   const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
+  const [sales]=await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales' ORDER BY e.name`);
   const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated,SUM(customer_status='active' AND pppoe_username IS NOT NULL AND router_id IS NOT NULL) pppoe_linked,SUM(customer_status='active' AND (pppoe_username IS NULL OR router_id IS NULL)) pppoe_unlinked FROM customers`);
-  res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,stats:stats||{},filters});
+  res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,sales,stats:stats||{},filters});
 });
 
 router.post('/sync-pppoe',requireAdmin,async(req,res)=>{
@@ -119,6 +114,22 @@ router.post('/sync-pppoe',requireAdmin,async(req,res)=>{
     await audit({userId:req.session.user.id,action:'sync',entityType:'pppoe_customers',entityId:null,description:`Sinkron PPPoE ${result.scope}: matched=${result.matched}, online=${result.online}, offline=${result.offline}, isolated=${result.isolated}, unmatched=${result.unmatched}, duplicate=${result.duplicate}`,ip:req.ip});
     const warnings=result.routerFailures+result.unconfigured+result.unmatched+result.duplicate;
     req.session.flash={type:warnings?'warning':'success',message:`Sinkron PPPoE ${result.scope} selesai: ${result.matched}/${result.customers} pelanggan cocok (${result.online} online, ${result.offline} offline, ${result.isolated} isolir). Belum dikonfigurasi ${result.unconfigured}, tidak ditemukan ${result.unmatched}, duplikat ${result.duplicate}, router gagal ${result.routerFailures}.`};
+  }catch(error){req.session.flash={type:'danger',message:`Sinkron PPPoE gagal: ${error.message}`};}
+  res.redirect(destination);
+});
+
+router.get('/:id/pppoe-suggestions',requireAdmin,async(req,res)=>{
+  try{res.set('Cache-Control','no-store').json({ok:true,...await customerSyncSuggestions(req.params.id)});}
+  catch(error){res.status(400).json({ok:false,error:error.message});}
+});
+
+router.post('/:id/sync-pppoe',requireAdmin,async(req,res)=>{
+  const returnTo=String(req.body.return_to||'/customers'),destination=returnTo.startsWith('/')&&!returnTo.startsWith('//')?returnTo:'/customers';
+  if(req.body.confirmed!=='1'){req.session.flash={type:'danger',message:'Konfirmasi sinkronisasi PPPoE belum diberikan.'};return res.redirect(destination);}
+  try{
+    const result=await syncSecret(req.body.router_id,req.body.secret_id,req.params.id);
+    await audit({userId:req.session.user.id,action:'sync',entityType:'customer_pppoe',entityId:req.params.id,description:`Sinkron per pelanggan ${result.customer.customer_code} ke ${result.secret.name} · ${result.router.site_code}/${result.router.name}`,ip:req.ip});
+    req.session.flash={type:'success',message:`PPPoE ${result.secret.name} berhasil disinkronkan ke ${result.customer.name} pada site ${result.router.site_code}.`};
   }catch(error){req.session.flash={type:'danger',message:`Sinkron PPPoE gagal: ${error.message}`};}
   res.redirect(destination);
 });
@@ -327,7 +338,8 @@ router.post('/import', requireAdmin, async(req,res)=>{
       const dueDay=d.due_day||d.site_default_due_day||15;
       const customerCode=await nextImportedCustomerCode(conn,d.site_code,dueDay,sequenceCache);
       const email=d.email||null;
-      await conn.execute(`INSERT INTO customers(customer_code,name,phone,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,prorata_enabled,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unpaid','offline',?,?)`,[customerCode,d.name,d.phone,email,d.address,d.sales_id,d.site_id,d.router_id,d.cluster_id,d.package_id,d.pppoe_username,d.activation_date,dueDay,d.grace_days,d.customer_status,d.prorata_enabled,d.notes]);
+      const wa=validateWhatsapp(d.phone);
+      await conn.execute(`INSERT INTO customers(customer_code,name,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,prorata_enabled,notes) VALUES(?,?,?,?,?,NOW(),?,?,?,?,?,?,?,?,?,?,?,?,'unpaid','offline',?,?)`,[customerCode,d.name,d.phone,wa.valid?'valid':'invalid',wa.normalized,email,d.address,d.sales_id,d.site_id,d.router_id,d.cluster_id,d.package_id,d.pppoe_username,d.activation_date,dueDay,d.grace_days,d.customer_status,d.prorata_enabled,d.notes]);
       inserted++;
     }
     await conn.commit();
@@ -373,7 +385,8 @@ router.post('/', async (req, res) => {
     req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect('/customers/new');
   }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
-  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?)`,[customerCode,b.name,b.phone||null,whatsappState(b.phone),email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid','offline',b.prorata_enabled?1:0,b.notes||null]);
+  const wa=validateWhatsapp(b.phone);
+  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,NOW(),?,?,?,?,?,?,?,?,?,?,?,?,?,'offline',NOW(),?,?)`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid',b.prorata_enabled?1:0,b.notes||null]);
   await audit({userId:req.session.user.id,action:'create',entityType:'customer',entityId:result.insertId,description:`Tambah ${customerCode} - ${b.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan berhasil ditambahkan dengan Customer ID ${customerCode}.`};res.redirect('/customers');
 });
@@ -388,9 +401,8 @@ router.post('/:id',async(req,res)=>{
     req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect(`/customers/${req.params.id}/edit`);
   }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
-  const [[current]]=await db.execute(`SELECT phone,customer_status FROM customers WHERE id=?`,[req.params.id]);
-  const phoneChanged=String(current?.phone||'')!==String(b.phone||'');
-  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=IF(?, ?, whatsapp_status),whatsapp_verified_at=IF(?,NULL,whatsapp_verified_at),whatsapp_verified_by=IF(?,NULL,whatsapp_verified_by),email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,phoneChanged?1:0,whatsappState(b.phone),phoneChanged?1:0,phoneChanged?1:0,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
+  const wa=validateWhatsapp(b.phone);
+  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
   await audit({userId:req.session.user.id,action:'update',entityType:'customer',entityId:req.params.id,description:`Update ${customerCode} - ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Data pelanggan diperbarui.'};res.redirect('/customers');
 });
 router.post('/:id/delete',requireAdmin,async(req,res)=>{
@@ -403,13 +415,12 @@ router.post('/:id/delete',requireAdmin,async(req,res)=>{
   res.redirect('/customers');
 });
 router.post('/:id/whatsapp-status',requireAdmin,async(req,res)=>{
-  const allowed=new Set(['valid','invalid','unverified']);const status=allowed.has(req.body.status)?req.body.status:'unverified';
   const [[customer]]=await db.execute(`SELECT id,name,phone FROM customers WHERE id=?`,[req.params.id]);
   if(!customer){req.session.flash={type:'danger',message:'Pelanggan tidak ditemukan.'};return res.redirect('/customers');}
-  if(status==='valid'&&!normalizeWhatsapp(customer.phone)){req.session.flash={type:'danger',message:'Nomor WhatsApp tidak valid. Perbaiki nomor pelanggan terlebih dahulu.'};return res.redirect('/customers');}
-  await db.execute(`UPDATE customers SET whatsapp_status=?,whatsapp_verified_at=${status==='unverified'?'NULL':'NOW()'},whatsapp_verified_by=? WHERE id=?`,[status,status==='unverified'?null:req.session.user.id,customer.id]);
-  await audit({userId:req.session.user.id,action:'validate_whatsapp',entityType:'customer',entityId:customer.id,description:`WhatsApp ${customer.name}: ${status}`,ip:req.ip});
-  req.session.flash={type:status==='valid'?'success':'warning',message:`Status WhatsApp ${customer.name}: ${status}.`};res.redirect('/customers');
+  const wa=validateWhatsapp(customer.phone),status=wa.valid?'valid':'invalid';
+  await db.execute(`UPDATE customers SET whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL WHERE id=?`,[status,wa.normalized,customer.id]);
+  await audit({userId:req.session.user.id,action:'system_validate_whatsapp',entityType:'customer',entityId:customer.id,description:`Validasi format sistem WhatsApp ${customer.name}: ${status}`,ip:req.ip});
+  req.session.flash={type:wa.valid?'success':'warning',message:`Validasi sistem WhatsApp ${customer.name}: ${wa.reason}.`};res.redirect('/customers');
 });
 router.get('/:id',async(req,res)=>{const [rows]=await db.execute(`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,r.name router_name,cl.name cluster_name,se.name sales_name FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE c.id=?`,[req.params.id]);if(!rows.length)return res.status(404).send('Pelanggan tidak ditemukan');const [invoices]=await db.execute(`SELECT * FROM invoices WHERE customer_id=? ORDER BY period_year DESC,period_month DESC`,[req.params.id]);res.render('customers/detail',{title:rows[0].name,customer:rows[0],invoices});});
 module.exports=router;

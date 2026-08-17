@@ -7,7 +7,7 @@ const { refreshInvoiceStatus }=require('../services/invoiceService');
 const { audit }=require('../services/auditService');
 const { unisolateCustomer }=require('../services/networkService');
 const { assignCashTransactionCode }=require('../services/cashService');
-const { requireAdmin, isAdminRole }=require('../middleware/auth');
+const { requireAdmin, requireMasterAdmin, isAdminRole }=require('../middleware/auth');
 const router=express.Router();
 
 const PROOF_DIR=path.join(__dirname,'..','storage','payment-proofs');
@@ -80,7 +80,7 @@ async function maybeAutoUnisolate(invoiceId){
 async function openInvoiceOptions(site='',cluster=''){
   let sql=`SELECT i.id,i.invoice_number,i.outstanding,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name
     FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
-    WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0`;
+    WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND NOT EXISTS (SELECT 1 FROM payments pp WHERE pp.invoice_id=i.id AND pp.status='pending')`;
   const params=[];if(site){sql+=` AND s.code=?`;params.push(site);}if(cluster){sql+=` AND c.cluster_id=?`;params.push(Number(cluster));}sql+=` ORDER BY s.code,cl.name,c.name,i.due_date`;
   const [rows]=await db.execute(sql,params);
   return rows;
@@ -119,17 +119,17 @@ router.get('/',async(req,res)=>{
   const [[summary]]=await db.execute(`SELECT
     COALESCE(SUM(CASE WHEN p.status='confirmed' THEN p.amount ELSE 0 END),0) confirmed_total,
     COALESCE(SUM(CASE WHEN p.method='cash' AND p.status='confirmed' AND p.settlement_status='held_by_staff' THEN p.amount ELSE 0 END),0) cash_held,
-    COALESCE(SUM(CASE WHEN p.method='transfer' AND p.status='pending' THEN p.amount ELSE 0 END),0) transfer_pending,
+    COALESCE(SUM(CASE WHEN p.status='pending' THEN p.amount ELSE 0 END),0) transfer_pending,
     SUM(p.status='confirmed') confirmed_count
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE ${summaryWhere.join(' AND ')}`,summaryParams);
   const preselectedInvoiceId=Number(req.query.invoice_id||0)||null;
   res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,banks,sites,clusters,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year},summaryMonth,summaryYear});
 });
 
-router.post('/',async(req,res)=>{
+router.post('/',requireAdmin,async(req,res)=>{
   const ids=selectedInvoiceIds(req.body);
   if(!ids.length)throw new Error('Pilih minimal satu faktur yang akan dibayar.');
-  const {method,notes,collector_user_id,payment_status}=req.body;
+  const {method,notes,collector_user_id}=req.body;
   const normalizedMethod=['transfer','cash','qris'].includes(method)?method:'transfer';
   let bankName=null;
   if(normalizedMethod==='transfer'){
@@ -137,13 +137,13 @@ router.post('/',async(req,res)=>{
     if(!bankRows.length)throw new Error('Pilih bank tujuan yang aktif dari Pengaturan → Bank.');
     const bank=bankRows[0];bankName=`${bank.bank_name} · ${bank.account_number} · ${bank.account_name}`;
   }else if(normalizedMethod==='qris')bankName='QRIS';
+  if(!req.file)throw new Error('Bukti pembayaran wajib diupload sebelum dikirim untuk approval Master Admin.');
   const isAdmin=isAdminRole(req.session.user.role);
-  const requestedConfirmed=payment_status==='confirmed';
-  const status=normalizedMethod==='cash'?'confirmed':(normalizedMethod==='transfer'?(isAdmin&&requestedConfirmed&&req.file?'confirmed':'pending'):(payment_status==='pending'?'pending':'confirmed'));
-  const settlement=normalizedMethod==='cash'?'held_by_staff':'not_applicable';
+  const status='pending';
+  const settlement='not_applicable';
   const collector=normalizedMethod==='cash'?(isAdmin?(collector_user_id||req.session.user.id):req.session.user.id):req.session.user.id;
   const conn=await db.getConnection();
-  const created=[];const savedFiles=[];const confirmedInvoices=[];
+  const created=[];const savedFiles=[];
   try{
     await conn.beginTransaction();
     for(const invoiceId of ids){
@@ -151,6 +151,9 @@ router.post('/',async(req,res)=>{
       if(!invoiceRows.length)throw new Error(`Faktur #${invoiceId} tidak ditemukan.`);
       const invoice=invoiceRows[0];
       if(['paid','cancelled','refunded'].includes(invoice.status)||Number(invoice.outstanding)<=0)throw new Error(`Faktur #${invoiceId} sudah tidak memiliki sisa tagihan.`);
+      // The invoice row is already locked above, so every competing payment flow is serialized here.
+      const [[pending]]=await conn.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=? AND status='pending'`,[invoiceId]);
+      if(Number(pending.total)>0)throw new Error(`Faktur #${invoiceId} sudah memiliki pembayaran yang menunggu approval.`);
       const numericAmount=Number(invoice.outstanding);
       if(!Number.isFinite(numericAmount)||numericAmount<=0)throw new Error(`Nominal faktur #${invoiceId} harus lebih dari 0.`);
       if(numericAmount>Number(invoice.outstanding))throw new Error(`Nominal faktur #${invoiceId} melebihi sisa tagihan (${Number(invoice.outstanding).toLocaleString('id-ID')}).`);
@@ -163,18 +166,11 @@ router.post('/',async(req,res)=>{
       await conn.execute(`UPDATE payments SET reference=? WHERE id=?`,[autoReference,r.insertId]);
       created.push({paymentId:r.insertId,invoiceId,amount:numericAmount,reference:autoReference});
       await refreshInvoiceStatus(conn,invoiceId);
-      if(status==='confirmed'&&normalizedMethod!=='cash')await postCashTransaction(conn,{paymentId:r.insertId,invoiceId,amount:numericAmount,reference:autoReference,actorUserId:req.session.user.id});
-      if(status==='confirmed')confirmedInvoices.push(invoiceId);
     }
     await conn.commit();
     await audit({userId:req.session.user.id,action:'create',entityType:'payment_batch',entityId:created[0]?.paymentId||null,description:`Pembayaran ${normalizedMethod} ${created.length} faktur · total Rp${created.reduce((a,x)=>a+x.amount,0)}${req.file?' · bukti terupload':' · tanpa bukti'}`,ip:req.ip});
-    for(const invoiceId of confirmedInvoices)await maybeAutoUnisolate(invoiceId);
     const total=created.reduce((a,x)=>a+x.amount,0);
-    let message=`${created.length} pembayaran berhasil dicatat dengan total Rp${total.toLocaleString('id-ID')}.`;
-    if(normalizedMethod==='cash')message+=' Dana berstatus Cash di Staff sampai disetor.';
-    else if(normalizedMethod==='transfer'&&!req.file)message+=' Bukti transfer belum ada; status tetap menunggu verifikasi.';
-    else if(status==='pending')message+=' Menunggu verifikasi admin.';
-    req.session.flash={type:'success',message};
+    req.session.flash={type:'success',message:`${created.length} pembayaran berbukti berhasil diajukan dengan total Rp${total.toLocaleString('id-ID')}. Menunggu approval Master Admin sebelum tagihan dinyatakan lunas.`};
   }catch(e){await conn.rollback();for(const f of savedFiles)await removeProofFile(f);throw e;}finally{conn.release();}
   res.redirect(localReturn(req.body.return_to,'/payments'));
 });
@@ -190,12 +186,12 @@ router.get('/:id/proof',async(req,res)=>{
 });
 
 router.post('/:id/proof',async(req,res)=>{
-  if(!req.file)throw new Error('Pilih file bukti transfer terlebih dahulu.');
+  if(!req.file)throw new Error('Pilih file bukti pembayaran terlebih dahulu.');
   const [rows]=await db.execute(`SELECT id,method,proof_path,received_by,collector_user_id FROM payments WHERE id=? LIMIT 1`,[req.params.id]);
   const payment=rows[0];if(!payment)throw new Error('Pembayaran tidak ditemukan.');
   const ownsPayment=Number(payment.received_by)===Number(req.session.user.id)||Number(payment.collector_user_id)===Number(req.session.user.id);
   if(!isAdminRole(req.session.user.role)&&!ownsPayment)throw new Error('Anda hanya dapat mengupload bukti untuk pembayaran yang Anda catat.');
-  if(!['transfer','qris','gateway','other'].includes(payment.method))throw new Error('Bukti upload hanya digunakan untuk pembayaran non-cash.');
+  if(!['transfer','cash','qris','gateway','other'].includes(payment.method))throw new Error('Metode pembayaran tidak mendukung bukti.');
   let savedProof=null;
   try{
     savedProof=await saveProofFile(req.file);
@@ -203,30 +199,31 @@ router.post('/:id/proof',async(req,res)=>{
       savedProof.originalName,savedProof.filename,savedProof.originalName,savedProof.mime,savedProof.size,req.session.user.id,payment.id
     ]);
     await removeProofFile(payment.proof_path);
-    await audit({userId:req.session.user.id,action:'upload_proof',entityType:'payment',entityId:payment.id,description:'Upload/ganti bukti pembayaran transfer',ip:req.ip});
-    req.session.flash={type:'success',message:'Bukti transfer berhasil diupload.'};
+    await audit({userId:req.session.user.id,action:'upload_proof',entityType:'payment',entityId:payment.id,description:'Upload/ganti bukti pembayaran',ip:req.ip});
+    req.session.flash={type:'success',message:'Bukti pembayaran berhasil diupload.'};
   }catch(e){if(savedProof)await removeProofFile(savedProof.filename);throw e;}
   res.redirect(localReturn(req.body.return_to,'/payments'));
 });
 
-router.post('/:id/verify',requireAdmin,async(req,res)=>{
+router.post('/:id/verify',requireMasterAdmin,async(req,res)=>{
   const conn=await db.getConnection();
   try{
     await conn.beginTransaction();
     const [rows]=await conn.execute(`SELECT * FROM payments WHERE id=? FOR UPDATE`,[req.params.id]);
     const p=rows[0];if(!p)throw new Error('Pembayaran tidak ditemukan');
     if(p.status!=='confirmed'){
+      if(!p.proof_path)throw new Error('Bukti pembayaran wajib tersedia sebelum approval.');
       const [invoiceRows]=await conn.execute(`SELECT outstanding,status FROM invoices WHERE id=? FOR UPDATE`,[p.invoice_id]);
       if(!invoiceRows.length)throw new Error('Faktur pembayaran tidak ditemukan.');
       if(Number(p.amount)>Number(invoiceRows[0].outstanding))throw new Error('Nominal transfer melebihi sisa tagihan saat ini. Periksa pembayaran lain sebelum verifikasi.');
-      await conn.execute(`UPDATE payments SET status='confirmed',verified_by=?,verified_at=NOW() WHERE id=?`,[req.session.user.id,p.id]);
+      await conn.execute(`UPDATE payments SET status='confirmed',settlement_status=?,verified_by=?,verified_at=NOW() WHERE id=?`,[p.method==='cash'?'held_by_staff':'not_applicable',req.session.user.id,p.id]);
       await refreshInvoiceStatus(conn,p.invoice_id);
       if(p.method!=='cash')await postCashTransaction(conn,{paymentId:p.id,invoiceId:p.invoice_id,amount:p.amount,reference:p.reference,actorUserId:req.session.user.id});
     }
     await conn.commit();
-    await audit({userId:req.session.user.id,action:'verify',entityType:'payment',entityId:p.id,description:`Verifikasi pembayaran ${p.proof_path?'berdasarkan bukti':'manual tanpa bukti transfer'}`,ip:req.ip});
+    await audit({userId:req.session.user.id,action:'approve',entityType:'payment',entityId:p.id,description:`Approval Master Admin berdasarkan bukti pembayaran ${p.reference||p.id}`,ip:req.ip});
     await maybeAutoUnisolate(p.invoice_id);
-    req.session.flash={type:p.proof_path?'success':'warning',message:p.proof_path?'Pembayaran diverifikasi berdasarkan bukti transfer dan faktur diperbarui.':'Pembayaran diverifikasi manual tanpa bukti. Tindakan sudah dicatat di audit log.'};
+    req.session.flash={type:'success',message:'Pembayaran disetujui Master Admin berdasarkan bukti. Tagihan dan jurnal terkait sudah diperbarui.'};
   }catch(e){await conn.rollback();req.session.flash={type:'danger',message:`Verifikasi gagal: ${e.message}`};}finally{conn.release();}
   res.redirect(localReturn(req.body.return_to,'/payments'));
 });

@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.12.0 - safe invoice financial correction, cluster-wide filtering, guided customer Excel import, and advanced NOC dashboard effects",
+  "description": "INKAMNET Control Center v1.13.0 - vendor cash analytics, master payment approval, one-page invoices, safe PPPoE suggestions, and clickable dashboards",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

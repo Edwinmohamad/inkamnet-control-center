@@ -121,7 +121,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.12.0</span>
+        <span class="version-pill">CONTROL CENTER v1.13.0</span>
       </div>
     </aside>
 
@@ -170,7 +170,7 @@
         <% if(can('support')){ %><a href="/server-duty" data-keywords="piket server jadwal shift"><i class="bi bi-shield-check"></i><div><strong>Piket Server</strong><small>Jadwal piket mingguan</small></div><span>→</span></a>
         <a href="/tickets" data-keywords="tiket gangguan teknisi"><i class="bi bi-life-preserver"></i><div><strong>Ticketing</strong><small>Keluhan & pekerjaan teknisi</small></div><span>→</span></a>
         <a href="/team-kpi" data-keywords="kpi tim teknisi staff performance"><i class="bi bi-bar-chart-steps"></i><div><strong>KPI Tim</strong><small>Performa teknisi & staff</small></div><span>→</span></a><% } %>
-        <% if(can('network')){ %><a href="/network/monitor" data-keywords="network noc monitor router"><i class="bi bi-activity"></i><div><strong>Network Monitor</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><% } %>
+        <% if(can('network')){ %><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><% } %>
         <% if(can('warehouse')){ %><a href="/inventory" data-keywords="gudang stock barang"><i class="bi bi-box-seam-fill"></i><div><strong>Stock Gudang</strong><small>Warehouse control</small></div><span>→</span></a><% } %>
         <% if(can('finance')){ %><a href="/cash" data-keywords="kas uang pendapatan pengeluaran"><i class="bi bi-cash-stack"></i><div><strong>Arus Kas</strong><small>Income & expense</small></div><span>→</span></a><% } %>
         <% if(can('reports')){ %><a href="/reports" data-keywords="laporan report site"><i class="bi bi-bar-chart-line-fill"></i><div><strong>Laporan</strong><small>Billing, finance & site</small></div><span>→</span></a><% } %>

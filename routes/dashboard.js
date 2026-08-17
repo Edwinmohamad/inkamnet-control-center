@@ -65,6 +65,7 @@ router.get('/', async (req, res) => {
   const selectedYear = safeInt(req.query.year, now.getFullYear(), 2020, 2100);
   const selectedSiteCode = String(req.query.site || '').trim().toUpperCase();
   const kpiMonth=safeInt(req.query.kpi_month,selectedMonth,1,12),kpiYear=safeInt(req.query.kpi_year,selectedYear,2020,2100);
+  const kpiSiteCode=String(req.query.kpi_site||'').trim().toUpperCase();
   const psbMonth=safeInt(req.query.psb_month,selectedMonth,1,12),psbYear=safeInt(req.query.psb_year,selectedYear,2020,2100),psbSiteCode=String(req.query.psb_site??selectedSiteCode).trim().toUpperCase();
   const offMonth=safeInt(req.query.off_month,selectedMonth,1,12),offYear=safeInt(req.query.off_year,selectedYear,2020,2100),offSiteCode=String(req.query.off_site??selectedSiteCode).trim().toUpperCase();
 
@@ -73,6 +74,7 @@ router.get('/', async (req, res) => {
   const siteId = selectedSite?.id || null;
   const customerScope = siteId ? ` AND c.site_id=?` : '';
   const customerParams = siteId ? [siteId] : [];
+  const kpiSite=kpiSiteCode?siteOptions.find(s=>s.code===kpiSiteCode):null,kpiScope=kpiSite?` AND c.site_id=?`:'',kpiParams=kpiSite?[kpiSite.id]:[];
   const psbSite=psbSiteCode?siteOptions.find(s=>s.code===psbSiteCode):null,psbScope=psbSite?` AND c.site_id=?`:'',psbParams=psbSite?[psbSite.id]:[];
   const offSite=offSiteCode?siteOptions.find(s=>s.code===offSiteCode):null,offScope=offSite?` AND c.site_id=?`:'',offParams=offSite?[offSite.id]:[];
 
@@ -85,8 +87,9 @@ router.get('/', async (req, res) => {
   const customer={total:Number(customerStats.total||0),active:Number(customerStats.active||0),inactive:Number(customerStats.inactive||0),isolated:Number(customerStats.isolated||0)};
 
   const [[revenue]] = await db.execute(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.status='confirmed' AND YEAR(p.paid_at)=? AND MONTH(p.paid_at)=?${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
-  const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected,COALESCE(SUM(i.status='paid'),0) paid_count,COALESCE(SUM(i.status='unpaid'),0) unpaid_count,COALESCE(SUM(i.status='partial'),0) partial_count,COALESCE(SUM(i.status='overdue'),0) overdue_count FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`,[kpiYear,kpiMonth,...customerParams]);
-  const [[unpaid]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.outstanding),0) total FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope}`,[kpiYear,kpiMonth,...customerParams]);
+  const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected,COALESCE(SUM(i.status='paid'),0) paid_count,COALESCE(SUM(i.status='unpaid'),0) unpaid_count,COALESCE(SUM(i.status='partial'),0) partial_count,COALESCE(SUM(i.status='overdue'),0) overdue_count FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${kpiScope}`,[kpiYear,kpiMonth,...kpiParams]);
+  const [[unpaid]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.outstanding),0) total FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${kpiScope}`,[kpiYear,kpiMonth,...kpiParams]);
+  const [[collectionBilling]]=await db.execute(`SELECT COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[newCustomers]] = await db.execute(`SELECT COUNT(*) total FROM customers c WHERE YEAR(COALESCE(c.activation_date,DATE(c.created_at)))=? AND MONTH(COALESCE(c.activation_date,DATE(c.created_at)))=?${psbScope}`,[psbYear,psbMonth,...psbParams]);
   const [psbCustomers]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.activation_date,c.customer_status,s.code site_code,cl.name cluster_name,p.name package_name,p.speed_label FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE YEAR(COALESCE(c.activation_date,DATE(c.created_at)))=? AND MONTH(COALESCE(c.activation_date,DATE(c.created_at)))=?${psbScope} ORDER BY COALESCE(c.activation_date,DATE(c.created_at)) DESC,c.id DESC LIMIT 250`,[psbYear,psbMonth,...psbParams]);
   const [[network]] = await db.execute(`SELECT SUM(c.network_status='online') online,SUM(c.network_status='offline') offline,SUM(c.network_status='isolated') isolated,SUM(c.network_status='router_unreachable') unreachable FROM customers c WHERE c.customer_status='active'${customerScope}`,customerParams);
@@ -95,7 +98,11 @@ router.get('/', async (req, res) => {
   const [[ticketNoc]] = await db.execute(`SELECT COUNT(*) tickets_open FROM tickets t LEFT JOIN customers c ON c.id=t.customer_id WHERE t.status IN ('open','progress','pending')${siteId?' AND c.site_id=?':''}`,customerParams);
   const [[cashHeldNoc]] = await db.execute(`SELECT COALESCE(SUM(p.amount),0) cash_held FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.method='cash' AND p.status='confirmed' AND p.settlement_status='held_by_staff'${customerScope}`,customerParams);
   const [[overdueNoc]] = await db.execute(`SELECT COUNT(DISTINCT i.customer_id) overdue_customers FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.status='overdue' AND i.outstanding>0${customerScope}`,customerParams);
-  const noc={...routerNoc,...ticketNoc,...cashHeldNoc,...overdueNoc};
+  const [[approvalNoc]]=await db.execute(`SELECT COUNT(*) pending_approvals,COALESCE(SUM(p.amount),0) pending_approval_total FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.status='pending'${customerScope}`,customerParams);
+  const [[pppoeNoc]]=await db.execute(`SELECT COUNT(*) pppoe_unlinked FROM customers c WHERE c.customer_status='active' AND (c.pppoe_username IS NULL OR c.router_id IS NULL)${customerScope}`,customerParams);
+  const [[dueTodayNoc]]=await db.execute(`SELECT COUNT(*) due_today FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND i.due_date=CURDATE()${customerScope}`,customerParams);
+  const [[criticalTicketNoc]]=await db.execute(`SELECT COUNT(*) critical_tickets FROM tickets t LEFT JOIN customers c ON c.id=t.customer_id WHERE t.status IN ('open','progress','pending') AND t.priority='critical'${siteId?' AND c.site_id=?':''}`,customerParams);
+  const noc={...routerNoc,...ticketNoc,...cashHeldNoc,...overdueNoc,...approvalNoc,...pppoeNoc,...dueTodayNoc,...criticalTicketNoc};
   const [hardOverdueCustomers]=await db.execute(`SELECT c.id,c.customer_code,c.name,s.code site_code,i.id invoice_id,i.invoice_number,i.period_month,i.period_year,i.outstanding,DATEDIFF(CURDATE(),i.due_date) days_overdue FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND DATEDIFF(CURDATE(),i.due_date)>2${customerScope} ORDER BY days_overdue DESC,i.outstanding DESC LIMIT 20`,customerParams);
   const [inactiveCustomers]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.customer_status,c.status_changed_at,s.code site_code FROM customers c JOIN sites s ON s.id=c.site_id WHERE c.customer_status<>'active' AND YEAR(COALESCE(c.status_changed_at,c.updated_at,c.created_at))=? AND MONTH(COALESCE(c.status_changed_at,c.updated_at,c.created_at))=?${offScope} ORDER BY COALESCE(c.status_changed_at,c.updated_at,c.created_at) DESC LIMIT 100`,[offYear,offMonth,...offParams]);
   const [isolatedCustomers]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.network_status,c.status_changed_at,s.code site_code FROM customers c JOIN sites s ON s.id=c.site_id WHERE c.network_status='isolated' AND YEAR(COALESCE(c.status_changed_at,c.updated_at,c.created_at))=? AND MONTH(COALESCE(c.status_changed_at,c.updated_at,c.created_at))=?${offScope} ORDER BY COALESCE(c.status_changed_at,c.updated_at,c.created_at) DESC LIMIT 100`,[offYear,offMonth,...offParams]);
@@ -130,7 +137,7 @@ router.get('/', async (req, res) => {
   monthlyInvoiceRows.forEach(r=>{monthlyInvoices[Number(r.month_no)-1]=Number(r.total||0)});
   monthlyPaymentRows.forEach(r=>{monthlyPayments[Number(r.month_no)-1]=Number(r.total||0)});
   dailyPsbRows.forEach(r=>{dailyPsb[Number(r.day_no)-1]=Number(r.total||0)});
-  const collectionRate=Number(billed.total)>0?Math.min(100,Math.round((Number(billed.collected)/Number(billed.total))*100)):0;
+  const collectionRate=Number(collectionBilling.total)>0?Math.min(100,Math.round((Number(collectionBilling.collected)/Number(collectionBilling.total))*100)):0;
   const routerRate=Number(noc.routers_total)>0?Math.round(Number(noc.routers_online||0)/Number(noc.routers_total)*100):100;
   const invoiceKpi={total:Number(billed.count||0),paid:Number(billed.paid_count||0),unpaid:Number(billed.unpaid_count||0),partial:Number(billed.partial_count||0),overdue:Number(billed.overdue_count||0)};
   const todayKey=isoDate(now),todayDuty=weekDuty.filter(row=>row.duty_date_key===todayKey);
@@ -139,7 +146,7 @@ router.get('/', async (req, res) => {
   res.render('dashboard/index',{
     title:'Dashboard',customer,revenue,billed,unpaid,newCustomers,psbCustomers,network,noc,recent,siteOptions,siteCustomerRows,weekDuty,todayDuty,week,invoiceKpi,hardOverdueCustomers,inactiveCustomers,isolatedCustomers,
     selectedSiteCode:selectedSite?.code||'',selectedSiteName:selectedSite?.name||'Semua Site',collectionRate,routerRate,
-    selectedMonth,selectedYear,years,kpiMonth,kpiYear,psbMonth,psbYear,psbSiteCode:psbSite?.code||'',offMonth,offYear,offSiteCode:offSite?.code||'',
+    selectedMonth,selectedYear,years,kpiMonth,kpiYear,kpiSiteCode:kpiSite?.code||'',psbMonth,psbYear,psbSiteCode:psbSite?.code||'',offMonth,offYear,offSiteCode:offSite?.code||'',
     monthly:{labels:monthLabels,invoices:monthlyInvoices,payments:monthlyPayments,psbLabels,psb:dailyPsb}
   });
 });
