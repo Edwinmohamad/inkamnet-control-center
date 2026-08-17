@@ -37,7 +37,7 @@
 
   <div class="command-pulse-grid">
     <article class="command-pulse"><div><span>PSB BULAN INI</span><strong><%= Number(newCustomers.total||0) %></strong></div><i class="bi bi-person-plus"></i></article>
-    <article class="command-pulse"><div><span>COLLECTION RATE</span><strong><%= collectionRate %>%</strong></div><i class="bi bi-graph-up-arrow"></i></article>
+    <% if(can('billing')){ %><a class="command-pulse collection-pulse" href="/collection-analysis?site=<%= selectedSiteCode %>&month=<%= selectedMonth %>&year=<%= selectedYear %>"><div><span>COLLECTION RATE</span><strong><%= collectionRate %>%</strong><em>Buka analisa pelanggan →</em></div><i class="bi bi-graph-up-arrow"></i></a><% }else{ %><article class="command-pulse"><div><span>COLLECTION RATE</span><strong><%= collectionRate %>%</strong></div><i class="bi bi-graph-up-arrow"></i></article><% } %>
     <article class="command-pulse <%= Number(noc.tickets_open||0)>0?'warn':'ok' %>"><div><span>TICKET AKTIF</span><strong><%= Number(noc.tickets_open||0) %></strong></div><i class="bi bi-life-preserver"></i></article>
     <article class="command-pulse <%= routerRate<100?'warn':'ok' %>"><div><span>ROUTER HEALTH</span><strong><%= Number(noc.routers_online||0) %>/<%= Number(noc.routers_total||0) %></strong></div><i class="bi bi-router-fill"></i></article>
   </div>
@@ -65,11 +65,6 @@
   </div>
 
   <div class="command-main-grid dashboard-v19-lower">
-    <article class="command-panel command-chart-panel">
-      <div class="command-panel-head"><div><span>TREND BILLING</span><h3>Tagihan vs Pembayaran <%= selectedYear %></h3></div><div class="command-legend"><span><i class="invoice"></i>Tagihan</span><span><i class="payment"></i>Pembayaran</span></div></div>
-      <div class="command-chart"><canvas id="commandBillingChart"></canvas></div>
-    </article>
-
     <aside class="command-side-stack">
       <article class="command-panel duty-week-panel">
         <div class="command-panel-head"><div><span>PIKET MINGGU INI</span><h3><%= formatDate(week.start) %> - <%= formatDate(week.end) %></h3></div><a href="/server-duty?week=<%= week.start %>" class="ink-text-link">Buka Jadwal <i class="bi bi-arrow-right"></i></a></div>
@@ -86,6 +81,10 @@
         </div>
       </article>
     </aside>
+    <article class="command-panel command-chart-panel dashboard-traffic-panel">
+      <div class="command-panel-head"><div><span>TRAFFIC KEUANGAN</span><h3>Tagihan vs Pembayaran <%= selectedYear %></h3></div><div class="command-legend"><span><i class="invoice"></i>Tagihan</span><span><i class="payment"></i>Pembayaran</span></div></div>
+      <div class="command-chart"><canvas id="commandBillingChart"></canvas></div>
+    </article>
   </div>
 
   <div class="command-main-grid dashboard-v19-bottom">

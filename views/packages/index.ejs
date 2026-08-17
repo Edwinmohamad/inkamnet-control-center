@@ -1,15 +1,10 @@
-<section>
+<section class="package-page">
   <div class="module-head">
     <div><div class="module-kicker">SERVICE CATALOG</div><h1>Paket Internet</h1><p>Paket layanan dibedakan per Site / POP agar harga, bandwidth, dan PPP Profile tidak tercampur antar lokasi.</p></div>
     <div class="module-actions"><button class="btn-tech primary" data-bs-toggle="modal" data-bs-target="#packageModal"><i class="bi bi-plus-lg"></i>Tambah Paket</button></div>
   </div>
 
-  <form class="filter-card package-site-filter" method="get" action="/packages">
-    <div class="filter-grid">
-      <div class="filter-group"><label>SITE / POP</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.id %>" <%= String(selectedSite)===String(s.id)?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
-      <div class="filter-group d-flex align-items-end gap-2"><button class="btn-tech primary"><i class="bi bi-funnel"></i>Terapkan</button><a class="btn-tech" href="/packages"><i class="bi bi-arrow-counterclockwise"></i>Reset</a></div>
-    </div>
-  </form>
+  <div class="package-site-switcher"><a class="<%= selectedSite?'':'active' %>" href="/packages"><i class="bi bi-grid-fill"></i><span><strong>Semua Site</strong><small><%= siteStats.reduce((n,s)=>n+Number(s.package_count||0),0) %> paket</small></span></a><% siteStats.forEach(site=>{ %><a class="<%= String(selectedSite)===String(site.id)?'active':'' %>" href="/packages?site=<%= site.id %>"><span class="site-code-pill"><%= site.code %></span><span><strong><%= site.name %></strong><small><%= site.active_count %>/<%= site.package_count %> paket aktif</small></span></a><% }) %></div>
 
   <div class="metric-grid">
     <article class="metric-card"><div class="metric-top"><span class="metric-label">Total Paket</span><span class="metric-icon"><i class="bi bi-speedometer2"></i></span></div><strong><%= packages.length %></strong><small>Hasil filter saat ini</small></article>
@@ -18,10 +13,10 @@
     <article class="metric-card"><div class="metric-top"><span class="metric-label">Subscriber</span><span class="metric-icon"><i class="bi bi-people-fill"></i></span></div><strong><%= packages.reduce((a,p)=>a+Number(p.customer_count||0),0) %></strong><small>Pelanggan aktif</small></article>
   </div>
 
-  <div class="plan-grid">
+  <div class="plan-grid package-catalog-grid">
     <% packages.forEach((p,index)=>{ %>
       <article class="plan-card reveal-item <%= p.is_active?'':'inactive' %>" style="--enter-delay:<%= Math.min(index*35,250) %>ms">
-        <div class="plan-top"><div><span class="plan-index"><%= String(index+1).padStart(2,'0') %></span><h3><%= p.name %></h3></div><span class="status-badge <%= p.is_active?'green':'gray' %>"><%= p.is_active?'AKTIF':'NONAKTIF' %></span></div>
+        <div class="plan-top"><div><span class="plan-index"><%= String(index+1).padStart(2,'0') %></span><div><small>PAKET <%= p.site_code||'GLOBAL' %></small><h3><%= p.name %></h3></div></div><span class="status-badge <%= p.is_active?'green':'gray' %>"><%= p.is_active?'AKTIF':'NONAKTIF' %></span></div>
         <div class="package-site-badge"><i class="bi bi-geo-alt-fill"></i><strong><%= p.site_code||'GLOBAL' %></strong><span><%= p.site_name||'Paket lama / semua site' %></span></div>
         <div class="plan-speed"><i class="bi bi-lightning-charge-fill"></i><strong><%= p.speed_label||'-' %></strong><small>Bandwidth Plan</small></div>
         <div class="plan-price"><strong><%= formatRupiah(p.price) %></strong><span>/ bulan</span></div>

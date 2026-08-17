@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../config/db');
+const { requirePermission } = require('../middleware/auth');
 const router = express.Router();
 
 function safeInt(value, fallback, min, max) {
@@ -17,6 +18,46 @@ function currentWeekRange(){
   const end=new Date(start);end.setDate(end.getDate()+6);
   return {start:isoDate(start),end:isoDate(end)};
 }
+
+router.get('/collection-analysis',requirePermission('billing'),async(req,res)=>{
+  const now=new Date();
+  const selectedMonth=safeInt(req.query.month,now.getMonth()+1,1,12);
+  const selectedYear=safeInt(req.query.year,now.getFullYear(),2020,2100);
+  const windowMonths=safeInt(req.query.window,6,3,12);
+  const selectedSiteCode=String(req.query.site||'').trim().toUpperCase();
+  const [siteOptions]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
+  const selectedSite=selectedSiteCode?siteOptions.find(site=>site.code===selectedSiteCode):null;
+  const siteId=selectedSite?.id||null;
+  const siteSql=siteId?' AND c.site_id=?':'';
+  const siteParams=siteId?[siteId]:[];
+
+  const [[summary]]=await db.execute(`SELECT COUNT(*) invoice_count,COALESCE(SUM(i.total),0) billed,COALESCE(SUM(i.paid_amount),0) collected,COALESCE(SUM(i.outstanding),0) outstanding,SUM(i.status='paid') paid_count,SUM(i.status IN ('unpaid','partial','overdue') AND i.outstanding>0) open_count FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${siteSql}`,[selectedYear,selectedMonth,...siteParams]);
+  const [[aging]]=await db.execute(`SELECT
+    COALESCE(SUM(CASE WHEN i.outstanding>0 AND i.due_date>=CURDATE() THEN i.outstanding ELSE 0 END),0) not_due,
+    COALESCE(SUM(CASE WHEN i.outstanding>0 AND DATEDIFF(CURDATE(),i.due_date) BETWEEN 1 AND 7 THEN i.outstanding ELSE 0 END),0) days_1_7,
+    COALESCE(SUM(CASE WHEN i.outstanding>0 AND DATEDIFF(CURDATE(),i.due_date) BETWEEN 8 AND 30 THEN i.outstanding ELSE 0 END),0) days_8_30,
+    COALESCE(SUM(CASE WHEN i.outstanding>0 AND DATEDIFF(CURDATE(),i.due_date)>30 THEN i.outstanding ELSE 0 END),0) days_31_plus
+    FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status IN ('unpaid','partial','overdue')${siteSql}`,[selectedYear,selectedMonth,...siteParams]);
+
+  const [behaviorRows]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.phone,s.code site_code,cl.name cluster_name,
+    COUNT(i.id) invoice_count,COALESCE(SUM(i.status='paid'),0) paid_count,
+    COALESCE(SUM(i.status IN ('unpaid','partial','overdue') AND i.outstanding>0),0) open_count,
+    COALESCE(SUM(CASE WHEN i.status IN ('unpaid','partial','overdue') THEN i.outstanding ELSE 0 END),0) outstanding,
+    COALESCE(SUM(CASE WHEN i.status='paid' AND DATE(lp.last_paid_at)<=i.due_date THEN 1 ELSE 0 END),0) on_time_count,
+    COALESCE(SUM(CASE WHEN (i.status='paid' AND DATE(lp.last_paid_at)>i.due_date) OR (i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND i.due_date<CURDATE()) THEN 1 ELSE 0 END),0) late_count,
+    ROUND(COALESCE(AVG(CASE WHEN i.status='paid' THEN GREATEST(DATEDIFF(lp.last_paid_at,i.due_date),0) WHEN i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND i.due_date<CURDATE() THEN DATEDIFF(CURDATE(),i.due_date) ELSE 0 END),0),1) avg_delay_days
+    FROM customers c JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
+    LEFT JOIN invoices i ON i.customer_id=c.id AND i.invoice_date>=DATE_SUB(CURDATE(),INTERVAL ${windowMonths} MONTH) AND i.status NOT IN ('cancelled','refunded')
+    LEFT JOIN (SELECT invoice_id,MAX(paid_at) last_paid_at FROM payments WHERE status='confirmed' GROUP BY invoice_id) lp ON lp.invoice_id=i.id
+    WHERE c.customer_status='active'${siteSql}
+    GROUP BY c.id,c.customer_code,c.name,c.phone,s.code,cl.name HAVING COUNT(i.id)>0`,siteParams);
+  const behavior=behaviorRows.map(row=>({...row,onTimeRate:Number(row.paid_count)>0?Math.round(Number(row.on_time_count)/Number(row.paid_count)*100):0}));
+  const reliable=behavior.filter(row=>Number(row.paid_count)>0&&Number(row.on_time_count)>0).sort((a,b)=>b.onTimeRate-a.onTimeRate||Number(a.avg_delay_days)-Number(b.avg_delay_days)||Number(b.invoice_count)-Number(a.invoice_count)).slice(0,10);
+  const frequentLate=behavior.filter(row=>Number(row.late_count)>0).sort((a,b)=>Number(b.late_count)-Number(a.late_count)||Number(b.avg_delay_days)-Number(a.avg_delay_days)).slice(0,10);
+  const [outstandingCustomers]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.phone,s.code site_code,cl.name cluster_name,COUNT(i.id) invoice_count,COALESCE(SUM(i.outstanding),0) outstanding,MIN(i.due_date) oldest_due,DATEDIFF(CURDATE(),MIN(i.due_date)) max_days_late FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE i.period_year=? AND i.period_month=? AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${siteSql} GROUP BY c.id,c.customer_code,c.name,c.phone,s.code,cl.name ORDER BY outstanding DESC,max_days_late DESC LIMIT 50`,[selectedYear,selectedMonth,...siteParams]);
+  const collectionRate=Number(summary.billed)>0?Math.min(100,Math.round(Number(summary.collected)/Number(summary.billed)*100)):0;
+  res.render('dashboard/collection',{title:'Analisa Collection Rate',summary,aging,collectionRate,reliable,frequentLate,outstandingCustomers,siteOptions,selectedSiteCode:selectedSite?.code||'',selectedSiteName:selectedSite?.name||'Semua Site',selectedMonth,selectedYear,windowMonths});
+});
 
 router.get('/', async (req, res) => {
   const now = new Date();
@@ -39,7 +80,7 @@ router.get('/', async (req, res) => {
   const customer={total:Number(customerStats.total||0),active:Number(customerStats.active||0),inactive:Number(customerStats.inactive||0),isolated:Number(customerStats.isolated||0)};
 
   const [[revenue]] = await db.execute(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.status='confirmed' AND YEAR(p.paid_at)=? AND MONTH(p.paid_at)=?${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
-  const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
+  const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[unpaid]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.outstanding),0) total FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[newCustomers]] = await db.execute(`SELECT COUNT(*) total FROM customers c WHERE YEAR(COALESCE(c.activation_date,DATE(c.created_at)))=? AND MONTH(COALESCE(c.activation_date,DATE(c.created_at)))=?${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[network]] = await db.execute(`SELECT SUM(c.network_status='online') online,SUM(c.network_status='offline') offline,SUM(c.network_status='isolated') isolated,SUM(c.network_status='router_unreachable') unreachable FROM customers c WHERE c.customer_status='active'${customerScope}`,customerParams);
@@ -79,7 +120,7 @@ router.get('/', async (req, res) => {
   monthlyInvoiceRows.forEach(r=>{monthlyInvoices[Number(r.month_no)-1]=Number(r.total||0)});
   monthlyPaymentRows.forEach(r=>{monthlyPayments[Number(r.month_no)-1]=Number(r.total||0)});
   monthlyPsbRows.forEach(r=>{monthlyPsb[Number(r.month_no)-1]=Number(r.total||0)});
-  const collectionRate=Number(billed.total)>0?Math.min(100,Math.round((Number(revenue.total)/Number(billed.total))*100)):0;
+  const collectionRate=Number(billed.total)>0?Math.min(100,Math.round((Number(billed.collected)/Number(billed.total))*100)):0;
   const routerRate=Number(noc.routers_total)>0?Math.round(Number(noc.routers_online||0)/Number(noc.routers_total)*100):100;
   const years=Array.from({length:5},(_,i)=>now.getFullYear()-2+i);if(!years.includes(selectedYear))years.push(selectedYear);years.sort((a,b)=>a-b);
 

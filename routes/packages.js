@@ -26,7 +26,8 @@ router.get('/', async(req,res)=>{
     WHERE ${where}
     ORDER BY COALESCE(s.code,'ZZZ'),p.price,p.name`,params);
   const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
-  res.render('packages/index',{title:'Paket Internet',packages,sites,selectedSite:selectedSite||''});
+  const [siteStats]=await db.query(`SELECT s.id,s.code,s.name,COUNT(p.id) package_count,COALESCE(SUM(p.is_active=1),0) active_count FROM sites s LEFT JOIN packages p ON p.site_id=s.id WHERE s.is_active=1 GROUP BY s.id,s.code,s.name ORDER BY s.code`);
+  res.render('packages/index',{title:'Paket Internet',packages,sites,siteStats,selectedSite:selectedSite||''});
 });
 
 router.post('/', async(req,res)=>{
