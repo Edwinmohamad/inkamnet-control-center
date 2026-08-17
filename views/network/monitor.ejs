@@ -25,13 +25,18 @@
 
   <div class="nms-site-grid" id="nmsSiteGrid">
     <% routers.forEach((r,index)=>{ %>
-      <article class="nms-router-card loading" data-router="<%= r.id %>" data-site="<%= r.site_code %>" style="--delay:<%= index*80 %>ms">
-        <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><b class="nms-health">CONNECTING</b></div>
-        <div class="nms-router-core"><div class="nms-radar"><i></i><i></i><span><b>--</b><small>CPU</small></span></div><div class="nms-router-spec"><span><small>RouterOS</small><b>--</b></span><span><small>Uptime</small><b>--</b></span><span><small>Latency</small><b>--</b></span></div></div>
-        <div class="nms-router-counts"><span class="online"><b>0</b><small>Online</small></span><span class="offline"><b>0</b><small>Offline</small></span><span class="isolated"><b>0</b><small>Isolir</small></span><span class="linked"><b>0</b><small>Billing</small></span></div>
-        <div class="nms-traffic-head"><span><i class="bi bi-activity"></i>LIVE TRAFFIC</span><select data-interface-select aria-label="Pilih interface"><option>Memuat…</option></select></div>
-        <div class="nms-traffic-chart"><canvas data-traffic-chart></canvas><div class="nms-traffic-legend"><span class="rx"><i></i>RX <b>0 bps</b></span><span class="tx"><i></i>TX <b>0 bps</b></span></div></div>
-      </article>
+      <div class="nms-router-row" data-router-shell="<%= r.id %>" data-site="<%= r.site_code %>" style="--delay:<%= index*80 %>ms">
+        <article class="nms-router-card loading" data-router="<%= r.id %>">
+          <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><b class="nms-health">CONNECTING</b></div>
+          <div class="nms-router-core"><div class="nms-radar"><i></i><i></i><span><b>--</b><small>CPU</small></span></div><div class="nms-router-spec"><span><small>RouterOS</small><b>--</b></span><span><small>Uptime</small><b>--</b></span><span><small>Latency</small><b>--</b></span></div></div>
+          <div class="nms-router-counts"><span class="online"><b>0</b><small>Online</small></span><span class="offline"><b>0</b><small>Offline</small></span><span class="isolated"><b>0</b><small>Isolir</small></span><span class="linked"><b>0</b><small>Billing</small></span></div>
+        </article>
+        <section class="nms-traffic-panel" data-traffic-panel="<%= r.id %>">
+          <div class="nms-traffic-panel-head"><div><span><i class="bi bi-activity"></i> LIVE INTERFACE TRAFFIC</span><h3><%= r.name %></h3><small>Realtime RX/TX · refresh otomatis 15 detik</small></div><label><span>INTERFACE</span><select data-interface-select data-router="<%= r.id %>" aria-label="Pilih interface"><option>Memuat…</option></select></label></div>
+          <div class="nms-traffic-metrics"><span class="rx"><small>DOWNLOAD / RX</small><b>0 bps</b></span><span class="tx"><small>UPLOAD / TX</small><b>0 bps</b></span><span><small>STATUS LINK</small><b data-interface-state>MENUNGGU</b></span></div>
+          <div class="nms-traffic-chart large"><canvas data-traffic-chart></canvas><div class="nms-traffic-legend"><span class="rx"><i></i>RX <b>0 bps</b></span><span class="tx"><i></i>TX <b>0 bps</b></span></div></div>
+        </section>
+      </div>
     <% }) %>
   </div>
 
@@ -67,4 +72,10 @@
     <label class="nms-toggle wide"><input type="checkbox" name="disabled"><i></i><span><b>Isolir / Disable Secret</b><small>Sesi pelanggan akan ditandai isolir. Putuskan sesi aktif dari detail pelanggan bila diperlukan.</small></span></label>
   </div></div>
   <div class="modal-footer"><span class="nms-form-security"><i class="bi bi-shield-lock-fill"></i>Kredensial diproses server-side</span><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary" type="submit"><i class="bi bi-cloud-arrow-up-fill"></i>Simpan ke MikroTik</button></div></form>
+</div></div></div>
+
+<div class="modal fade" id="nmsSecretActionModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content nms-modal nms-action-modal">
+  <div class="modal-header"><div><span class="module-kicker">KONFIRMASI TINDAKAN PPPoE</span><h3>Putus Koneksi atau Hapus Akun?</h3><small>Pilih tindakan dengan teliti. Username: <b data-action-secret>-</b> · Router: <b data-action-router>-</b></small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body"><div class="nms-action-choice"><button type="button" data-confirm-disconnect><i class="bi bi-plug-fill"></i><span><b>Remove Connection</b><small>Hanya memutus sesi aktif. Akun PPPoE dan link billing tetap aman.</small></span></button><button type="button" class="danger" data-confirm-delete><i class="bi bi-trash3-fill"></i><span><b>Hapus Akun PPPoE</b><small>Menghapus secret permanen, memutus sesi, dan melepas link billing.</small></span></button></div><label class="nms-action-check"><input type="checkbox" data-action-reviewed><span>Saya sudah memeriksa username dan router di atas.</span></label></div>
+  <div class="modal-footer"><button class="btn-tech" type="button" data-bs-dismiss="modal">Batal</button></div>
 </div></div></div>

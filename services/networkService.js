@@ -19,10 +19,10 @@ async function checkCustomer(customerId) {
     const secret=await mt.findSecret(c,c.pppoe_username);
     const active=await mt.findActive(c,c.pppoe_username);
     const status=active ? 'online' : (secret?.disabled==='true' ? 'isolated' : 'offline');
-    await db.execute(`UPDATE customers SET network_status=? WHERE id=?`,[status,customerId]);
+    await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>?,NOW(),status_changed_at),network_status=? WHERE id=?`,[status,status,customerId]);
     return {customer:c,secret,active,status};
   } catch(e) {
-    await db.execute(`UPDATE customers SET network_status='router_unreachable' WHERE id=?`,[customerId]);
+    await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'router_unreachable',NOW(),status_changed_at),network_status='router_unreachable' WHERE id=?`,[customerId]);
     throw e;
   }
 }
@@ -30,7 +30,7 @@ async function checkCustomer(customerId) {
 async function isolateCustomer(customerId, reason='manual') {
   const c=await getCustomerNetwork(customerId);
   await mt.isolatePppoe(c,c.pppoe_username);
-  await db.execute(`UPDATE customers SET network_status='isolated',isolation_reason=? WHERE id=?`,[reason,customerId]);
+  await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'isolated',NOW(),status_changed_at),network_status='isolated',isolation_reason=? WHERE id=?`,[reason,customerId]);
   return true;
 }
 
@@ -38,7 +38,7 @@ async function unisolateCustomer(customerId, onlyBilling=false) {
   const c=await getCustomerNetwork(customerId);
   if (onlyBilling && c.isolation_reason !== 'billing') return {skipped:true,reason:'not_billing_isolation'};
   await mt.unisolatePppoe(c,c.pppoe_username);
-  await db.execute(`UPDATE customers SET network_status='offline',isolation_reason=NULL WHERE id=?`,[customerId]);
+  await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),network_status='offline',isolation_reason=NULL WHERE id=?`,[customerId]);
   return {skipped:false};
 }
 

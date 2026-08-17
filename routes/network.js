@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../config/db');
 const { requireAdmin } = require('../middleware/auth');
 const { checkCustomer, isolateCustomer, unisolateCustomer } = require('../services/networkService');
-const { allSnapshots, saveSecret, syncSecret, removeSecret, customersForRouter } = require('../services/nmsService');
+const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret, customersForRouter } = require('../services/nmsService');
 const { audit } = require('../services/auditService');
 const router = express.Router();
 
@@ -62,6 +62,14 @@ router.post('/secrets/:secretId/delete', requireAdmin, async (req,res) => {
     const result=await removeSecret(req.body.router_id,req.params.secretId);
     await audit({userId:req.session.user.id,action:'delete',entityType:'pppoe_secret',entityId:req.params.secretId,description:`Hapus PPPoE ${result.secret.name} dari ${result.router.name}; unlink=${result.linkedCustomers.length}`,ip:req.ip});
     res.json({ok:true,message:`Secret ${result.secret.name} dihapus${result.disconnected?' dan sesi aktif diputus':''}. ${result.linkedCustomers.length} link billing dilepas.`});
+  } catch(error) { res.status(400).json({ok:false,error:error.message}); }
+});
+
+router.post('/secrets/:secretId/disconnect', requireAdmin, async (req,res) => {
+  try {
+    const result=await disconnectSecret(req.body.router_id,req.params.secretId);
+    await audit({userId:req.session.user.id,action:'disconnect',entityType:'pppoe_session',entityId:req.params.secretId,description:`Putus sesi PPPoE ${result.secret.name} dari ${result.router.name}; secret dipertahankan`,ip:req.ip});
+    res.json({ok:true,message:result.disconnected?`Koneksi ${result.secret.name} diputus. Akun PPPoE tetap tersimpan.`:`${result.secret.name} tidak memiliki sesi aktif. Akun PPPoE tetap tersimpan.`});
   } catch(error) { res.status(400).json({ok:false,error:error.message}); }
 });
 

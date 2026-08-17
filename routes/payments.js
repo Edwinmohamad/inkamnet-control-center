@@ -7,7 +7,7 @@ const { refreshInvoiceStatus }=require('../services/invoiceService');
 const { audit }=require('../services/auditService');
 const { unisolateCustomer }=require('../services/networkService');
 const { assignCashTransactionCode }=require('../services/cashService');
-const { requireAdmin }=require('../middleware/auth');
+const { requireAdmin, isAdminRole }=require('../middleware/auth');
 const router=express.Router();
 
 const PROOF_DIR=path.join(__dirname,'..','storage','payment-proofs');
@@ -137,7 +137,7 @@ router.post('/',async(req,res)=>{
     if(!bankRows.length)throw new Error('Pilih bank tujuan yang aktif dari Pengaturan → Bank.');
     const bank=bankRows[0];bankName=`${bank.bank_name} · ${bank.account_number} · ${bank.account_name}`;
   }else if(normalizedMethod==='qris')bankName='QRIS';
-  const isAdmin=req.session.user.role==='admin';
+  const isAdmin=isAdminRole(req.session.user.role);
   const requestedConfirmed=payment_status==='confirmed';
   const status=normalizedMethod==='cash'?'confirmed':(normalizedMethod==='transfer'?(isAdmin&&requestedConfirmed&&req.file?'confirmed':'pending'):(payment_status==='pending'?'pending':'confirmed'));
   const settlement=normalizedMethod==='cash'?'held_by_staff':'not_applicable';
@@ -194,7 +194,7 @@ router.post('/:id/proof',async(req,res)=>{
   const [rows]=await db.execute(`SELECT id,method,proof_path,received_by,collector_user_id FROM payments WHERE id=? LIMIT 1`,[req.params.id]);
   const payment=rows[0];if(!payment)throw new Error('Pembayaran tidak ditemukan.');
   const ownsPayment=Number(payment.received_by)===Number(req.session.user.id)||Number(payment.collector_user_id)===Number(req.session.user.id);
-  if(req.session.user.role!=='admin'&&!ownsPayment)throw new Error('Anda hanya dapat mengupload bukti untuk pembayaran yang Anda catat.');
+  if(!isAdminRole(req.session.user.role)&&!ownsPayment)throw new Error('Anda hanya dapat mengupload bukti untuk pembayaran yang Anda catat.');
   if(!['transfer','qris','gateway','other'].includes(payment.method))throw new Error('Bukti upload hanya digunakan untuk pembayaran non-cash.');
   let savedProof=null;
   try{
@@ -215,7 +215,6 @@ router.post('/:id/verify',requireAdmin,async(req,res)=>{
     await conn.beginTransaction();
     const [rows]=await conn.execute(`SELECT * FROM payments WHERE id=? FOR UPDATE`,[req.params.id]);
     const p=rows[0];if(!p)throw new Error('Pembayaran tidak ditemukan');
-    if(p.method==='transfer'&&!p.proof_path)throw new Error('Upload bukti transfer sebelum melakukan verifikasi.');
     if(p.status!=='confirmed'){
       const [invoiceRows]=await conn.execute(`SELECT outstanding,status FROM invoices WHERE id=? FOR UPDATE`,[p.invoice_id]);
       if(!invoiceRows.length)throw new Error('Faktur pembayaran tidak ditemukan.');
@@ -225,10 +224,10 @@ router.post('/:id/verify',requireAdmin,async(req,res)=>{
       if(p.method!=='cash')await postCashTransaction(conn,{paymentId:p.id,invoiceId:p.invoice_id,amount:p.amount,reference:p.reference,actorUserId:req.session.user.id});
     }
     await conn.commit();
-    await audit({userId:req.session.user.id,action:'verify',entityType:'payment',entityId:p.id,description:'Verifikasi pembayaran transfer berdasarkan bukti pembayaran',ip:req.ip});
+    await audit({userId:req.session.user.id,action:'verify',entityType:'payment',entityId:p.id,description:`Verifikasi pembayaran ${p.proof_path?'berdasarkan bukti':'manual tanpa bukti transfer'}`,ip:req.ip});
     await maybeAutoUnisolate(p.invoice_id);
-    req.session.flash={type:'success',message:'Pembayaran diverifikasi berdasarkan bukti transfer dan faktur diperbarui.'};
-  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+    req.session.flash={type:p.proof_path?'success':'warning',message:p.proof_path?'Pembayaran diverifikasi berdasarkan bukti transfer dan faktur diperbarui.':'Pembayaran diverifikasi manual tanpa bukti. Tindakan sudah dicatat di audit log.'};
+  }catch(e){await conn.rollback();req.session.flash={type:'danger',message:`Verifikasi gagal: ${e.message}`};}finally{conn.release();}
   res.redirect(localReturn(req.body.return_to,'/payments'));
 });
 

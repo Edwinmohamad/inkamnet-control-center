@@ -225,4 +225,19 @@ async function ensureV20Schema() {
   await db.query(`UPDATE role_permissions SET permission_schema_version=2 WHERE permission_schema_version<2`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema };
+async function ensureV21Schema() {
+  // Role master admin harus dapat disimpan tanpa bergantung pada ENUM lama.
+  await db.query(`ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL DEFAULT 'staff'`);
+  await db.query(`INSERT INTO role_permissions(role_key,role_name,permissions_json,permission_schema_version)
+    VALUES('master_admin','Master Admin',JSON_ARRAY('dashboard','customers','billing','warehouse','support','network','finance','reports','logs','settings'),3)
+    ON DUPLICATE KEY UPDATE role_name='Master Admin',permissions_json=VALUES(permissions_json),permission_schema_version=3`);
+
+  // Status perubahan dipakai untuk riwayat pelanggan isolir/nonaktif. Validasi WA ditempatkan di master pelanggan.
+  await db.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS status_changed_at DATETIME NULL AFTER network_status`);
+  await db.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS whatsapp_status ENUM('unverified','valid','invalid') NOT NULL DEFAULT 'unverified' AFTER phone`);
+  await db.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS whatsapp_verified_at DATETIME NULL AFTER whatsapp_status`);
+  await db.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS whatsapp_verified_by BIGINT UNSIGNED NULL AFTER whatsapp_verified_at`);
+  await db.query(`UPDATE customers SET status_changed_at=COALESCE(status_changed_at,updated_at,created_at) WHERE status_changed_at IS NULL`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema };

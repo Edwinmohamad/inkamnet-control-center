@@ -52,10 +52,10 @@
     </div>
     <div class="table-responsive action-safe-table">
       <table class="app-table invoice-table">
-        <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Sisa</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
+        <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th>Kirim Pengingat</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
-          <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62'); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const canPay=Number(i.outstanding)>0 && !['paid','cancelled','refunded'].includes(i.status); %>
-          <tr>
+          <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); const waValid=/^628[1-9]\d{7,11}$/.test(wa); const hardOverdue=Number(i.days_overdue)>2&&Number(i.outstanding)>0&&!['paid','cancelled','refunded'].includes(i.status); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const canPay=Number(i.outstanding)>0 && !['paid','cancelled','refunded'].includes(i.status); %>
+          <tr class="<%= hardOverdue?'invoice-hard-overdue':'' %>">
             <td><span class="cell-main"><%= index+1 %></span></td>
             <td>
               <div class="invoice-customer-select">
@@ -64,12 +64,12 @@
               </div>
             </td>
             <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
-            <td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span></td>
+            <td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span><% if(hardOverdue){ %><span class="invoice-hard-warning"><i class="bi bi-exclamation-octagon-fill"></i>PERINGATAN KERAS</span><% } %></td>
             <td class="money"><%= formatRupiah(i.total) %><span class="cell-sub"><%= i.package_name %></span></td>
             <td class="money text-success-soft"><%= formatRupiah(i.paid_amount) %></td>
-            <td class="money <%= Number(i.outstanding)>0?'text-danger-soft':'text-success-soft' %>"><%= formatRupiah(i.outstanding) %></td>
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
-            <td><%= formatDate(i.due_date) %></td>
+            <td><%= formatDate(i.due_date) %><% if(hardOverdue){ %><span class="cell-sub text-danger-soft"><%= i.days_overdue %> hari lewat jatuh tempo</span><% } %></td>
+            <td><% if(canPay&&waValid){ %><a class="invoice-reminder-button <%= i.whatsapp_status==='valid'?'validated':'' %>" target="_blank" rel="noopener" href="https://wa.me/<%= wa %>?text=<%= encodeURIComponent(reminder) %>"><i class="bi bi-whatsapp"></i><span>Kirim<small><%= i.whatsapp_status==='valid'?'WA tervalidasi':'WA belum divalidasi' %></small></span></a><% }else if(canPay){ %><span class="invoice-reminder-invalid"><i class="bi bi-exclamation-circle"></i>Nomor WA tidak valid</span><% }else{ %><span class="cell-sub">Tidak diperlukan</span><% } %></td>
             <td class="invoice-action-cell">
               <div class="invoice-inline-actions">
                 <% if(canPay){ %><button type="button" class="invoice-pay-button" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>" title="Input pembayaran penuh atau sebagian"><i class="bi bi-check2-circle"></i><span>Lunasi</span></button><% } %>
