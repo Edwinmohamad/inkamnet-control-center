@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../config/db');
 const { requireAdmin } = require('../middleware/auth');
 const { checkCustomer, isolateCustomer, unisolateCustomer } = require('../services/networkService');
-const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret, customersForRouter } = require('../services/nmsService');
+const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret, customersForRouter, customersForSync } = require('../services/nmsService');
 const { audit } = require('../services/auditService');
 const router = express.Router();
 
@@ -47,6 +47,11 @@ router.post('/secrets/:secretId', requireAdmin, async (req,res) => {
     await audit({userId:req.session.user.id,action:'update',entityType:'pppoe_secret',entityId:req.params.secretId,description:`Ubah PPPoE ${result.payload.name} di ${result.router.name}`,ip:req.ip});
     res.json({ok:true,message:'PPPoE secret berhasil diperbarui.'});
   } catch (error) { res.status(400).json({ok:false,error:error.message}); }
+});
+
+router.get('/api/sync-customers', requireAdmin, async (req,res) => {
+  try { res.set('Cache-Control','no-store').json({ok:true,customers:await customersForSync()}); }
+  catch (error) { res.status(400).json({ok:false,error:error.message}); }
 });
 
 router.post('/secrets/:secretId/sync', requireAdmin, async (req,res) => {

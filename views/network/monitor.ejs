@@ -4,7 +4,7 @@
     <div><div class="module-kicker"><span class="nms-live-dot"></span> NETWORK OPERATIONS CENTER</div><h1>MikroTik NMS <em>// LIVE</em></h1><p>PPPoE, pelanggan billing, health router, dan traffic lintas site dalam satu command center.</p></div>
     <div class="module-actions">
       <button class="btn-tech" id="nmsRefresh"><i class="bi bi-arrow-repeat"></i><span>Sinkronkan</span></button>
-      <% if(user?.role==='admin'){ %><button class="btn-tech primary" id="nmsAddSecret"><i class="bi bi-person-plus-fill"></i><span>Secret Baru</span></button><% } %>
+      <% if(user?.role==='admin'){ %><button class="btn-tech" id="nmsOpenSync"><i class="bi bi-link-45deg"></i><span>Sinkron PPPoE</span></button><button class="btn-tech primary" id="nmsAddSecret"><i class="bi bi-person-plus-fill"></i><span>Secret Baru</span></button><% } %>
     </div>
   </div>
 
@@ -81,3 +81,35 @@
   <div class="modal-body"><div class="nms-action-choice"><button type="button" data-confirm-disconnect><i class="bi bi-plug-fill"></i><span><b>Remove Connection</b><small>Hanya memutus sesi aktif. Akun PPPoE dan link billing tetap aman.</small></span></button><button type="button" class="danger" data-confirm-delete><i class="bi bi-trash3-fill"></i><span><b>Hapus Akun PPPoE</b><small>Menghapus secret permanen, memutus sesi, dan melepas link billing.</small></span></button></div><label class="nms-action-check"><input type="checkbox" data-action-reviewed><span>Saya sudah memeriksa username dan router di atas.</span></label></div>
   <div class="modal-footer"><button class="btn-tech" type="button" data-bs-dismiss="modal">Batal</button></div>
 </div></div></div>
+
+<div class="modal fade" id="nmsPppoeSyncModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><form class="modal-content nms-modal nms-sync-modal" id="nmsPppoeSyncForm">
+  <div class="modal-header"><div><span class="module-kicker">PUSAT SINKRONISASI PPPoE</span><h3>Hubungkan Pelanggan dengan Secret MikroTik</h3><small>Pilih Auto Suggest atau tentukan router dan secret secara manual. Site pelanggan selalu dikunci oleh sistem.</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="nms-sync-mode" role="tablist"><button type="button" class="active" data-pppoe-mode="auto"><i class="bi bi-stars"></i><span><b>Auto Suggest</b><small>Rekomendasi berdasarkan nama, Customer ID, dan username.</small></span></button><button type="button" data-pppoe-mode="manual"><i class="bi bi-sliders2"></i><span><b>Manual Sinkron</b><small>Pilih pelanggan, router site, dan secret sendiri.</small></span></button></div>
+    <div class="nms-sync-layout">
+      <section class="nms-sync-customer-panel">
+        <div class="nms-sync-step"><span>1</span><div><b>Cari Pelanggan</b><small>Pelanggan aktif dari seluruh site.</small></div></div>
+        <label class="nms-sync-search"><i class="bi bi-search"></i><input type="search" id="nmsSyncCustomerSearch" placeholder="Cari nama atau Customer ID…" autocomplete="off"></label>
+        <select name="customer_id" id="nmsSyncCustomer" size="8" required aria-label="Pilih pelanggan"><option value="">Memuat pelanggan…</option></select>
+      </section>
+      <section class="nms-sync-target-panel">
+        <div class="nms-sync-lock" id="nmsSyncLock"><i class="bi bi-shield-lock-fill"></i><span><b>Site belum dipilih</b><small>Pilih pelanggan untuk mengunci site dan router yang tersedia.</small></span><em>-</em></div>
+        <div class="nms-sync-current" id="nmsSyncCurrent" hidden></div>
+        <div data-pppoe-panel="auto">
+          <div class="nms-sync-step"><span>2</span><div><b>Pilih Rekomendasi Otomatis</b><small>Secret yang sudah dipakai pelanggan lain tidak ditampilkan.</small></div></div>
+          <div class="nms-sync-auto-list" id="nmsSyncAutoList"><div class="nms-no-match"><i class="bi bi-person-check"></i>Pilih pelanggan untuk melihat Auto Suggest.</div></div>
+        </div>
+        <div data-pppoe-panel="manual" hidden>
+          <div class="nms-sync-step"><span>2</span><div><b>Pilih Router MikroTik</b><small>Hanya router pada site pelanggan yang bisa dipilih.</small></div></div>
+          <select class="form-select" name="router_id" id="nmsSyncRouter"><option value="">Pilih pelanggan dahulu</option></select>
+          <div class="nms-sync-step mt-3"><span>3</span><div><b>Cari & Pilih Secret</b><small>Secret kosong atau milik pelanggan terpilih dapat digunakan.</small></div></div>
+          <label class="nms-sync-search"><i class="bi bi-search"></i><input type="search" id="nmsSyncSecretSearch" placeholder="Cari username, profile, atau komentar…" autocomplete="off"></label>
+          <select name="secret_id" id="nmsSyncSecret" size="7" aria-label="Pilih secret PPPoE"><option value="">Pilih router terlebih dahulu</option></select>
+        </div>
+        <div class="nms-sync-selection" id="nmsSyncSelection"><i class="bi bi-link-45deg"></i><span><b>Belum ada secret dipilih</b><small>Pilih rekomendasi atau gunakan mode manual.</small></span></div>
+      </section>
+    </div>
+    <label class="nms-action-check nms-sync-confirm"><input type="checkbox" id="nmsSyncReviewed"><span>Saya sudah memeriksa pelanggan, site, router, dan secret PPPoE yang dipilih.</span></label>
+  </div>
+  <div class="modal-footer"><span class="nms-form-security"><i class="bi bi-shield-check"></i>Validasi site dan duplikasi dijalankan kembali di server</span><button class="btn-tech" type="button" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary" type="submit" id="nmsSyncSubmit" disabled><i class="bi bi-link-45deg"></i>Sinkronkan PPPoE</button></div>
+</form></div></div>

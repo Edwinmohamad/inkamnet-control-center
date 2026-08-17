@@ -115,6 +115,12 @@ async function syncSecret(routerId,secretId,customerId){
 async function removeSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.deleteSecret(router,secretId);const [linked]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),pppoe_username=NULL,network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result,linkedCustomers:linked};}
 async function disconnectSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.disconnectSecret(router,secretId);if(result.disconnected)await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result};}
 async function customersForRouter(routerId){const router=await routerById(routerId);return customersForSite(router);}
+async function customersForSync(){
+  const [rows]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.site_id,c.router_id,c.pppoe_username,c.network_status,s.code site_code,s.name site_name,r.name router_name,p.name package_name
+    FROM customers c JOIN sites s ON s.id=c.site_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN packages p ON p.id=c.package_id
+    WHERE c.customer_status='active' ORDER BY s.code,c.name`);
+  return rows;
+}
 
 async function syncActiveCustomers(siteCode=''){
   const scopedSite=String(siteCode||'').trim().toUpperCase();
@@ -171,4 +177,4 @@ async function syncActiveCustomers(siteCode=''){
   return summary;
 }
 
-module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,disconnectSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};
+module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,disconnectSecret,customersForRouter,customersForSync,syncActiveCustomers,cleanPayload,matchScore,exemptOf};
