@@ -87,6 +87,14 @@
     setTimeout(() => { if (button.classList.contains('is-loading')) button.innerHTML = `<span class="spinner-border spinner-border-sm"></span><span>${html.lang==='en'?'Processing...':'Memproses...'}</span>`; }, 100);
   }));
 
+  // GET filters react immediately to select/date/year changes; text search still submits with Enter.
+  document.querySelectorAll('form[method="get"],form[method="GET"]').forEach(form=>{
+    let timer=0,submitting=false;
+    const submit=()=>{if(submitting)return;submitting=true;form.classList.add('is-auto-submitting');form.requestSubmit();};
+    form.querySelectorAll('select,input[type="date"],input[type="month"],input[type="number"],input[type="radio"],input[type="checkbox"]').forEach(field=>field.addEventListener('change',()=>{clearTimeout(timer);timer=setTimeout(submit,120);}));
+    if(form.hasAttribute('data-auto-filter'))form.classList.add('auto-filter-enabled');
+  });
+
   document.addEventListener('click', event => {
     const link = event.target.closest('a[href]');
     if (!link || link.target === '_blank' || link.hasAttribute('download') || link.href.startsWith('javascript:') || link.getAttribute('href').startsWith('#')) return;

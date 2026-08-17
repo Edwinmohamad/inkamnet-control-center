@@ -91,7 +91,44 @@ async function routerById(id){const [rows]=await db.execute(`SELECT r.*,s.code s
 async function customerForRouter(router,customerId){const [rows]=await db.execute(`SELECT id,site_id,name,customer_code FROM customers WHERE id=? AND customer_status='active'`,[customerId]);if(!rows.length)throw new Error('Pelanggan billing tidak ditemukan');if(Number(rows[0].site_id)!==Number(router.site_id))throw new Error('Site pelanggan dan router harus sama');return rows[0];}
 
 async function saveSecret(routerId,secretId,input,customerId){const router=await routerById(routerId),payload=cleanPayload(input);if(!payload.name)throw new Error('Username PPPoE wajib diisi');const customer=customerId?await customerForRouter(router,customerId):null;if(secretId)await mt.updateSecret(router,secretId,payload);else{if(!payload.password)throw new Error('Password wajib diisi untuk secret baru');await mt.createSecret(router,payload);}if(customer){const status=bool(payload.disabled)?'isolated':'offline';await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>?,NOW(),status_changed_at),router_id=?,pppoe_username=?,network_status=? WHERE id=?`,[status,router.id,payload.name,status,customer.id]);}return {router,payload,customer};}
-async function syncSecret(routerId,secretId,customerId){const router=await routerById(routerId),customer=await customerForRouter(router,customerId),secret=await mt.getSecret(router,secretId);if(!secret?.name)throw new Error('PPPoE secret tidak ditemukan');const existing=await db.execute(`SELECT id,name FROM customers WHERE router_id=? AND pppoe_username=? AND id<>? LIMIT 1`,[router.id,secret.name,customer.id]);if(existing[0].length)throw new Error(`Secret sudah terhubung ke ${existing[0][0].name}`);const status=statusOf(secret,null);await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>?,NOW(),status_changed_at),router_id=?,pppoe_username=?,network_status=? WHERE id=?`,[status,router.id,secret.name,status,customer.id]);return {router,secret,customer};}
+async function syncSecret(routerId,secretId,customerId){
+  const router=await routerById(routerId),customer=await customerForRouter(router,customerId),secret=await mt.getSecret(router,secretId);
+  if(!secret?.name)throw new Error('PPPoE secret tidak ditemukan');
+  const lockName=`inkamnet_pppoe_${router.id}_${normalize(secret.name).replace(/\s/g,'_').slice(0,35)}`;
+  const conn=await db.getConnection();let locked=false;
+  try{
+    const [[lock]]=await conn.execute(`SELECT GET_LOCK(?,8) locked`,[lockName]);locked=Number(lock?.locked)===1;if(!locked)throw new Error('Sinkronisasi secret sedang diproses pengguna lain. Coba lagi.');
+    await conn.beginTransaction();
+    const [freshRows]=await conn.execute(`SELECT id,name,customer_code,site_id FROM customers WHERE id=? AND customer_status='active' FOR UPDATE`,[customer.id]);
+    const fresh=freshRows[0];if(!fresh)throw new Error('Pelanggan sudah tidak aktif.');if(Number(fresh.site_id)!==Number(router.site_id))throw new Error('Site pelanggan dan router tidak sama.');
+    const [existing]=await conn.execute(`SELECT id,name FROM customers WHERE site_id=? AND LOWER(TRIM(pppoe_username))=LOWER(TRIM(?)) AND id<>? LIMIT 1 FOR UPDATE`,[fresh.site_id,secret.name,fresh.id]);
+    if(existing.length)throw new Error(`Username PPPoE sudah terhubung ke ${existing[0].name} pada site yang sama.`);
+    const status=statusOf(secret,null);
+    await conn.execute(`UPDATE customers SET status_changed_at=IF(network_status<>?,NOW(),status_changed_at),router_id=?,pppoe_username=?,network_status=? WHERE id=?`,[status,router.id,secret.name,status,fresh.id]);
+    await conn.commit();return {router,secret,customer:{...customer,...fresh}};
+  }catch(error){try{await conn.rollback();}catch(_){}throw error;}finally{if(locked){try{await conn.execute(`SELECT RELEASE_LOCK(?)`,[lockName]);}catch(_){}}conn.release();}
+}
+
+async function customerSyncSuggestions(customerId){
+  const [customerRows]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.site_id,c.pppoe_username,c.router_id,s.code site_code,s.name site_name FROM customers c JOIN sites s ON s.id=c.site_id WHERE c.id=? AND c.customer_status='active' LIMIT 1`,[customerId]);
+  const customer=customerRows[0];if(!customer)throw new Error('Pelanggan aktif tidak ditemukan.');
+  const [routers]=await db.execute(`SELECT r.*,s.code site_code,s.name site_name FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.site_id=? AND r.is_active=1 ORDER BY r.name`,[customer.site_id]);
+  if(!routers.length)throw new Error(`Belum ada router aktif pada site ${customer.site_code}.`);
+  const [linked]=await db.execute(`SELECT id,name,router_id,pppoe_username FROM customers WHERE site_id=? AND id<>? AND pppoe_username IS NOT NULL`,[customer.site_id,customer.id]);
+  // Username billing harus unik di seluruh site, bukan hanya per-router.
+  const occupiedNames=new Set(linked.map(row=>normalize(row.pppoe_username)).filter(Boolean));
+  const scanned=await Promise.all(routers.map(async router=>{try{return {router,secrets:await mt.listSecrets(router),error:null};}catch(error){return {router,secrets:[],error:error.message};}}));
+  const nameCounts=new Map();for(const item of scanned)for(const secret of item.secrets){const key=normalize(secret.name);if(key)nameCounts.set(key,(nameCounts.get(key)||0)+1);}
+  const suggestions=[];
+  for(const item of scanned)for(const secret of item.secrets){
+    const key=normalize(secret.name);if(!key||!secret['.id']||exemptOf(secret)||occupiedNames.has(key))continue;
+    const score=matchScore(secret,customer),duplicateAcrossRouters=(nameCounts.get(key)||0)>1;
+    if(score<35||duplicateAcrossRouters)continue;
+    suggestions.push({secretId:secret['.id'],secretName:secret.name,profile:secret.profile||'-',comment:secret.comment||'',disabled:bool(secret.disabled),routerId:item.router.id,routerName:item.router.name,siteCode:item.router.site_code,score});
+  }
+  suggestions.sort((a,b)=>b.score-a.score||a.secretName.localeCompare(b.secretName));
+  return {customer,suggestions:suggestions.slice(0,12),routerFailures:scanned.filter(item=>item.error).map(item=>`${item.router.name}: ${item.error}`),duplicateNames:[...nameCounts].filter(([,count])=>count>1).map(([name])=>name)};
+}
 async function removeSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.deleteSecret(router,secretId);const [linked]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),pppoe_username=NULL,network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result,linkedCustomers:linked};}
 async function disconnectSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.disconnectSecret(router,secretId);if(result.disconnected)await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result};}
 async function customersForRouter(routerId){const router=await routerById(routerId);return customersForSite(router);}
@@ -151,4 +188,4 @@ async function syncActiveCustomers(siteCode=''){
   return summary;
 }
 
-module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,disconnectSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};
+module.exports={allSnapshots,routerById,saveSecret,syncSecret,customerSyncSuggestions,removeSecret,disconnectSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};

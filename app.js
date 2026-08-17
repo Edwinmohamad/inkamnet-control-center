@@ -24,7 +24,7 @@ const { requireAuth, loadPermissions, requirePermission } = require('./middlewar
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
 const { purgeOldLogs } = require('./services/logRetentionService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema } = require('./services/schemaService');
 
 const app = express();
 const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
@@ -230,6 +230,7 @@ async function bootstrap() {
   await ensureV20Schema();
   await ensureV21Schema();
   await ensureV22Schema();
+  await ensureV23Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';

@@ -29,8 +29,9 @@ function periodQuery(filters){
 }
 async function loadInvoiceBranding(){
   const [[s]]=await db.query(`SELECT company_name,company_address,company_phone,company_email,company_website,company_tagline,invoice_company_name,invoice_address,invoice_phone,invoice_email,invoice_website,invoice_tax_id,invoice_footer,invoice_logo_path FROM settings WHERE id=1`);
+  const configuredCompany=String(s?.invoice_company_name||s?.company_name||'PT INKAMNET NEXERA TECHNOLOGY').trim();
   const branding={
-    companyName:s?.invoice_company_name||s?.company_name||'PT INKAMNET NEXERA TECHNOLOGY',
+    companyName:/^PT(?:\.|\s)/i.test(configuredCompany)?configuredCompany:`PT ${configuredCompany}`,
     address:s?.invoice_address||s?.company_address||'',phone:s?.invoice_phone||s?.company_phone||'',email:s?.invoice_email||s?.company_email||'',website:s?.invoice_website||s?.company_website||'',
     taxId:s?.invoice_tax_id||'',footer:s?.invoice_footer||'Dokumen digital resmi. Tidak memerlukan tanda tangan basah.',tagline:s?.company_tagline||'From the Village, Online Everywhere',logoPath:s?.invoice_logo_path||null
   };
@@ -101,7 +102,7 @@ router.get('/',async(req,res)=>{
   };
   const [openInvoices]=await db.query(`SELECT i.id,i.invoice_number,i.outstanding,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name
     FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
-    WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY s.code,cl.name,c.name,i.due_date`);
+    WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND NOT EXISTS (SELECT 1 FROM payments pp WHERE pp.invoice_id=i.id AND pp.status='pending') ORDER BY s.code,cl.name,c.name,i.due_date`);
   const [staff]=await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);
   const [banks]=await db.query(`SELECT id,bank_name,account_name,account_number,type FROM banks WHERE is_active=1 AND type IN ('bank_transfer','virtual_account','other') ORDER BY bank_name,account_number`);
   const filters={month,year,status,site,cluster,customer,q};

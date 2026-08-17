@@ -23,7 +23,7 @@ Staging build untuk PT INKAMNET NEXERA TECHNOLOGY.
 
 - Control Center: Dashboard
 - Pelanggan: Pelanggan, Paket Internet
-- Network: Site/POP, Router MikroTik, Cluster & ODP, Network Monitor
+- Network: Site/POP, Router MikroTik, Cluster & ODP, MikroTik NMS
 - Support: Ticketing, Jadwal Teknisi, Piket Server
 - Gudang: Stock Barang, Pergerakan Stock, Pemakaian Material, Supplier
 - Billing: Tagihan, Pembayaran, Faktur Custom, Diskon, Biaya Tambahan
