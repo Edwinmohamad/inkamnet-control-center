@@ -80,9 +80,10 @@ router.get('/', async (req, res) => {
   const customer={total:Number(customerStats.total||0),active:Number(customerStats.active||0),inactive:Number(customerStats.inactive||0),isolated:Number(customerStats.isolated||0)};
 
   const [[revenue]] = await db.execute(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.status='confirmed' AND YEAR(p.paid_at)=? AND MONTH(p.paid_at)=?${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
-  const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
+  const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected,COALESCE(SUM(i.status='paid'),0) paid_count,COALESCE(SUM(i.status='unpaid'),0) unpaid_count,COALESCE(SUM(i.status='partial'),0) partial_count,COALESCE(SUM(i.status='overdue'),0) overdue_count FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[unpaid]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.outstanding),0) total FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[newCustomers]] = await db.execute(`SELECT COUNT(*) total FROM customers c WHERE YEAR(COALESCE(c.activation_date,DATE(c.created_at)))=? AND MONTH(COALESCE(c.activation_date,DATE(c.created_at)))=?${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
+  const [psbCustomers]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.activation_date,c.customer_status,s.code site_code,cl.name cluster_name,p.name package_name,p.speed_label FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE YEAR(COALESCE(c.activation_date,DATE(c.created_at)))=? AND MONTH(COALESCE(c.activation_date,DATE(c.created_at)))=?${customerScope} ORDER BY COALESCE(c.activation_date,DATE(c.created_at)) DESC,c.id DESC LIMIT 250`,[selectedYear,selectedMonth,...customerParams]);
   const [[network]] = await db.execute(`SELECT SUM(c.network_status='online') online,SUM(c.network_status='offline') offline,SUM(c.network_status='isolated') isolated,SUM(c.network_status='router_unreachable') unreachable FROM customers c WHERE c.customer_status='active'${customerScope}`,customerParams);
 
   const [[routerNoc]] = await db.execute(`SELECT COUNT(*) routers_total,SUM(last_status='online') routers_online FROM routers WHERE is_active=1${siteId?' AND site_id=?':''}`,customerParams);
@@ -122,10 +123,12 @@ router.get('/', async (req, res) => {
   monthlyPsbRows.forEach(r=>{monthlyPsb[Number(r.month_no)-1]=Number(r.total||0)});
   const collectionRate=Number(billed.total)>0?Math.min(100,Math.round((Number(billed.collected)/Number(billed.total))*100)):0;
   const routerRate=Number(noc.routers_total)>0?Math.round(Number(noc.routers_online||0)/Number(noc.routers_total)*100):100;
+  const invoiceKpi={total:Number(billed.count||0),paid:Number(billed.paid_count||0),unpaid:Number(billed.unpaid_count||0),partial:Number(billed.partial_count||0),overdue:Number(billed.overdue_count||0)};
+  const todayKey=isoDate(now),todayDuty=weekDuty.filter(row=>row.duty_date_key===todayKey);
   const years=Array.from({length:5},(_,i)=>now.getFullYear()-2+i);if(!years.includes(selectedYear))years.push(selectedYear);years.sort((a,b)=>a-b);
 
   res.render('dashboard/index',{
-    title:'Dashboard',customer,revenue,billed,unpaid,newCustomers,network,noc,recent,siteOptions,siteCustomerRows,weekDuty,week,
+    title:'Dashboard',customer,revenue,billed,unpaid,newCustomers,psbCustomers,network,noc,recent,siteOptions,siteCustomerRows,weekDuty,todayDuty,week,invoiceKpi,
     selectedSiteCode:selectedSite?.code||'',selectedSiteName:selectedSite?.name||'Semua Site',collectionRate,routerRate,
     selectedMonth,selectedYear,years,
     monthly:{labels:monthLabels,invoices:monthlyInvoices,payments:monthlyPayments,psb:monthlyPsb}

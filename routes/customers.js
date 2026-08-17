@@ -3,6 +3,7 @@ const ExcelJS = require('exceljs');
 const db = require('../config/db');
 const { audit } = require('../services/auditService');
 const { requireAdmin } = require('../middleware/auth');
+const { syncActiveCustomers } = require('../services/nmsService');
 const router = express.Router();
 
 async function options() {
@@ -15,7 +16,7 @@ async function options() {
 }
 
 function customerFilter(req) {
-  return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', status:req.query.status||'' };
+  return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', status:req.query.status||'', network:req.query.network||'' };
 }
 function customerSql(filters) {
   let sql=`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,p.speed_label,r.name router_name,cl.name cluster_name,se.name sales_name,se.employee_code sales_code,(SELECT i.id FROM invoices i WHERE i.customer_id=c.id AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY i.period_year DESC,i.period_month DESC,i.id DESC LIMIT 1) open_invoice_id FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE 1=1`;
@@ -24,6 +25,7 @@ function customerSql(filters) {
   if(filters.site){sql+=` AND s.code=?`;params.push(filters.site);}
   if(filters.cluster){sql+=` AND c.cluster_id=?`;params.push(Number(filters.cluster));}
   if(filters.status==='inactive'){sql+=` AND c.customer_status<>'active'`;}else if(filters.status){sql+=` AND c.customer_status=?`;params.push(filters.status);}
+  if(filters.network==='unlinked'){sql+=` AND (c.pppoe_username IS NULL OR c.router_id IS NULL)`;}else if(filters.network==='problem'){sql+=` AND c.network_status IN ('offline','router_unreachable')`;}else if(['online','offline','isolated','router_unreachable'].includes(filters.network)){sql+=` AND c.network_status=?`;params.push(filters.network);}
   sql+=` ORDER BY c.id DESC`;
   return {sql,params};
 }
@@ -97,8 +99,21 @@ router.get('/', async (req, res) => {
   const [customers]=await db.execute(sql,params);
   const [sites]=await db.query(`SELECT code,name FROM sites ORDER BY code`);
   const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
-  const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated FROM customers`);
+  const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated,SUM(customer_status='active' AND pppoe_username IS NOT NULL AND router_id IS NOT NULL) pppoe_linked,SUM(customer_status='active' AND (pppoe_username IS NULL OR router_id IS NULL)) pppoe_unlinked FROM customers`);
   res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,stats:stats||{},filters});
+});
+
+router.post('/sync-pppoe',requireAdmin,async(req,res)=>{
+  const site=String(req.body.site||'').trim().toUpperCase();
+  const returnTo=String(req.body.return_to||'/customers');
+  const destination=returnTo.startsWith('/')&&!returnTo.startsWith('//')?returnTo:'/customers';
+  try{
+    const result=await syncActiveCustomers(site);
+    await audit({userId:req.session.user.id,action:'sync',entityType:'pppoe_customers',entityId:null,description:`Sinkron PPPoE ${result.scope}: matched=${result.matched}, online=${result.online}, offline=${result.offline}, isolated=${result.isolated}, unmatched=${result.unmatched}, duplicate=${result.duplicate}`,ip:req.ip});
+    const warnings=result.routerFailures+result.unconfigured+result.unmatched+result.duplicate;
+    req.session.flash={type:warnings?'warning':'success',message:`Sinkron PPPoE ${result.scope} selesai: ${result.matched}/${result.customers} pelanggan cocok (${result.online} online, ${result.offline} offline, ${result.isolated} isolir). Belum dikonfigurasi ${result.unconfigured}, tidak ditemukan ${result.unmatched}, duplikat ${result.duplicate}, router gagal ${result.routerFailures}.`};
+  }catch(error){req.session.flash={type:'danger',message:`Sinkron PPPoE gagal: ${error.message}`};}
+  res.redirect(destination);
 });
 
 

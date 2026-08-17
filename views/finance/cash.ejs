@@ -70,6 +70,15 @@
 
 <script>
 (()=>{
+  const addForm=document.querySelector('#cashModal form');
+  if(addForm){
+    const hint=addForm.querySelector('.cash-code-hint');
+    hint?.insertAdjacentHTML('beforebegin','<div class="cash-entry-type"><label><input type="radio" name="entry_type" value="expense" checked><span><i class="bi bi-graph-down-arrow"></i><strong>Pengeluaran</strong><small>Belanja atau biaya operasional</small></span></label><label><input type="radio" name="entry_type" value="income"><span><i class="bi bi-graph-up-arrow"></i><strong>Pemasukan</strong><small>Pendapatan kas manual</small></span></label></div>');
+    const category=addForm.querySelector('select[name="category_id"]'),purchase=addForm.querySelector('[name="purchase_channel"]'),shop=addForm.querySelector('[name="purchase_shop_name"]'),proof=addForm.querySelector('[name="proof_file"]'),submit=addForm.querySelector('.modal-footer .btn-tech.primary');
+    const expenseFields=[purchase?.closest('.col-md-6'),shop?.closest('.col-md-6'),proof?.closest('.col-12')].filter(Boolean);
+    const syncType=()=>{const type=addForm.querySelector('input[name="entry_type"]:checked')?.value||'expense';[...category.options].forEach(option=>{const match=option.dataset.type===type;option.hidden=!match;option.disabled=!match});if(category.selectedOptions[0]?.disabled)category.value=[...category.options].find(option=>!option.disabled)?.value||'';expenseFields.forEach(field=>field.classList.toggle('d-none',type!=='expense'));[purchase,shop,proof].filter(Boolean).forEach(field=>field.disabled=type!=='expense');if(submit)submit.innerHTML=`<i class="bi bi-check2"></i>Simpan ${type==='expense'?'Pengeluaran':'Pemasukan'}`;};
+    addForm.querySelectorAll('input[name="entry_type"]').forEach(input=>input.addEventListener('change',syncType));syncType();
+  }
   const modal=document.getElementById('cashEditModal');if(modal)modal.addEventListener('show.bs.modal',event=>{const b=event.relatedTarget;if(!b)return;const form=document.getElementById('cashEditForm');form.action=`/cash/${b.dataset.id}/update`;document.getElementById('cashEditDate').value=b.dataset.date||'';document.getElementById('cashEditName').value=b.dataset.name||'';document.getElementById('cashEditCategory').value=b.dataset.category||'';document.getElementById('cashEditSite').value=b.dataset.site||'';document.getElementById('cashEditAmount').value=b.dataset.amount||'';document.getElementById('cashEditPurchaseChannel').value=b.dataset.purchaseChannel||'';document.getElementById('cashEditPurchaseShop').value=b.dataset.purchaseShop||'';document.getElementById('cashEditNotes').value=b.dataset.notes||'';});
   document.querySelectorAll('[data-cash-proof]').forEach(input=>input.addEventListener('change',()=>{const label=input.closest('.proof-dropzone')?.querySelector('[data-cash-proof-name]');if(label)label.textContent=input.files?.[0]?.name||'Belum ada file dipilih';}));
 })();

@@ -1,4 +1,4 @@
-<% const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; %>
+<% const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; const siteQuery=selectedSiteCode?`&site=${encodeURIComponent(selectedSiteCode)}`:''; const customerSiteQuery=selectedSiteCode?`site=${encodeURIComponent(selectedSiteCode)}`:''; %>
 <section class="command-dashboard dashboard-v19 dashboard-v112">
   <div class="command-tech-mesh" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
   <div class="command-hero">
@@ -21,26 +21,39 @@
   <div class="command-telemetry-rail" aria-label="Live telemetry">
     <div><span class="telemetry-signal online"></span><small>NOC STATUS</small><strong>ONLINE</strong></div>
     <div><span class="telemetry-signal purple"></span><small>SCOPE</small><strong><%= selectedSiteCode||'ALL SITES' %></strong></div>
-    <div><span class="telemetry-signal blue"></span><small>ROUTER HEALTH</small><strong><%= routerRate %>%</strong></div>
-    <div><span class="telemetry-signal green"></span><small>CUSTOMER ONLINE</small><strong><%= Number(network.online||0) %></strong></div>
+    <a href="/network/monitor"><span class="telemetry-signal blue"></span><small>ROUTER HEALTH</small><strong><%= routerRate %>%</strong></a>
+    <a href="/customers?<%= customerSiteQuery %><%= customerSiteQuery?'&':'' %>status=active&network=online"><span class="telemetry-signal green"></span><small>CUSTOMER ONLINE</small><strong><%= Number(network.online||0) %></strong></a>
     <div class="telemetry-stream"><i></i><i></i><i></i><span>LIVE DATA STREAM</span></div>
   </div>
 
   <div class="command-kpis command-kpis-v19">
-    <a href="/customers" class="command-kpi purple"><span class="command-kpi-icon"><i class="bi bi-people-fill"></i></span><div><small>TOTAL PELANGGAN</small><strong><%= Number(customer.total||0) %></strong><em><%= selectedSiteCode||'SEMUA SITE' %></em></div></a>
-    <a href="/customers?status=active" class="command-kpi green"><span class="command-kpi-icon"><i class="bi bi-person-check-fill"></i></span><div><small>PELANGGAN AKTIF</small><strong><%= Number(customer.active||0) %></strong><em>Service aktif</em></div></a>
-    <a href="/customers?status=inactive" class="command-kpi orange"><span class="command-kpi-icon"><i class="bi bi-person-dash-fill"></i></span><div><small>TIDAK AKTIF</small><strong><%= Number(customer.inactive||0) %></strong><em>Suspended / berhenti</em></div></a>
-    <a href="/customers" class="command-kpi red"><span class="command-kpi-icon"><i class="bi bi-wifi-off"></i></span><div><small>TERISOLIR</small><strong><%= Number(customer.isolated||0) %></strong><em>Network isolated</em></div></a>
-    <a href="/payments" class="command-kpi green"><span class="command-kpi-icon"><i class="bi bi-cash-coin"></i></span><div><small>PEMBAYARAN</small><strong><%= formatRupiah(revenue.total||0) %></strong><em><%= monthNames[selectedMonth-1] %> <%= selectedYear %></em></div></a>
-    <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=overdue" class="command-kpi red"><span class="command-kpi-icon"><i class="bi bi-exclamation-diamond-fill"></i></span><div><small>OUTSTANDING</small><strong><%= formatRupiah(unpaid.total||0) %></strong><em><%= Number(unpaid.count||0) %> tagihan</em></div></a>
+    <a href="/customers?<%= customerSiteQuery %>" class="command-kpi purple"><span class="command-kpi-icon"><i class="bi bi-people-fill"></i></span><div><small>TOTAL PELANGGAN</small><strong><%= Number(customer.total||0) %></strong><em><%= selectedSiteCode||'SEMUA SITE' %></em></div></a>
+    <a href="/customers?<%= customerSiteQuery %><%= customerSiteQuery?'&':'' %>status=active" class="command-kpi green"><span class="command-kpi-icon"><i class="bi bi-person-check-fill"></i></span><div><small>PELANGGAN AKTIF</small><strong><%= Number(customer.active||0) %></strong><em>Service aktif</em></div></a>
+    <a href="/customers?<%= customerSiteQuery %><%= customerSiteQuery?'&':'' %>status=inactive" class="command-kpi orange"><span class="command-kpi-icon"><i class="bi bi-person-dash-fill"></i></span><div><small>TIDAK AKTIF</small><strong><%= Number(customer.inactive||0) %></strong><em>Suspended / berhenti</em></div></a>
+    <a href="/customers?<%= customerSiteQuery %><%= customerSiteQuery?'&':'' %>status=active&network=isolated" class="command-kpi red"><span class="command-kpi-icon"><i class="bi bi-wifi-off"></i></span><div><small>TERISOLIR</small><strong><%= Number(customer.isolated||0) %></strong><em>Network isolated</em></div></a>
+    <a href="/payments?month=<%= selectedMonth %>&year=<%= selectedYear %><%= siteQuery %>" class="command-kpi green"><span class="command-kpi-icon"><i class="bi bi-cash-coin"></i></span><div><small>PEMBAYARAN</small><strong><%= formatRupiah(revenue.total||0) %></strong><em><%= monthNames[selectedMonth-1] %> <%= selectedYear %></em></div></a>
+    <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=open<%= siteQuery %>" class="command-kpi red"><span class="command-kpi-icon"><i class="bi bi-exclamation-diamond-fill"></i></span><div><small>OUTSTANDING</small><strong><%= formatRupiah(unpaid.total||0) %></strong><em><%= Number(unpaid.count||0) %> tagihan</em></div></a>
   </div>
 
   <div class="command-pulse-grid">
-    <article class="command-pulse"><div><span>PSB BULAN INI</span><strong><%= Number(newCustomers.total||0) %></strong></div><i class="bi bi-person-plus"></i></article>
+    <button type="button" class="command-pulse pulse-button" data-bs-toggle="modal" data-bs-target="#psbCustomerModal"><div><span>PSB BULAN INI</span><strong><%= Number(newCustomers.total||0) %></strong><em>Lihat nama pelanggan →</em></div><i class="bi bi-person-plus"></i></button>
     <% if(can('billing')){ %><a class="command-pulse collection-pulse" href="/collection-analysis?site=<%= selectedSiteCode %>&month=<%= selectedMonth %>&year=<%= selectedYear %>"><div><span>COLLECTION RATE</span><strong><%= collectionRate %>%</strong><em>Buka analisa pelanggan →</em></div><i class="bi bi-graph-up-arrow"></i></a><% }else{ %><article class="command-pulse"><div><span>COLLECTION RATE</span><strong><%= collectionRate %>%</strong></div><i class="bi bi-graph-up-arrow"></i></article><% } %>
-    <article class="command-pulse <%= Number(noc.tickets_open||0)>0?'warn':'ok' %>"><div><span>TICKET AKTIF</span><strong><%= Number(noc.tickets_open||0) %></strong></div><i class="bi bi-life-preserver"></i></article>
-    <article class="command-pulse <%= routerRate<100?'warn':'ok' %>"><div><span>ROUTER HEALTH</span><strong><%= Number(noc.routers_online||0) %>/<%= Number(noc.routers_total||0) %></strong></div><i class="bi bi-router-fill"></i></article>
+    <a href="/tickets?status=active<%= siteQuery %>" class="command-pulse <%= Number(noc.tickets_open||0)>0?'warn':'ok' %>"><div><span>TICKET AKTIF</span><strong><%= Number(noc.tickets_open||0) %></strong><em>Buka daftar tiket →</em></div><i class="bi bi-life-preserver"></i></a>
+    <a href="/network/monitor" class="command-pulse <%= routerRate<100?'warn':'ok' %>"><div><span>ROUTER HEALTH</span><strong><%= Number(noc.routers_online||0) %>/<%= Number(noc.routers_total||0) %></strong><em>Buka monitor →</em></div><i class="bi bi-router-fill"></i></a>
   </div>
+
+  <article class="command-panel invoice-kpi-panel">
+    <div class="command-panel-head"><div><span>KPI TAGIHAN PELANGGAN</span><h3>Status Billing <%= monthNames[selectedMonth-1] %> <%= selectedYear %></h3></div><a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %><%= siteQuery %>" class="ink-text-link">Buka Semua Tagihan <i class="bi bi-arrow-right"></i></a></div>
+    <div class="invoice-kpi-layout">
+      <div class="invoice-kpi-chart"><canvas id="invoiceKpiChart"></canvas><div><strong><%= invoiceKpi.total %></strong><small>TOTAL</small></div></div>
+      <div class="invoice-kpi-links">
+        <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=paid<%= siteQuery %>" class="paid"><i></i><span><small>Lunas</small><strong><%= invoiceKpi.paid %></strong></span><em><%= invoiceKpi.total?Math.round(invoiceKpi.paid/invoiceKpi.total*100):0 %>%</em></a>
+        <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=unpaid<%= siteQuery %>" class="unpaid"><i></i><span><small>Belum Lunas</small><strong><%= invoiceKpi.unpaid %></strong></span><em>Tindak lanjut</em></a>
+        <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=partial<%= siteQuery %>" class="partial"><i></i><span><small>Bayar Sebagian</small><strong><%= invoiceKpi.partial %></strong></span><em>Masih bersisa</em></a>
+        <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=overdue<%= siteQuery %>" class="overdue"><i></i><span><small>Terlambat</small><strong><%= invoiceKpi.overdue %></strong></span><em>Prioritas tinggi</em></a>
+      </div>
+    </div>
+  </article>
 
   <div class="dashboard-v19-grid">
     <article class="command-panel psb-trend-panel">
@@ -94,7 +107,7 @@
         <a href="/payments/reconciliation" class="priority-row <%= Number(noc.cash_held||0)>0?'attention':'clear' %>"><span><i class="bi bi-person-vcard"></i></span><div><strong>Cash di Tim</strong><small>Perlu rekonsiliasi</small></div><b><%= formatRupiah(noc.cash_held||0) %></b></a>
         <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=overdue" class="priority-row <%= Number(noc.overdue_customers||0)>0?'danger':'clear' %>"><span><i class="bi bi-exclamation-triangle"></i></span><div><strong>Overdue</strong><small>Pelanggan perlu follow-up</small></div><b><%= Number(noc.overdue_customers||0) %></b></a>
         <a href="/network/monitor" class="priority-row <%= Number(noc.routers_total||0)>Number(noc.routers_online||0)?'danger':'clear' %>"><span><i class="bi bi-router"></i></span><div><strong>Router Offline</strong><small>Periksa health jaringan</small></div><b><%= Math.max(0,Number(noc.routers_total||0)-Number(noc.routers_online||0)) %></b></a>
-        <a href="/tickets" class="priority-row <%= Number(noc.tickets_open||0)>0?'attention':'clear' %>"><span><i class="bi bi-life-preserver"></i></span><div><strong>Ticket Aktif</strong><small>Open / progress / pending</small></div><b><%= Number(noc.tickets_open||0) %></b></a>
+        <a href="/tickets?status=active<%= siteQuery %>" class="priority-row <%= Number(noc.tickets_open||0)>0?'attention':'clear' %>"><span><i class="bi bi-life-preserver"></i></span><div><strong>Ticket Aktif</strong><small>Open / progress / pending</small></div><b><%= Number(noc.tickets_open||0) %></b></a>
       </div>
     </article>
 
@@ -108,12 +121,42 @@
   </div>
 </section>
 
+<% if(todayDuty.length || Number(network.offline||0)>0 || Number(network.unreachable||0)>0 || Number(noc.tickets_open||0)>0 || Number(noc.overdue_customers||0)>0){ %>
+<aside class="dashboard-alert-popover" id="dashboardImportantPopup" role="status" aria-live="polite">
+  <button type="button" aria-label="Tutup informasi" data-important-close><i class="bi bi-x-lg"></i></button>
+  <div class="dashboard-alert-head"><span><i class="bi bi-broadcast"></i></span><div><small>OPERATIONAL BRIEF</small><strong>Informasi Penting Hari Ini</strong></div></div>
+  <div class="dashboard-alert-list">
+    <% if(todayDuty.length){ %><a href="/server-duty?week=<%= week.start %>"><i class="bi bi-calendar2-check"></i><span><b>Piket hari ini</b><small><%= todayDuty.map(d=>d.staff_name).join(', ') %></small></span></a><% } %>
+    <% if(Number(network.offline||0)>0 || Number(network.unreachable||0)>0){ %><a href="/customers?<%= customerSiteQuery %><%= customerSiteQuery?'&':'' %>status=active&network=problem"><i class="bi bi-wifi-off"></i><span><b><%= Number(network.offline||0)+Number(network.unreachable||0) %> pelanggan bermasalah</b><small>Offline / router tidak terjangkau</small></span></a><% } %>
+    <% if(Number(noc.overdue_customers||0)>0){ %><a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=overdue<%= siteQuery %>"><i class="bi bi-exclamation-triangle"></i><span><b><%= Number(noc.overdue_customers||0) %> pelanggan overdue</b><small>Perlu tindak lanjut penagihan</small></span></a><% } %>
+    <% if(Number(noc.tickets_open||0)>0){ %><a href="/tickets?status=active<%= siteQuery %>"><i class="bi bi-life-preserver"></i><span><b><%= Number(noc.tickets_open||0) %> tiket aktif</b><small>Buka daftar pekerjaan dukungan</small></span></a><% } %>
+  </div>
+  <div class="dashboard-alert-progress"><i></i></div>
+</aside>
+<% } %>
+
+<div class="modal fade" id="psbCustomerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content psb-modal-content">
+      <div class="modal-header"><div><div class="module-kicker">PELANGGAN BARU</div><h5 class="modal-title">PSB <%= monthNames[selectedMonth-1] %> <%= selectedYear %></h5><small><%= selectedSiteCode||'Semua site' %> · <%= Number(newCustomers.total||0) %> pelanggan<%= Number(newCustomers.total||0)>psbCustomers.length?' · menampilkan 250 terbaru':'' %></small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body"><div class="psb-customer-list">
+        <% psbCustomers.forEach(c=>{ %><a href="/customers/<%= c.id %>"><span class="psb-avatar"><%= c.name.charAt(0).toUpperCase() %></span><div><strong><%= c.name %></strong><small><%= c.customer_code %> · <%= c.site_code %> · Cluster <%= c.cluster_name||'-' %></small><em><%= c.package_name %><%= c.speed_label?` · ${c.speed_label}`:'' %></em></div><span><b><%= c.customer_status %></b><small><%= c.activation_date?formatDate(c.activation_date):'Tanggal belum diisi' %></small></span><i class="bi bi-chevron-right"></i></a><% }) %>
+        <% if(!psbCustomers.length){ %><div class="ink-empty"><i class="bi bi-person-plus"></i> Belum ada pelanggan PSB pada periode ini.</div><% } %>
+      </div></div>
+      <div class="modal-footer"><a class="btn-tech" href="/customers?<%= customerSiteQuery %>"><i class="bi bi-people"></i>Buka Data Pelanggan</a><button type="button" class="btn-tech primary" data-bs-dismiss="modal">Tutup</button></div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 (()=>{
-  if(typeof Chart==='undefined')return;
   const data=<%- JSON.stringify(monthly) %>;
+  const invoiceKpi=<%- JSON.stringify(invoiceKpi) %>;
   const money=v=>'Rp '+new Intl.NumberFormat('id-ID',{maximumFractionDigits:0}).format(v||0);
+  const popup=document.getElementById('dashboardImportantPopup');
+  if(popup){const close=()=>{popup.classList.add('leaving');setTimeout(()=>popup.remove(),280)};popup.querySelector('[data-important-close]')?.addEventListener('click',close);setTimeout(close,9000);}
+  if(typeof Chart==='undefined')return;
   const common={responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},animation:{duration:850,easing:'easeOutQuart'},plugins:{legend:{display:false},tooltip:{backgroundColor:'#0b1020',borderColor:'rgba(255,255,255,.10)',borderWidth:1,padding:12}},scales:{x:{grid:{display:false},ticks:{color:'#77839a'}},y:{beginAtZero:true,border:{display:false},grid:{color:'rgba(148,163,184,.09)'},ticks:{color:'#77839a'}}}};
   const billingCanvas=document.getElementById('commandBillingChart');
   if(billingCanvas){
@@ -125,6 +168,8 @@
     const ctx=psbCanvas.getContext('2d');const fill=ctx.createLinearGradient(0,0,0,260);fill.addColorStop(0,'rgba(46,214,161,.30)');fill.addColorStop(1,'rgba(46,214,161,0)');
     new Chart(psbCanvas,{type:'line',data:{labels:data.labels,datasets:[{label:'PSB',data:data.psb,borderColor:'#2ed6a1',backgroundColor:fill,fill:true,tension:.38,borderWidth:2.4,pointRadius:3,pointHoverRadius:5,pointBackgroundColor:'#2ed6a1'}]},options:{...common,plugins:{...common.plugins,tooltip:{...common.plugins.tooltip,callbacks:{label:c=>`PSB: ${Number(c.raw||0)} pelanggan`}}},scales:{...common.scales,y:{...common.scales.y,ticks:{...common.scales.y.ticks,precision:0}}}}});
   }
+  const kpiCanvas=document.getElementById('invoiceKpiChart');
+  if(kpiCanvas){new Chart(kpiCanvas,{type:'doughnut',data:{labels:['Lunas','Belum Lunas','Sebagian','Terlambat'],datasets:[{data:[invoiceKpi.paid,invoiceKpi.unpaid,invoiceKpi.partial,invoiceKpi.overdue],backgroundColor:['#2ed6a1','#65758b','#ffbd5b','#ff6969'],borderColor:'rgba(8,12,25,.9)',borderWidth:4,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,cutout:'72%',plugins:{legend:{display:false},tooltip:{backgroundColor:'#0b1020',callbacks:{label:c=>`${c.label}: ${Number(c.raw||0)} tagihan`}}}}});}
 
   // v1.12 subtle pointer telemetry: purely visual, disabled for touch/reduced-motion.
   const dashboard=document.querySelector('.dashboard-v112');
