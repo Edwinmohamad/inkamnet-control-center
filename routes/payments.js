@@ -77,48 +77,66 @@ async function maybeAutoUnisolate(invoiceId){
   }
 }
 
-async function openInvoiceOptions(){
-  const [rows]=await db.query(`SELECT i.id,i.invoice_number,i.outstanding,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name
+async function openInvoiceOptions(site='',cluster=''){
+  let sql=`SELECT i.id,i.invoice_number,i.outstanding,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name
     FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
-    WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY s.code,cl.name,c.name,i.due_date`);
+    WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0`;
+  const params=[];if(site){sql+=` AND s.code=?`;params.push(site);}if(cluster){sql+=` AND c.cluster_id=?`;params.push(Number(cluster));}sql+=` ORDER BY s.code,cl.name,c.name,i.due_date`;
+  const [rows]=await db.execute(sql,params);
   return rows;
 }
 async function staffOptions(){
   const [rows]=await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);return rows;
+}
+async function bankOptions(){
+  const [rows]=await db.query(`SELECT id,bank_name,account_name,account_number,type FROM banks WHERE is_active=1 AND type IN ('bank_transfer','virtual_account','other') ORDER BY bank_name,account_number`);return rows;
 }
 
 router.get('/',async(req,res)=>{
   const q=String(req.query.q||'').trim();
   const site=String(req.query.site||'').trim();
   const cluster=String(req.query.cluster||'').trim();
+  const month=Number(req.query.month)>=1&&Number(req.query.month)<=12?Number(req.query.month):'';
+  const year=Number(req.query.year)>=2020&&Number(req.query.year)<=2100?Number(req.query.year):'';
   let sql=`SELECT p.*,i.invoice_number,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name,u.name collector_name,v.name verifier_name,pu.name proof_uploader_name
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     LEFT JOIN users u ON u.id=COALESCE(p.collector_user_id,p.received_by) LEFT JOIN users v ON v.id=p.verified_by LEFT JOIN users pu ON pu.id=p.proof_uploaded_by WHERE 1=1`;
   const params=[];
   if(site){sql+=` AND s.code=?`;params.push(site);}
   if(cluster){sql+=` AND c.cluster_id=?`;params.push(Number(cluster));}
+  if(month&&year){sql+=` AND MONTH(p.paid_at)=? AND YEAR(p.paid_at)=?`;params.push(month,year);}
   if(q){const like=`%${q}%`;sql+=` AND (c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR p.reference LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;params.push(like,like,like,like,like,like);}
   sql+=` ORDER BY p.id DESC LIMIT 500`;
   const [payments]=await db.execute(sql,params);
-  const openInvoices=await openInvoiceOptions();
+  const openInvoices=await openInvoiceOptions(site,cluster);
   const staff=await staffOptions();
+  const banks=await bankOptions();
   const [sites]=await db.query(`SELECT code,name FROM sites WHERE is_active=1 ORDER BY code`);
   const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
-  const [[summary]]=await db.query(`SELECT
-    COALESCE(SUM(CASE WHEN status='confirmed' THEN amount ELSE 0 END),0) confirmed_total,
-    COALESCE(SUM(CASE WHEN method='cash' AND status='confirmed' AND settlement_status='held_by_staff' THEN amount ELSE 0 END),0) cash_held,
-    COALESCE(SUM(CASE WHEN method='transfer' AND status='pending' THEN amount ELSE 0 END),0) transfer_pending,
-    SUM(status='confirmed') confirmed_count
-    FROM payments WHERE paid_at>=DATE_FORMAT(CURDATE(),'%Y-%m-01')`);
+  const summaryMonth=month||new Date().getMonth()+1,summaryYear=year||new Date().getFullYear();
+  const summaryWhere=['MONTH(p.paid_at)=?','YEAR(p.paid_at)=?'];const summaryParams=[summaryMonth,summaryYear];
+  if(site){summaryWhere.push('s.code=?');summaryParams.push(site);}if(cluster){summaryWhere.push('c.cluster_id=?');summaryParams.push(Number(cluster));}
+  const [[summary]]=await db.execute(`SELECT
+    COALESCE(SUM(CASE WHEN p.status='confirmed' THEN p.amount ELSE 0 END),0) confirmed_total,
+    COALESCE(SUM(CASE WHEN p.method='cash' AND p.status='confirmed' AND p.settlement_status='held_by_staff' THEN p.amount ELSE 0 END),0) cash_held,
+    COALESCE(SUM(CASE WHEN p.method='transfer' AND p.status='pending' THEN p.amount ELSE 0 END),0) transfer_pending,
+    SUM(p.status='confirmed') confirmed_count
+    FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE ${summaryWhere.join(' AND ')}`,summaryParams);
   const preselectedInvoiceId=Number(req.query.invoice_id||0)||null;
-  res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,sites,clusters,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster}});
+  res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,banks,sites,clusters,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year},summaryMonth,summaryYear});
 });
 
 router.post('/',async(req,res)=>{
   const ids=selectedInvoiceIds(req.body);
   if(!ids.length)throw new Error('Pilih minimal satu faktur yang akan dibayar.');
-  const {method,notes,collector_user_id,bank_name,payment_status}=req.body;
-  const normalizedMethod=method||'transfer';
+  const {method,notes,collector_user_id,payment_status}=req.body;
+  const normalizedMethod=['transfer','cash','qris'].includes(method)?method:'transfer';
+  let bankName=null;
+  if(normalizedMethod==='transfer'){
+    const [bankRows]=await db.execute(`SELECT id,bank_name,account_name,account_number FROM banks WHERE id=? AND is_active=1 AND type IN ('bank_transfer','virtual_account','other') LIMIT 1`,[req.body.bank_id||0]);
+    if(!bankRows.length)throw new Error('Pilih bank tujuan yang aktif dari Pengaturan → Bank.');
+    const bank=bankRows[0];bankName=`${bank.bank_name} · ${bank.account_number} · ${bank.account_name}`;
+  }else if(normalizedMethod==='qris')bankName='QRIS';
   const isAdmin=req.session.user.role==='admin';
   const requestedConfirmed=payment_status==='confirmed';
   const status=normalizedMethod==='cash'?'confirmed':(normalizedMethod==='transfer'?(isAdmin&&requestedConfirmed&&req.file?'confirmed':'pending'):(payment_status==='pending'?'pending':'confirmed'));
@@ -133,14 +151,13 @@ router.post('/',async(req,res)=>{
       if(!invoiceRows.length)throw new Error(`Faktur #${invoiceId} tidak ditemukan.`);
       const invoice=invoiceRows[0];
       if(['paid','cancelled','refunded'].includes(invoice.status)||Number(invoice.outstanding)<=0)throw new Error(`Faktur #${invoiceId} sudah tidak memiliki sisa tagihan.`);
-      const requestedAmount=req.body[`amount_${invoiceId}`]??(ids.length===1?req.body.amount:null);
-      const numericAmount=requestedAmount==null||requestedAmount===''?Number(invoice.outstanding):Number(requestedAmount);
+      const numericAmount=Number(invoice.outstanding);
       if(!Number.isFinite(numericAmount)||numericAmount<=0)throw new Error(`Nominal faktur #${invoiceId} harus lebih dari 0.`);
       if(numericAmount>Number(invoice.outstanding))throw new Error(`Nominal faktur #${invoiceId} melebihi sisa tagihan (${Number(invoice.outstanding).toLocaleString('id-ID')}).`);
       let savedProof=null;
       if(req.file){savedProof=await saveProofFile(req.file);savedFiles.push(savedProof.filename);}
       const [r]=await conn.execute(`INSERT INTO payments (invoice_id,amount,method,reference,notes,status,settlement_status,bank_name,proof_reference,proof_path,proof_original_name,proof_mime,proof_size,proof_uploaded_by,proof_uploaded_at,paid_at,received_by,collector_user_id,verified_by,verified_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?,?,?)`,[
-        invoiceId,numericAmount,normalizedMethod,null,notes||null,status,settlement,bank_name||null,savedProof?.originalName||null,savedProof?.filename||null,savedProof?.originalName||null,savedProof?.mime||null,savedProof?.size||null,savedProof?req.session.user.id:null,savedProof?new Date():null,req.session.user.id,collector,status==='confirmed'?req.session.user.id:null,status==='confirmed'?new Date():null
+        invoiceId,numericAmount,normalizedMethod,null,notes||null,status,settlement,bankName,savedProof?.originalName||null,savedProof?.filename||null,savedProof?.originalName||null,savedProof?.mime||null,savedProof?.size||null,savedProof?req.session.user.id:null,savedProof?new Date():null,req.session.user.id,collector,status==='confirmed'?req.session.user.id:null,status==='confirmed'?new Date():null
       ]);
       const autoReference=paymentReference(r.insertId);
       await conn.execute(`UPDATE payments SET reference=? WHERE id=?`,[autoReference,r.insertId]);

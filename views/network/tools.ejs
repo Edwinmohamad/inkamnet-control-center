@@ -1,0 +1,19 @@
+<section class="remote-tools-page">
+  <div class="module-head remote-tools-head">
+    <div><div class="module-kicker">NETWORK OPERATIONS</div><h1>Remote Tools</h1><p>Akses cepat ke panel infrastruktur INKAMNET. Tautan dibuka di tab baru agar Control Center tetap aktif.</p></div>
+    <a class="btn-tech" href="/network/monitor"><i class="bi bi-activity"></i>Monitor Jaringan</a>
+  </div>
+
+  <div class="remote-tools-security"><i class="bi bi-shield-lock-fill"></i><div><strong>Gunakan akun operasional yang berwenang</strong><small>Control Center hanya menyediakan pintasan aman; autentikasi tetap dilakukan oleh masing-masing layanan.</small></div></div>
+
+  <div class="remote-tools-grid">
+    <% tools.forEach((tool,index)=>{ %>
+      <a class="remote-tool-card <%= tool.tone %>" href="<%= tool.url %>" target="_blank" rel="noopener noreferrer" style="--tool-delay:<%= index*55 %>ms">
+        <div class="remote-tool-brand"><span class="remote-tool-logo"><i class="bi <%= tool.icon %>"></i></span><span class="remote-tool-live"><i></i>REMOTE</span></div>
+        <div class="remote-tool-copy"><small><%= tool.key.toUpperCase() %></small><h2><%= tool.name %></h2><p><%= tool.description %></p></div>
+        <div class="remote-tool-url"><i class="bi bi-lock-fill"></i><span><%= tool.url.replace(/^https?:\/\//,'') %></span></div>
+        <div class="remote-tool-open"><span>Buka Panel</span><i class="bi bi-arrow-up-right"></i></div>
+      </a>
+    <% }) %>
+  </div>
+</section>

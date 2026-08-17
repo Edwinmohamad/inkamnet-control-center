@@ -92,4 +92,59 @@ async function syncSecret(routerId,secretId,customerId){const router=await route
 async function removeSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.deleteSecret(router,secretId);const [linked]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);await db.execute(`UPDATE customers SET pppoe_username=NULL,network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result,linkedCustomers:linked};}
 async function customersForRouter(routerId){const router=await routerById(routerId);return customersForSite(router);}
 
-module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,customersForRouter,cleanPayload,matchScore,exemptOf};
+async function syncActiveCustomers(siteCode=''){
+  const scopedSite=String(siteCode||'').trim().toUpperCase();
+  let routerSql=`SELECT r.*,s.code site_code,s.name site_name FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.is_active=1`;
+  const routerParams=[];
+  if(scopedSite){routerSql+=` AND s.code=?`;routerParams.push(scopedSite);}
+  routerSql+=` ORDER BY s.code,r.name`;
+  const [routers]=await db.execute(routerSql,routerParams);
+  if(scopedSite&&!routers.length)throw new Error(`Router aktif untuk site ${scopedSite} tidak ditemukan.`);
+
+  const routerData=await Promise.all(routers.map(async router=>{
+    try{
+      const [secrets,active]=await Promise.all([mt.listSecrets(router),mt.listActive(router)]);
+      const activeNames=new Set(active.map(row=>normalize(row.name)));
+      return {ok:true,router,secrets,activeNames};
+    }catch(error){
+      return {ok:false,router,error:error.message};
+    }
+  }));
+
+  const secretIndex=new Map();
+  for(const item of routerData.filter(row=>row.ok)){
+    for(const secret of item.secrets){
+      const name=normalize(secret.name);if(!name)continue;
+      const key=`${item.router.site_id}:${name}`;
+      const entries=secretIndex.get(key)||[];
+      entries.push({router:item.router,secret,status:statusOf(secret,item.activeNames.has(name))});
+      secretIndex.set(key,entries);
+    }
+  }
+
+  let customerSql=`SELECT c.id,c.customer_code,c.name,c.site_id,c.pppoe_username,s.code site_code FROM customers c JOIN sites s ON s.id=c.site_id WHERE c.customer_status='active'`;
+  const customerParams=[];
+  if(scopedSite){customerSql+=` AND s.code=?`;customerParams.push(scopedSite);}
+  customerSql+=` ORDER BY s.code,c.name`;
+  const [customers]=await db.execute(customerSql,customerParams);
+  const summary={scope:scopedSite||'Semua Site',routers:routers.length,routerFailures:routerData.filter(row=>!row.ok).length,customers:customers.length,matched:0,online:0,offline:0,isolated:0,unconfigured:0,unmatched:0,duplicate:0};
+  const conn=await db.getConnection();
+  try{
+    await conn.beginTransaction();
+    for(const customer of customers){
+      const username=normalize(customer.pppoe_username);
+      if(!username){summary.unconfigured++;continue;}
+      const matches=secretIndex.get(`${customer.site_id}:${username}`)||[];
+      if(matches.length===0){summary.unmatched++;continue;}
+      if(matches.length>1){summary.duplicate++;continue;}
+      const match=matches[0];
+      await conn.execute(`UPDATE customers SET router_id=?,network_status=? WHERE id=?`,[match.router.id,match.status,customer.id]);
+      summary.matched++;summary[match.status]=(summary[match.status]||0)+1;
+    }
+    await conn.commit();
+  }catch(error){await conn.rollback();throw error;}finally{conn.release();}
+  summary.failures=routerData.filter(row=>!row.ok).map(row=>`${row.router.site_code} / ${row.router.name}: ${row.error}`);
+  return summary;
+}
+
+module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};

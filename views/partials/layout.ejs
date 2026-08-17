@@ -88,6 +88,7 @@
           <a class="sidebar-link <%= currentPath.startsWith('/routers') ? 'active' : '' %>" href="/routers"><i class="bi bi-router-fill"></i><span><%= t('routers') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/clusters') ? 'active' : '' %>" href="/clusters"><i class="bi bi-diagram-3-fill"></i><span><%= t('clusters') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/network/monitor') ? 'active' : '' %>" href="/network/monitor"><i class="bi bi-activity"></i><span><%= t('monitor') %></span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/network/tools') ? 'active' : '' %>" href="/network/tools"><i class="bi bi-box-arrow-up-right"></i><span>Remote Tools</span></a>
         </nav>
         <% } %>
 
@@ -148,7 +149,7 @@
       <main class="content-wrap">
         <% if(flash){ %><div class="alert alert-<%= flash.type %> alert-modern alert-dismissible fade show" role="alert"><i class="bi bi-info-circle-fill me-2"></i><%= flash.message %><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div><% } %>
         <div class="page-enter"><%- body %></div>
-        <footer class="app-footer"><span>PT INKAMNET NEXERA TECHNOLOGY</span><span>From the Village, Online Everywhere</span></footer>
+        <footer class="app-footer"><span>© <%= new Date().getFullYear() %> Edwin Mohamad · PT INKAMNET NEXERA TECHNOLOGY</span><span>From the Village, Online Everywhere</span></footer>
       </main>
     </div>
   </div>

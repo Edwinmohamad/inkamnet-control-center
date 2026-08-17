@@ -6,6 +6,17 @@ const { allSnapshots, saveSecret, syncSecret, removeSecret, customersForRouter }
 const { audit } = require('../services/auditService');
 const router = express.Router();
 
+const REMOTE_TOOLS=[
+  {key:'proxmox',name:'Proxmox',description:'Virtualisasi server dan container',url:'https://inkampxmx.edwinpxmx.my.id',icon:'bi-boxes',tone:'orange'},
+  {key:'n8n',name:'n8n',description:'Otomasi workflow operasional',url:'https://ndepalann.edwinpxmx.my.id/',icon:'bi-diagram-2-fill',tone:'red'},
+  {key:'prtg',name:'PRTG',description:'Monitoring perangkat dan trafik',url:'https://inkamnetnms.edwinpxmx.my.id',icon:'bi-activity',tone:'blue'},
+  {key:'genieacs',name:'GenieACS',description:'Remote provisioning perangkat CPE',url:'https://geniinkamnet.edwinpxmx.my.id',icon:'bi-router-fill',tone:'green'},
+  {key:'panelacs',name:'Panel ACS',description:'Panel kendali dan administrasi ACS',url:'https://panelacs.edwinpxmx.my.id',icon:'bi-sliders2-vertical',tone:'purple'},
+  {key:'casaos',name:'CasaOS',description:'Workspace aplikasi dan storage server',url:'https://kasaos.edwinpxmx.my.id/#/',icon:'bi-grid-3x3-gap-fill',tone:'cyan'}
+];
+
+router.get('/tools',(req,res)=>res.render('network/tools',{title:'Remote Tools Jaringan',tools:REMOTE_TOOLS}));
+
 router.get('/monitor', async (req,res) => {
   const [routers] = await db.query(`SELECT r.id,r.name,r.last_status,r.last_seen_at,r.last_error,s.code site_code,s.name site_name FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.is_active=1 ORDER BY s.code,r.name`);
   const [sites] = await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);

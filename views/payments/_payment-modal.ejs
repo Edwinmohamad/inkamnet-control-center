@@ -1,4 +1,4 @@
-<% const paymentReturnTo = typeof returnTo!=='undefined' ? returnTo : '/payments'; const paymentAutoOpen = typeof autoOpenPaymentModal!=='undefined' ? autoOpenPaymentModal : false; %>
+<% const paymentReturnTo = typeof returnTo!=='undefined' ? returnTo : '/payments'; const paymentAutoOpen = typeof autoOpenPaymentModal!=='undefined' ? autoOpenPaymentModal : false; const paymentBanks=typeof banks!=='undefined'?banks:[]; %>
 <div class="modal fade" id="paymentModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <form method="post" action="/payments" enctype="multipart/form-data" class="modal-content" id="paymentForm">
@@ -14,7 +14,7 @@
 
         <div class="invoice-picker-panel">
           <div class="invoice-picker-head">
-            <div><strong>Pilih Faktur</strong><small>Centang sebanyak yang diperlukan. Nominal per faktur dapat diubah untuk pembayaran sebagian.</small></div>
+            <div><strong>Pilih Faktur</strong><small>Centang faktur pelanggan. Nominal dikunci otomatis sesuai sisa tagihan pada sistem.</small></div>
             <div class="search-box invoice-picker-search"><i class="bi bi-search"></i><input type="search" id="paymentCustomerSearch" placeholder="Cari nama pelanggan, Customer ID, faktur, site, cluster..."></div>
           </div>
           <div class="bulk-payment-tools"><button class="btn-tech compact" type="button" id="selectVisibleInvoices"><i class="bi bi-check2-square"></i>Centang Hasil Pencarian</button><button class="btn-tech compact" type="button" id="clearSelectedInvoices"><i class="bi bi-square"></i>Kosongkan</button><span><b id="selectedInvoiceCount">0</b> faktur dipilih</span><strong id="selectedInvoiceTotal">Rp 0</strong></div>
@@ -25,7 +25,7 @@
               <span class="invoice-picker-customer"><strong><%= i.customer_name %></strong><small><%= i.customer_code %> · <%= i.invoice_number %></small></span>
               <span class="invoice-picker-site"><b><%= i.site_code %></b><small>Cluster <%= i.cluster_name||'-' %></small></span>
               <span class="invoice-picker-amount"><small>Sisa Tagihan</small><b><%= formatRupiah(i.outstanding) %></b></span>
-              <span class="invoice-picker-input"><label>Nominal Bayar</label><input class="form-control payment-allocation" type="number" min="1" max="<%= Number(i.outstanding) %>" step="1" name="amount_<%= i.id %>" value="<%= Number(i.outstanding) %>" data-outstanding="<%= Number(i.outstanding) %>" <%= Number(preselectedInvoiceId)===Number(i.id)?'':'disabled' %>></span>
+              <span class="invoice-picker-input locked"><label>Nominal Bayar · Terkunci</label><input class="form-control payment-allocation" type="number" name="amount_<%= i.id %>" value="<%= Number(i.outstanding) %>" data-outstanding="<%= Number(i.outstanding) %>" readonly aria-readonly="true" <%= Number(preselectedInvoiceId)===Number(i.id)?'':'disabled' %>><i class="bi bi-lock-fill" aria-hidden="true"></i></span>
             </label>
             <% }) %>
             <% if(!openInvoices.length){ %><div class="empty-state"><i class="bi bi-check2-circle"></i><strong>Tidak ada faktur terbuka</strong><small>Semua faktur sudah lunas atau belum dibuat.</small></div><% } %>
@@ -33,7 +33,7 @@
         </div>
 
         <div class="row g-3 mt-1">
-          <div class="col-md-6 transfer-fields"><label class="form-label">Bank Tujuan</label><input class="form-control" name="bank_name" placeholder="BCA / BRI / Mandiri / lainnya"></div>
+          <div class="col-md-6 transfer-fields"><label class="form-label">Bank Tujuan Terdaftar</label><select class="form-select" name="bank_id" required><option value="">Pilih rekening tujuan</option><% paymentBanks.forEach(bank=>{ %><option value="<%= bank.id %>"><%= bank.bank_name %> · <%= bank.account_number %> · a.n. <%= bank.account_name %></option><% }) %></select><div class="form-help"><% if(paymentBanks.length){ %>Data rekening diambil langsung dari Pengaturan → Bank.<% }else{ %><span class="text-danger-soft">Belum ada bank aktif. <% if(user.role==='admin'){ %><a href="/settings?tab=banks">Daftarkan bank terlebih dahulu.</a><% } %></span><% } %></div></div>
           <div class="col-md-6 transfer-fields"><label class="form-label">Status Transfer</label><% if(user.role==='admin'){ %><select class="form-select" name="payment_status"><option value="pending" selected>Menunggu Verifikasi</option><option value="confirmed">Konfirmasi Sekarang (wajib ada bukti)</option></select><% } else { %><input type="hidden" name="payment_status" value="pending"><div class="collector-self"><i class="bi bi-hourglass-split"></i><span><strong>Menunggu Verifikasi</strong><small>Admin akan memverifikasi setelah bukti tersedia.</small></span></div><% } %></div>
           <div class="col-md-6 cash-fields d-none"><label class="form-label">Cash Diterima Oleh</label><% if(user.role==='admin'){ %><select class="form-select" name="collector_user_id"><% staff.forEach(u=>{ %><option value="<%= u.id %>" <%= Number(u.id)===Number(user.id)?'selected':'' %>><%= u.name %> · <%= u.role %></option><% }) %></select><% } else { %><input type="hidden" name="collector_user_id" value="<%= user.id %>"><div class="collector-self"><i class="bi bi-person-check-fill"></i><span><strong><%= user.name %></strong><small>Cash tercatat atas nama akun yang login.</small></span></div><% } %><div class="form-help">Faktur diperbarui, tetapi uang tetap berstatus <b>Cash di Staff</b> sampai disetor.</div></div>
           <div class="col-md-6 proof-upload-field">
@@ -64,15 +64,16 @@
   const proofFileName=document.getElementById('proofFileName');
   function syncRow(check){const row=check.closest('[data-invoice-row]');const amount=row?.querySelector('.payment-allocation');if(amount)amount.disabled=!check.checked;row?.classList.toggle('selected',check.checked);}
   function updateTotal(){let sum=0,c=0;checks.forEach(ch=>{syncRow(ch);if(ch.checked){c++;const input=ch.closest('[data-invoice-row]')?.querySelector('.payment-allocation');sum+=Number(input?.value||0);}});count.textContent=c;total.textContent=rupiah(sum);modalTotal.textContent=rupiah(sum);}
-  checks.forEach(ch=>{ch.addEventListener('change',updateTotal);const amount=ch.closest('[data-invoice-row]')?.querySelector('.payment-allocation');amount?.addEventListener('input',updateTotal);});
+  checks.forEach(ch=>ch.addEventListener('change',updateTotal));
   search?.addEventListener('input',()=>{const q=search.value.trim().toLowerCase();form.querySelectorAll('[data-invoice-row]').forEach(row=>row.classList.toggle('d-none',!!q&&!row.dataset.search.includes(q)));});
   document.getElementById('selectVisibleInvoices')?.addEventListener('click',()=>{form.querySelectorAll('[data-invoice-row]:not(.d-none) .payment-invoice-check').forEach(ch=>ch.checked=true);updateTotal();});
   document.getElementById('clearSelectedInvoices')?.addEventListener('click',()=>{checks.forEach(ch=>ch.checked=false);updateTotal();});
-  form.querySelectorAll('input[name="method"]').forEach(r=>r.addEventListener('change',()=>{const m=form.querySelector('input[name="method"]:checked')?.value;form.querySelectorAll('.cash-fields').forEach(x=>x.classList.toggle('d-none',m!=='cash'));form.querySelectorAll('.transfer-fields').forEach(x=>x.classList.toggle('d-none',m==='cash'));form.querySelectorAll('.proof-upload-field').forEach(x=>x.classList.toggle('d-none',m==='cash'));}));
+  function syncMethodFields(){const m=form.querySelector('input[name="method"]:checked')?.value;form.querySelectorAll('.cash-fields').forEach(x=>{const show=m==='cash';x.classList.toggle('d-none',!show);x.querySelectorAll('input,select,textarea').forEach(field=>field.disabled=!show)});form.querySelectorAll('.transfer-fields').forEach(x=>{const show=m==='transfer';x.classList.toggle('d-none',!show);x.querySelectorAll('input,select,textarea').forEach(field=>field.disabled=!show)});form.querySelectorAll('.proof-upload-field').forEach(x=>{const show=m!=='cash';x.classList.toggle('d-none',!show);x.querySelectorAll('input,select,textarea').forEach(field=>field.disabled=!show)});}
+  form.querySelectorAll('input[name="method"]').forEach(r=>r.addEventListener('change',syncMethodFields));
   proofInput?.addEventListener('change',()=>{proofFileName.textContent=proofInput.files?.[0]?.name||'Belum ada bukti TF';});
   document.querySelectorAll('[data-payment-invoice-id]').forEach(btn=>btn.addEventListener('click',()=>{const id=String(btn.dataset.paymentInvoiceId||'');checks.forEach(ch=>ch.checked=String(ch.value)===id);const target=checks.find(ch=>String(ch.value)===id);target?.closest('[data-invoice-row]')?.scrollIntoView({block:'nearest'});updateTotal();}));
   form.addEventListener('submit',e=>{if(!checks.some(x=>x.checked)){e.preventDefault();alert('Pilih minimal satu faktur yang akan dibayar.');}});
-  updateTotal();
+  syncMethodFields();updateTotal();
   <% if(paymentAutoOpen || preselectedInvoiceId){ %>setTimeout(()=>bootstrap.Modal.getOrCreateInstance(modal).show(),120);<% } %>
 })();
 </script>

@@ -44,7 +44,7 @@ router.get('/',async(req,res)=>{
   const now=new Date();
   const month=intInRange(req.query.month,1,12,now.getMonth()+1);
   const year=intInRange(req.query.year,2020,2100,now.getFullYear());
-  const status=['unpaid','partial','paid','overdue','cancelled','refunded'].includes(req.query.status)?req.query.status:'';
+  const status=['open','unpaid','partial','paid','overdue','cancelled','refunded'].includes(req.query.status)?req.query.status:'';
   const site=String(req.query.site||'').trim();
   const cluster=String(req.query.cluster||'').trim();
   const customer=String(req.query.customer||'').trim();
@@ -58,7 +58,8 @@ router.get('/',async(req,res)=>{
 
   const listWhere=[...commonWhere];
   const listParams=[...commonParams];
-  if(status){listWhere.push('i.status=?');listParams.push(status);}
+  if(status==='open') listWhere.push("i.status IN ('unpaid','partial','overdue')");
+  else if(status){listWhere.push('i.status=?');listParams.push(status);}
   if(q){listWhere.push('(c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');const like=`%${q}%`;listParams.push(like,like,like,like,like);}
 
   const [invoices]=await db.execute(`SELECT i.*,DATE_FORMAT(i.invoice_date,'%Y-%m-%d') invoice_date_key,DATE_FORMAT(i.due_date,'%Y-%m-%d') due_date_key,c.customer_code,c.name customer_name,c.phone,c.due_day,p.name package_name,s.code site_code,cl.name cluster_name,
@@ -102,8 +103,9 @@ router.get('/',async(req,res)=>{
     FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY s.code,cl.name,c.name,i.due_date`);
   const [staff]=await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);
+  const [banks]=await db.query(`SELECT id,bank_name,account_name,account_number,type FROM banks WHERE is_active=1 AND type IN ('bank_transfer','virtual_account','other') ORDER BY bank_name,account_number`);
   const filters={month,year,status,site,cluster,customer,q};
-  res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,clusters,openInvoices,staff,filters,monthNames:MONTH_NAMES,periodQueryString:periodQuery(filters)});
+  res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,clusters,openInvoices,staff,banks,filters,monthNames:MONTH_NAMES,periodQueryString:periodQuery(filters)});
 });
 
 router.post('/generate',async(req,res)=>{

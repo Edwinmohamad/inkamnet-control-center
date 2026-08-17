@@ -1,4 +1,4 @@
-<% const paymentFilterQuery=new URLSearchParams({q:filters.q||'',site:filters.site||'',cluster:filters.cluster||''}).toString(); %>
+<% const paymentFilterQuery=new URLSearchParams({q:filters.q||'',site:filters.site||'',cluster:filters.cluster||'',month:filters.month||'',year:filters.year||''}).toString(); const paymentMonthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; %>
 <section>
   <div class="module-head">
     <div><div class="module-kicker">PAYMENT COLLECTION</div><h1>Pembayaran Pelanggan</h1><p>Kelola pembayaran satu atau banyak faktur, bukti transfer, cash ke tim, dan verifikasi dalam satu alur.</p></div>
@@ -6,7 +6,7 @@
   </div>
 
   <div class="metric-grid">
-    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pembayaran Terkonfirmasi</span><span class="metric-icon"><i class="bi bi-patch-check-fill"></i></span></div><strong><%= formatRupiah(summary.confirmed_total||0) %></strong><small>Bulan berjalan</small></article>
+    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pembayaran Terkonfirmasi</span><span class="metric-icon"><i class="bi bi-patch-check-fill"></i></span></div><strong><%= formatRupiah(summary.confirmed_total||0) %></strong><small><%= paymentMonthNames[summaryMonth-1] %> <%= summaryYear %></small></article>
     <article class="metric-card orange"><div class="metric-top"><span class="metric-label">Cash di Tim</span><span class="metric-icon"><i class="bi bi-person-badge-fill"></i></span></div><strong><%= formatRupiah(summary.cash_held||0) %></strong><small>Belum disetor ke kas perusahaan</small></article>
     <article class="metric-card red"><div class="metric-top"><span class="metric-label">Transfer Pending</span><span class="metric-icon"><i class="bi bi-bank2"></i></span></div><strong><%= formatRupiah(summary.transfer_pending||0) %></strong><small>Termasuk transfer yang bukti TF belum diupload</small></article>
     <article class="metric-card"><div class="metric-top"><span class="metric-label">Faktur Terbuka</span><span class="metric-icon"><i class="bi bi-hourglass-split"></i></span></div><strong><%= openInvoices.length %></strong><small>Siap menerima pembayaran</small></article>
@@ -17,6 +17,7 @@
       <div class="filter-group"><label>CARI</label><div class="search-box"><i class="bi bi-search"></i><input name="q" value="<%= filters.q %>" placeholder="Nama, Customer ID, faktur, referensi..."></div></div>
       <div class="filter-group"><label>SITE / POP</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
       <div class="filter-group"><label>CLUSTER / ODP</label><select class="form-select" name="cluster"><option value="">Semua Cluster</option><% clusters.forEach(c=>{ %><option value="<%= c.id %>" <%= String(filters.cluster)===String(c.id)?'selected':'' %>><%= c.site_code %> · <%= c.name %></option><% }) %></select></div>
+      <div class="filter-group"><label>PERIODE</label><div class="d-flex gap-2"><select class="form-select" name="month"><option value="">Semua Bulan</option><% paymentMonthNames.forEach((name,index)=>{ %><option value="<%= index+1 %>" <%= Number(filters.month)===index+1?'selected':'' %>><%= name %></option><% }) %></select><input class="form-control" type="number" name="year" min="2020" max="2100" value="<%= filters.year||'' %>" placeholder="Tahun"></div></div>
       <div class="filter-group d-flex align-items-end gap-2"><button class="btn-tech primary flex-fill"><i class="bi bi-search"></i>Cari</button><a class="btn-tech" href="/payments"><i class="bi bi-x-lg"></i></a></div>
     </div>
   </form>
@@ -52,7 +53,7 @@
   </div>
 </section>
 
-<%- include('_payment-modal',{openInvoices,staff,preselectedInvoiceId,returnTo:'/payments?'+paymentFilterQuery,autoOpenPaymentModal:!!preselectedInvoiceId}) %>
+<%- include('_payment-modal',{openInvoices,staff,banks,preselectedInvoiceId,returnTo:'/payments?'+paymentFilterQuery,autoOpenPaymentModal:!!preselectedInvoiceId}) %>
 
 <div class="modal fade" id="proofViewerModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content proof-viewer-modal"><div class="modal-header"><div><div class="module-kicker">BUKTI PEMBAYARAN</div><h5 class="modal-title">Bukti Pembayaran</h5></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body proof-viewer-grid"><div class="proof-stage"><div class="proof-stage-grid"></div><img id="proofViewerImage" alt="Bukti pembayaran" class="d-none"><iframe id="proofViewerPdf" title="Bukti pembayaran PDF" class="d-none"></iframe><div id="proofViewerLoading" class="proof-loading"><span class="proof-scan"></span><i class="bi bi-shield-lock-fill"></i><strong>Secure Payment Evidence</strong><small>Memuat bukti pembayaran...</small></div></div><aside class="proof-meta-panel"><div class="proof-verified-seal" id="proofStatusSeal"><i class="bi bi-patch-check-fill"></i><span>PAYMENT</span><strong>CONFIRMED</strong></div><div class="proof-meta-list"><div><span>Pelanggan</span><strong id="proofMetaCustomer">-</strong><small id="proofMetaCode">-</small></div><div><span>Faktur</span><strong id="proofMetaInvoice">-</strong></div><div><span>Nominal</span><strong id="proofMetaAmount">-</strong></div><div><span>Bank</span><strong id="proofMetaBank">-</strong></div><div><span>Referensi</span><strong id="proofMetaReference">-</strong></div><div><span>Diupload Oleh</span><strong id="proofMetaUploader">-</strong><small id="proofMetaUploaded">-</small></div></div><a id="proofOpenNew" class="btn-tech w-100 justify-content-center" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i>Buka File Asli</a></aside></div></div></div></div>
 
