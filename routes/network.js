@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../config/db');
 const { requireAdmin } = require('../middleware/auth');
 const { checkCustomer, isolateCustomer, unisolateCustomer } = require('../services/networkService');
-const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret, customersForRouter, customersForSync } = require('../services/nmsService');
+const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret, customersForRouter, customersForSync, smartSyncPlan, applySmartSync } = require('../services/nmsService');
 const { audit } = require('../services/auditService');
 const router = express.Router();
 
@@ -52,6 +52,19 @@ router.post('/secrets/:secretId', requireAdmin, async (req,res) => {
 router.get('/api/sync-customers', requireAdmin, async (req,res) => {
   try { res.set('Cache-Control','no-store').json({ok:true,customers:await customersForSync()}); }
   catch (error) { res.status(400).json({ok:false,error:error.message}); }
+});
+
+router.get('/api/smart-sync-plan', requireAdmin, async (req,res) => {
+  try { res.set('Cache-Control','no-store').json({ok:true,plan:await smartSyncPlan(req.query.site_code||'')}); }
+  catch(error) { res.status(400).json({ok:false,error:error.message}); }
+});
+
+router.post('/smart-sync', requireAdmin, async (req,res) => {
+  try {
+    const result=await applySmartSync(req.body.site_code||'');
+    await audit({userId:req.session.user.id,action:'smart_sync',entityType:'pppoe_reconciliation',entityId:null,description:`Smart Sync PPPoE ${result.scope}: ${result.succeeded}/${result.processed} berhasil, ${result.failed} gagal`,ip:req.ip});
+    res.json({ok:true,result,message:result.processed?`Smart Sync selesai: ${result.succeeded} berhasil${result.failed?`, ${result.failed} gagal`:''}.`:'Tidak ada kandidat high-confidence yang aman untuk disinkronkan.'});
+  } catch(error) { res.status(400).json({ok:false,error:error.message}); }
 });
 
 router.post('/secrets/:secretId/sync', requireAdmin, async (req,res) => {

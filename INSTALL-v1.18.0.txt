@@ -1,0 +1,15 @@
+INKAMNET Control Center v1.18.0 — NMS PPPoE Focus
+
+Perubahan utama:
+- Dashboard MikroTik NMS dirombak customer-first: monitoring pelanggan + health sinkronisasi menjadi fokus utama.
+- Live Traffic router dibuat compact dan dipindahkan menjadi informasi sekunder.
+- Manual Sync: daftar router diambil dari katalog router database berdasarkan site, tidak lagi hanya dari snapshot router yang ONLINE.
+- Tombol Sinkronkan PPPoE dipermudah: aktif setelah pelanggan + secret dipilih; validasi site/duplikasi tetap dilakukan server-side.
+- Smart Sync Aman: hanya memproses kandidat high-confidence (>=90%, gap kandidat >=8 poin, site sama, username existing tidak boleh berbeda).
+- Smart Sync selalu validasi ulang di server dan menggunakan syncSecret yang memiliki DB lock + duplicate protection.
+
+Cara update manual:
+1. Copy semua file dalam ZIP patch ke root repo lokal.
+2. Replace file existing.
+3. Jalankan: npm run validate
+4. Buka GitHub Desktop -> review Changes -> Commit -> Push origin.

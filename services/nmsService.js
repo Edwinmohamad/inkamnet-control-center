@@ -33,6 +33,8 @@ function exemptOf(secret) {
 function matchScore(secret,customer) {
   const username=normalize(secret.name),comment=normalize(secret.comment),name=normalize(customer.name),code=normalize(customer.customer_code),registered=normalize(customer.pppoe_username);
   if (registered && username===registered) return 100;
+  if (username && username===name) return 99;
+  if (username && name && username.replace(/ /g,'')===name.replace(/ /g,'')) return 98;
   if (username && (username===code || comment.includes(code))) return 96;
   let score=0;
   if (username.length>=4 && name.replace(/ /g,'').includes(username.replace(/ /g,''))) score=82;
@@ -177,4 +179,39 @@ async function syncActiveCustomers(siteCode=''){
   return summary;
 }
 
-module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,disconnectSecret,customersForRouter,customersForSync,syncActiveCustomers,cleanPayload,matchScore,exemptOf};
+function smartSyncPlanFromSnapshots(snapshots,siteCode=''){
+  const scope=String(siteCode||'').trim().toUpperCase(),customers=new Map();
+  for(const snapshot of snapshots||[]){
+    if(scope&&String(snapshot.siteCode||'').trim().toUpperCase()!==scope)continue;
+    for(const customer of snapshot.unmatchedCustomers||[]){
+      const key=String(customer.id),row=customers.get(key)||{...customer,siteCode:snapshot.siteCode,suggestions:[]};
+      for(const suggestion of customer.suggestions||[]){
+        const candidate={...suggestion,routerId:snapshot.id,routerName:snapshot.name,siteCode:snapshot.siteCode};
+        if(!row.suggestions.some(item=>String(item.routerId)===String(candidate.routerId)&&String(item.secretId)===String(candidate.secretId)))row.suggestions.push(candidate);
+      }
+      customers.set(key,row);
+    }
+  }
+  const rows=[...customers.values()].map(customer=>{
+    const suggestions=[...(customer.suggestions||[])].sort((a,b)=>Number(b.score||0)-Number(a.score||0)||String(a.secretName||'').localeCompare(String(b.secretName||''))),top=suggestions[0]||null,second=suggestions[1]||null;
+    const registered=normalize(customer.pppoe_username),topName=normalize(top?.secretName),registeredOk=!registered||registered===topName;
+    const safe=!!top&&Number(top.score||0)>=90&&registeredOk&&(!second||Number(top.score||0)-Number(second.score||0)>=8);
+    return {...customer,suggestions,top,second,safe,review:!!top&&!safe,reason:!top?'no_candidate':!registeredOk?'registered_username_differs':Number(top.score||0)<90?'score_below_90':second&&Number(top.score||0)-Number(second.score||0)<8?'ambiguous':'safe'};
+  });
+  const secretOwners=new Map();
+  for(const row of rows.filter(item=>item.safe)){const key=`${row.top.routerId}:${row.top.secretId}`,owners=secretOwners.get(key)||[];owners.push(row.id);secretOwners.set(key,owners);}
+  for(const row of rows){if(!row.safe)continue;const key=`${row.top.routerId}:${row.top.secretId}`;if((secretOwners.get(key)||[]).length>1){row.safe=false;row.review=true;row.reason='secret_conflict';}}
+  const safe=rows.filter(row=>row.safe),review=rows.filter(row=>row.review),unmatched=rows.filter(row=>!row.top);
+  return {scope:scope||'ALL',rows,safe,review,unmatched,counts:{total:rows.length,safe:safe.length,review:review.length,unmatched:unmatched.length}};
+}
+async function smartSyncPlan(siteCode=''){return smartSyncPlanFromSnapshots(await allSnapshots(),siteCode);}
+async function applySmartSync(siteCode=''){
+  const plan=await smartSyncPlan(siteCode),results=[];
+  for(const row of plan.safe.slice(0,100)){
+    try{const result=await syncSecret(row.top.routerId,row.top.secretId,row.id);results.push({ok:true,customerId:row.id,customerCode:row.customer_code,customerName:row.name,secretName:result.secret.name,routerName:result.router.name,score:Number(row.top.score||0)});}
+    catch(error){results.push({ok:false,customerId:row.id,customerCode:row.customer_code,customerName:row.name,secretName:row.top.secretName,routerName:row.top.routerName,score:Number(row.top.score||0),error:error.message});}
+  }
+  return {scope:plan.scope,planned:plan.safe.length,processed:results.length,succeeded:results.filter(row=>row.ok).length,failed:results.filter(row=>!row.ok).length,results};
+}
+
+module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,disconnectSecret,customersForRouter,customersForSync,syncActiveCustomers,smartSyncPlan,applySmartSync,smartSyncPlanFromSnapshots,cleanPayload,matchScore,exemptOf};
