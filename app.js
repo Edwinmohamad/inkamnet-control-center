@@ -23,7 +23,8 @@ const invoiceLogoUpload = require('./middleware/invoiceLogoUpload');
 const { requireAuth, loadPermissions, requirePermission } = require('./middleware/auth');
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema } = require('./services/schemaService');
+const { purgeOldLogs } = require('./services/logRetentionService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema } = require('./services/schemaService');
 
 const app = express();
 const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
@@ -227,6 +228,7 @@ async function bootstrap() {
   await ensureV18Schema();
   await ensureV19Schema();
   await ensureV20Schema();
+  await ensureV21Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
@@ -242,6 +244,11 @@ async function bootstrap() {
       console.log('Cron invoice:', await generateMonthlyInvoices(new Date(), false, null));
       console.log('Cron isolasi:', await runAutoIsolation());
     } catch (err) { console.error('Cron billing/network gagal:', err.message); }
+  }, { timezone: 'Asia/Jakarta' });
+
+  cron.schedule('30 2 * * 0', async () => {
+    try { console.log('Cron retensi log:',await purgeOldLogs(7)); }
+    catch (err) { console.error('Cron retensi log gagal:',err.message); }
   }, { timezone: 'Asia/Jakarta' });
 
   const port = Number(process.env.PORT || 3000);

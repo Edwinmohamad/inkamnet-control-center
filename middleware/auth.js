@@ -6,11 +6,21 @@ const PERMISSIONS = [
 ];
 
 const DEFAULT_PERMISSIONS = {
+  master_admin: [...PERMISSIONS],
   admin: [...PERMISSIONS],
   staff: ['dashboard', 'customers', 'billing', 'support', 'reports']
 };
 
+function normalizeRole(value) {
+  const role = String(value || 'staff').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return ['masteradmin', 'superadmin', 'super_admin'].includes(role) ? 'master_admin' : role;
+}
+function isMasterAdminRole(value) { return normalizeRole(value) === 'master_admin'; }
+function isAdminRole(value) { return ['admin', 'master_admin'].includes(normalizeRole(value)); }
+
 function normalizePermissions(value, role = 'staff') {
+  role = normalizeRole(role);
+  if (isMasterAdminRole(role)) return [...PERMISSIONS];
   let parsed = value;
   if (typeof value === 'string') {
     try { parsed = JSON.parse(value); } catch { parsed = []; }
@@ -18,10 +28,10 @@ function normalizePermissions(value, role = 'staff') {
   if (Array.isArray(parsed)) parsed = parsed.map(item => item === 'tickets' ? 'support' : item);
   const allowed = new Set(PERMISSIONS);
   let result = Array.isArray(parsed) ? parsed.filter(item => allowed.has(item)) : [];
-  if (role !== 'admin') result = result.filter(item => item !== 'settings');
+  if (!isAdminRole(role)) result = result.filter(item => item !== 'settings');
   if (!result.length) result.push(...(DEFAULT_PERMISSIONS[role] || DEFAULT_PERMISSIONS.staff));
   if (!result.includes('dashboard')) result.unshift('dashboard');
-  if (role === 'admin' && !result.includes('settings')) result.push('settings');
+  if (isAdminRole(role) && !result.includes('settings')) result.push('settings');
   return [...new Set(result)];
 }
 
@@ -32,7 +42,7 @@ async function loadPermissions(req, res, next) {
     res.locals.can = () => false;
     return next();
   }
-  const role = req.session.user.role || 'staff';
+  const role = normalizeRole(req.session.user.role || 'staff');
   try {
     const [rows] = await db.execute(`SELECT permissions_json FROM role_permissions WHERE role_key=? LIMIT 1`, [role]);
     req.permissions = normalizePermissions(rows[0]?.permissions_json, role);
@@ -64,7 +74,7 @@ function requirePermission(permission) {
 
 function requireAdmin(req, res, next) {
   if (!req.session.user) return res.redirect('/login');
-  if (req.session.user.role !== 'admin') {
+  if (!isAdminRole(req.session.user.role)) {
     req.session.flash = { type: 'danger', message: 'Akses hanya untuk Admin.' };
     return res.redirect('/');
   }
@@ -74,6 +84,9 @@ function requireAdmin(req, res, next) {
 module.exports = {
   PERMISSIONS,
   DEFAULT_PERMISSIONS,
+  normalizeRole,
+  isAdminRole,
+  isMasterAdminRole,
   normalizePermissions,
   loadPermissions,
   requireAuth,

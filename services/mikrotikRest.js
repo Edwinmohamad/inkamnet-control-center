@@ -120,7 +120,15 @@ async function deleteSecret(router, id) {
   return {secret,disconnected:!!active};
 }
 
+async function disconnectSecret(router,id){
+  const secret=await getSecret(router,id);
+  if(!secret?.name)throw new Error('PPPoE secret tidak ditemukan');
+  const active=await findActive(router,secret.name);
+  if(active?.['.id'])await request(router,'DELETE',`/ppp/active/${encodeURIComponent(active['.id'])}`);
+  return {secret,disconnected:!!active};
+}
+
 module.exports = {
   request, testConnection, findSecret, findActive, isolatePppoe, unisolatePppoe,
-  listSecrets, listActive, listProfiles, listInterfaces, createSecret, updateSecret, getSecret, deleteSecret
+  listSecrets, listActive, listProfiles, listInterfaces, createSecret, updateSecret, getSecret, deleteSecret, disconnectSecret
 };

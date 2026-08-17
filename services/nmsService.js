@@ -54,7 +54,10 @@ async function customersForSite(router) {
 
 async function syncCustomerStatuses(secretRows) {
   const linked=secretRows.filter(x=>x.customer?.id);
-  for(let offset=0;offset<linked.length;offset+=200){const chunk=linked.slice(offset,offset+200),cases=chunk.map(()=>`WHEN ? THEN ?`).join(' '),ids=chunk.map(x=>x.customer.id),params=chunk.flatMap(x=>[x.customer.id,x.status]).concat(ids);await db.execute(`UPDATE customers SET network_status=CASE id ${cases} ELSE network_status END WHERE id IN (${ids.map(()=>'?').join(',')})`,params);}
+  for(let offset=0;offset<linked.length;offset+=200){
+    const chunk=linked.slice(offset,offset+200),cases=chunk.map(()=>`WHEN ? THEN ?`).join(' '),ids=chunk.map(x=>x.customer.id),statusParams=chunk.flatMap(x=>[x.customer.id,x.status]);
+    await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>CASE id ${cases} ELSE network_status END,NOW(),status_changed_at),network_status=CASE id ${cases} ELSE network_status END WHERE id IN (${ids.map(()=>'?').join(',')})`,[...statusParams,...statusParams,...ids]);
+  }
 }
 
 async function routerSnapshot(router) {
@@ -87,9 +90,10 @@ async function allSnapshots(){const [routers]=await db.query(`SELECT r.*,s.code 
 async function routerById(id){const [rows]=await db.execute(`SELECT r.*,s.code site_code,s.name site_name FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.id=? AND r.is_active=1`,[id]);if(!rows.length)throw new Error('Router tidak ditemukan atau tidak aktif');return rows[0];}
 async function customerForRouter(router,customerId){const [rows]=await db.execute(`SELECT id,site_id,name,customer_code FROM customers WHERE id=? AND customer_status='active'`,[customerId]);if(!rows.length)throw new Error('Pelanggan billing tidak ditemukan');if(Number(rows[0].site_id)!==Number(router.site_id))throw new Error('Site pelanggan dan router harus sama');return rows[0];}
 
-async function saveSecret(routerId,secretId,input,customerId){const router=await routerById(routerId),payload=cleanPayload(input);if(!payload.name)throw new Error('Username PPPoE wajib diisi');const customer=customerId?await customerForRouter(router,customerId):null;if(secretId)await mt.updateSecret(router,secretId,payload);else{if(!payload.password)throw new Error('Password wajib diisi untuk secret baru');await mt.createSecret(router,payload);}if(customer)await db.execute(`UPDATE customers SET router_id=?,pppoe_username=?,network_status=? WHERE id=?`,[router.id,payload.name,bool(payload.disabled)?'isolated':'offline',customer.id]);return {router,payload,customer};}
-async function syncSecret(routerId,secretId,customerId){const router=await routerById(routerId),customer=await customerForRouter(router,customerId),secret=await mt.getSecret(router,secretId);if(!secret?.name)throw new Error('PPPoE secret tidak ditemukan');const existing=await db.execute(`SELECT id,name FROM customers WHERE router_id=? AND pppoe_username=? AND id<>? LIMIT 1`,[router.id,secret.name,customer.id]);if(existing[0].length)throw new Error(`Secret sudah terhubung ke ${existing[0][0].name}`);await db.execute(`UPDATE customers SET router_id=?,pppoe_username=?,network_status=? WHERE id=?`,[router.id,secret.name,statusOf(secret,null),customer.id]);return {router,secret,customer};}
-async function removeSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.deleteSecret(router,secretId);const [linked]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);await db.execute(`UPDATE customers SET pppoe_username=NULL,network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result,linkedCustomers:linked};}
+async function saveSecret(routerId,secretId,input,customerId){const router=await routerById(routerId),payload=cleanPayload(input);if(!payload.name)throw new Error('Username PPPoE wajib diisi');const customer=customerId?await customerForRouter(router,customerId):null;if(secretId)await mt.updateSecret(router,secretId,payload);else{if(!payload.password)throw new Error('Password wajib diisi untuk secret baru');await mt.createSecret(router,payload);}if(customer){const status=bool(payload.disabled)?'isolated':'offline';await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>?,NOW(),status_changed_at),router_id=?,pppoe_username=?,network_status=? WHERE id=?`,[status,router.id,payload.name,status,customer.id]);}return {router,payload,customer};}
+async function syncSecret(routerId,secretId,customerId){const router=await routerById(routerId),customer=await customerForRouter(router,customerId),secret=await mt.getSecret(router,secretId);if(!secret?.name)throw new Error('PPPoE secret tidak ditemukan');const existing=await db.execute(`SELECT id,name FROM customers WHERE router_id=? AND pppoe_username=? AND id<>? LIMIT 1`,[router.id,secret.name,customer.id]);if(existing[0].length)throw new Error(`Secret sudah terhubung ke ${existing[0][0].name}`);const status=statusOf(secret,null);await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>?,NOW(),status_changed_at),router_id=?,pppoe_username=?,network_status=? WHERE id=?`,[status,router.id,secret.name,status,customer.id]);return {router,secret,customer};}
+async function removeSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.deleteSecret(router,secretId);const [linked]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),pppoe_username=NULL,network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result,linkedCustomers:linked};}
+async function disconnectSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.disconnectSecret(router,secretId);if(result.disconnected)await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result};}
 async function customersForRouter(routerId){const router=await routerById(routerId);return customersForSite(router);}
 
 async function syncActiveCustomers(siteCode=''){
@@ -138,7 +142,7 @@ async function syncActiveCustomers(siteCode=''){
       if(matches.length===0){summary.unmatched++;continue;}
       if(matches.length>1){summary.duplicate++;continue;}
       const match=matches[0];
-      await conn.execute(`UPDATE customers SET router_id=?,network_status=? WHERE id=?`,[match.router.id,match.status,customer.id]);
+      await conn.execute(`UPDATE customers SET status_changed_at=IF(network_status<>?,NOW(),status_changed_at),router_id=?,network_status=? WHERE id=?`,[match.status,match.router.id,match.status,customer.id]);
       summary.matched++;summary[match.status]=(summary[match.status]||0)+1;
     }
     await conn.commit();
@@ -147,4 +151,4 @@ async function syncActiveCustomers(siteCode=''){
   return summary;
 }
 
-module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};
+module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,disconnectSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};

@@ -4,7 +4,7 @@ const fs=require('fs');
 const path=require('path');
 const crypto=require('crypto');
 const db=require('../config/db');
-const { requireAdmin, PERMISSIONS, normalizePermissions }=require('../middleware/auth');
+const { requireAdmin, PERMISSIONS, normalizePermissions, normalizeRole, isMasterAdminRole }=require('../middleware/auth');
 const { audit }=require('../services/auditService');
 const router=express.Router();
 router.use(requireAdmin);
@@ -99,7 +99,7 @@ router.post('/gateways',async(req,res)=>{const allowed=new Set(['active','inacti
 router.post('/gateways/:id/toggle',async(req,res)=>{await db.execute(`UPDATE payment_gateways SET status=IF(status='active','inactive','active') WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=gateways');});
 
 router.post('/roles/:roleKey',async(req,res)=>{
-  const roleKey=clean(req.params.roleKey).toLowerCase();
+  const roleKey=normalizeRole(req.params.roleKey);
   const [rows]=await db.execute(`SELECT id,role_key FROM role_permissions WHERE role_key=? LIMIT 1`,[roleKey]);
   if(!rows.length){req.session.flash={type:'danger',message:'Role tidak ditemukan.'};return res.redirect('/settings?tab=roles');}
   const requested=Array.isArray(req.body.permissions)?req.body.permissions:[req.body.permissions].filter(Boolean);
@@ -111,7 +111,7 @@ router.post('/roles/:roleKey',async(req,res)=>{
   res.redirect('/settings?tab=roles');
 });
 
-router.post('/users',async(req,res)=>{const b=req.body;const hash=await bcrypt.hash(b.password,12);const [result]=await db.execute(`INSERT INTO users(name,username,password_hash,role,is_active) VALUES(?,?,?,?,1)`,[b.name,b.username,hash,b.role||'staff']);await db.execute(`INSERT INTO employees(employee_code,name,user_id,is_active) VALUES(?,?,?,1)`,[`USR-${String(result.insertId).padStart(4,'0')}`,b.name,result.insertId]);req.session.flash={type:'success',message:'Akun staff dibuat dan masuk ke direktori karyawan.'};res.redirect('/settings?tab=employees');});
+router.post('/users',async(req,res)=>{const b=req.body;const hash=await bcrypt.hash(b.password,12);const requestedRole=normalizeRole(b.role);const role=['staff','admin','master_admin'].includes(requestedRole)?requestedRole:'staff';if(role==='master_admin'&&!isMasterAdminRole(req.session.user.role)){req.session.flash={type:'danger',message:'Hanya Master Admin yang dapat membuat Master Admin baru.'};return res.redirect('/settings?tab=employees');}const [result]=await db.execute(`INSERT INTO users(name,username,password_hash,role,is_active) VALUES(?,?,?,?,1)`,[b.name,b.username,hash,role]);await db.execute(`INSERT INTO employees(employee_code,name,user_id,is_active) VALUES(?,?,?,1)`,[`USR-${String(result.insertId).padStart(4,'0')}`,b.name,result.insertId]);req.session.flash={type:'success',message:`Akun ${role==='master_admin'?'Master Admin':role} dibuat dan masuk ke direktori karyawan.`};res.redirect('/settings?tab=employees');});
 router.post('/users/:id/toggle',async(req,res)=>{if(Number(req.params.id)===Number(req.session.user.id)){req.session.flash={type:'warning',message:'Akun yang sedang dipakai tidak bisa dinonaktifkan.'};return res.redirect('/settings?tab=employees');}await db.execute(`UPDATE users SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);await db.execute(`UPDATE employees SET is_active=(SELECT is_active FROM users WHERE id=?) WHERE user_id=?`,[req.params.id,req.params.id]);res.redirect('/settings?tab=employees');});
 router.post('/users/:id/password',async(req,res)=>{const hash=await bcrypt.hash(req.body.password,12);await db.execute(`UPDATE users SET password_hash=? WHERE id=?`,[hash,req.params.id]);req.session.flash={type:'success',message:'Password berhasil direset.'};res.redirect('/settings?tab=employees');});
 

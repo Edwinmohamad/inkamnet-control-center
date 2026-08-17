@@ -59,6 +59,13 @@ function phoneString(v){
   if(/^8\d{7,14}$/.test(s)) s='0'+s;
   return s;
 }
+function normalizeWhatsapp(value){
+  let digits=String(value||'').replace(/\D/g,'');
+  if(digits.startsWith('0'))digits=`62${digits.slice(1)}`;
+  else if(digits.startsWith('8'))digits=`62${digits}`;
+  return /^628[1-9]\d{7,11}$/.test(digits)?digits:'';
+}
+function whatsappState(value){return normalizeWhatsapp(value)?'unverified':'invalid';}
 
 function normalizeCodePart(value){return String(value||'').trim().toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-+|-+$/g,'');}
 function autoCustomerEmail(customerCode){
@@ -366,7 +373,7 @@ router.post('/', async (req, res) => {
     req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect('/customers/new');
   }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
-  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,prorata_enabled,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[customerCode,b.name,b.phone||null,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid','offline',b.prorata_enabled?1:0,b.notes||null]);
+  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?)`,[customerCode,b.name,b.phone||null,whatsappState(b.phone),email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid','offline',b.prorata_enabled?1:0,b.notes||null]);
   await audit({userId:req.session.user.id,action:'create',entityType:'customer',entityId:result.insertId,description:`Tambah ${customerCode} - ${b.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan berhasil ditambahkan dengan Customer ID ${customerCode}.`};res.redirect('/customers');
 });
@@ -381,17 +388,28 @@ router.post('/:id',async(req,res)=>{
     req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect(`/customers/${req.params.id}/edit`);
   }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
-  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
+  const [[current]]=await db.execute(`SELECT phone,customer_status FROM customers WHERE id=?`,[req.params.id]);
+  const phoneChanged=String(current?.phone||'')!==String(b.phone||'');
+  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=IF(?, ?, whatsapp_status),whatsapp_verified_at=IF(?,NULL,whatsapp_verified_at),whatsapp_verified_by=IF(?,NULL,whatsapp_verified_by),email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,phoneChanged?1:0,whatsappState(b.phone),phoneChanged?1:0,phoneChanged?1:0,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
   await audit({userId:req.session.user.id,action:'update',entityType:'customer',entityId:req.params.id,description:`Update ${customerCode} - ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Data pelanggan diperbarui.'};res.redirect('/customers');
 });
 router.post('/:id/delete',requireAdmin,async(req,res)=>{
   const [rows]=await db.execute(`SELECT id,customer_code,name,customer_status FROM customers WHERE id=? LIMIT 1`,[req.params.id]);
   if(!rows.length){req.session.flash={type:'warning',message:'Pelanggan tidak ditemukan.'};return res.redirect('/customers');}
   const c=rows[0];
-  await db.execute(`UPDATE customers SET customer_status='terminated',network_status='offline' WHERE id=?`,[c.id]);
+  await db.execute(`UPDATE customers SET status_changed_at=NOW(),customer_status='terminated',network_status='offline' WHERE id=?`,[c.id]);
   await audit({userId:req.session.user.id,action:'archive',entityType:'customer',entityId:c.id,description:`Arsip pelanggan ${c.customer_code} - ${c.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan ${c.name} diarsipkan. Riwayat tagihan dan pembayaran tetap aman.`};
   res.redirect('/customers');
+});
+router.post('/:id/whatsapp-status',requireAdmin,async(req,res)=>{
+  const allowed=new Set(['valid','invalid','unverified']);const status=allowed.has(req.body.status)?req.body.status:'unverified';
+  const [[customer]]=await db.execute(`SELECT id,name,phone FROM customers WHERE id=?`,[req.params.id]);
+  if(!customer){req.session.flash={type:'danger',message:'Pelanggan tidak ditemukan.'};return res.redirect('/customers');}
+  if(status==='valid'&&!normalizeWhatsapp(customer.phone)){req.session.flash={type:'danger',message:'Nomor WhatsApp tidak valid. Perbaiki nomor pelanggan terlebih dahulu.'};return res.redirect('/customers');}
+  await db.execute(`UPDATE customers SET whatsapp_status=?,whatsapp_verified_at=${status==='unverified'?'NULL':'NOW()'},whatsapp_verified_by=? WHERE id=?`,[status,status==='unverified'?null:req.session.user.id,customer.id]);
+  await audit({userId:req.session.user.id,action:'validate_whatsapp',entityType:'customer',entityId:customer.id,description:`WhatsApp ${customer.name}: ${status}`,ip:req.ip});
+  req.session.flash={type:status==='valid'?'success':'warning',message:`Status WhatsApp ${customer.name}: ${status}.`};res.redirect('/customers');
 });
 router.get('/:id',async(req,res)=>{const [rows]=await db.execute(`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,r.name router_name,cl.name cluster_name,se.name sales_name FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE c.id=?`,[req.params.id]);if(!rows.length)return res.status(404).send('Pelanggan tidak ditemukan');const [invoices]=await db.execute(`SELECT * FROM invoices WHERE customer_id=? ORDER BY period_year DESC,period_month DESC`,[req.params.id]);res.render('customers/detail',{title:rows[0].name,customer:rows[0],invoices});});
 module.exports=router;
