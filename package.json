@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.14.1 - repaired master access, complete site analytics, compact one-page invoices, localized statuses, and site-safe PPPoE reconciliation in MikroTik NMS",
+  "description": "INKAMNET Control Center v1.15.0 - guided auto/manual PPPoE synchronization in MikroTik NMS and a denser operations dashboard",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
