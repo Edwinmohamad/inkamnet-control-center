@@ -27,15 +27,13 @@
   <div class="data-card action-safe-card">
     <div class="data-card-head"><div><h3>Database Pelanggan</h3><small><%= customers.length %> data ditemukan</small></div><div class="toolbar-right"><span class="status-badge purple"><%= customers.length %> rows</span></div></div>
     <div class="table-responsive action-safe-table">
-      <table class="app-table"><thead><tr><th>Customer</th><th>Sales</th><th>Site / Cluster</th><th>Paket</th><th>Harga Paket</th><th>PPPoE</th><th>Billing</th><th>Kontak</th><th class="text-center">Tindakan</th></tr></thead><tbody>
-      <% customers.forEach(c=>{ const wa=c.whatsapp_status==='valid'?String(c.whatsapp_normalized||''):''; %><tr>
+      <table class="app-table"><thead><tr><th class="customer-sequence">No.</th><th>Pelanggan</th><th>Site / Cluster</th><th>Paket</th><th>Harga Paket</th><th>Kontak</th><th class="text-center">Tindakan</th></tr></thead><tbody>
+      <% customers.forEach((c,index)=>{ const wa=c.whatsapp_status==='valid'?String(c.whatsapp_normalized||''):''; %><tr>
+        <td class="customer-sequence"><span class="customer-row-number"><%= index+1 %></span></td>
         <td><a class="cell-main text-decoration-none" href="/customers/<%= c.id %>"><%= c.name %></a><span class="cell-sub"><%= c.customer_code %></span></td>
-        <td><span class="cell-main"><%= c.sales_name || 'Direct' %></span><span class="cell-sub"><%= c.sales_code || 'Tanpa sales' %></span></td>
         <td><span class="cell-main"><%= c.site_code %></span><span class="cell-sub"><%= c.cluster_name || 'Belum di-cluster' %></span></td>
         <td><span class="cell-main"><%= c.package_name %></span><span class="cell-sub"><%= c.speed_label || 'Paket Internet' %></span></td>
         <td class="money"><%= formatRupiah(c.package_price) %><span class="cell-sub">/ bulan</span></td>
-        <td><span class="cell-main"><%= c.pppoe_username || 'Belum diisi' %></span><span class="cell-sub"><%= c.router_name ? c.router_name+' · '+c.site_code : 'Belum terhubung ke router Site' %></span><span class="status-badge <%= c.network_status==='online'?'green':c.network_status==='isolated'?'red':'gray' %> mt-1"><%= statusLabel(c.network_status) %></span><% if(isAdmin){ %><button type="button" class="pppoe-row-sync" data-bs-toggle="modal" data-bs-target="#customerPppoeModal" data-customer-id="<%= c.id %>" data-customer-name="<%= c.name %>" data-customer-code="<%= c.customer_code %>" data-site="<%= c.site_code %>"><i class="bi bi-stars"></i>Sugest Secret PPPoE</button><% } %></td>
-        <td><span class="status-badge <%= c.billing_status==='paid'?'green':c.billing_status==='overdue'?'red':'orange' %>"><%= statusLabel(c.billing_status) %></span></td>
         <td><% if(wa){ %><a class="customer-wa-link" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer" title="Buka WhatsApp <%= c.name %>"><i class="bi bi-whatsapp"></i><span><%= c.phone %></span></a><% }else{ %><span class="cell-main"><%= c.phone||'-' %></span><% } %><span class="wa-validation-badge <%= c.whatsapp_status||'invalid' %>"><i class="bi <%= c.whatsapp_status==='valid'?'bi-cpu-fill':'bi-exclamation-octagon-fill' %>"></i><%= c.whatsapp_status==='valid'?'Format valid · sistem':'Format nomor tidak valid' %></span><span class="cell-sub"><%= c.address || '-' %></span></td>
         <td class="text-center customer-action-cell">
           <button class="action-menu action-menu-labeled" type="button" data-action-popover-target="customerAction<%= c.id %>" aria-label="Buka tindakan pelanggan <%= c.name %>"><i class="bi bi-three-dots-vertical"></i><span>Aksi</span></button>
@@ -47,7 +45,7 @@
               <% if(c.open_invoice_id){ %><a class="ink-action-item compact success" href="/payments?invoice_id=<%= c.open_invoice_id %>"><i class="bi bi-wallet2"></i><span><b>Pembayaran</b><small>Catat pembayaran tagihan aktif</small></span></a><% }else{ %><a class="ink-action-item compact" href="/invoices?customer=<%= c.id %>"><i class="bi bi-receipt"></i><span><b>Cek Tagihan</b><small>Lihat daftar tagihan pelanggan</small></span></a><% } %>
               <a class="ink-action-item compact" href="/payments?q=<%= encodeURIComponent(c.customer_code) %>"><i class="bi bi-clock-history"></i><span><b>Cek Pembayaran</b><small>Riwayat transaksi pelanggan</small></span></a>
               <a class="ink-action-item compact" href="/invoices?customer=<%= c.id %>"><i class="bi bi-receipt-cutoff"></i><span><b>Rincian Tagihan</b><small>Invoice dan status pembayaran</small></span></a>
-              <% if(c.pppoe_username&&c.router_id){ %><form method="post" action="/network/<%= c.id %>/check"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="ink-action-item compact" type="submit"><i class="bi bi-arrow-repeat"></i><span><b>Sinkron Status PPPoE</b><small>Cek status langsung ke router <%= c.site_code %></small></span></button></form><% } %>
+              <a class="ink-action-item compact" href="/network/monitor"><i class="bi bi-router-fill"></i><span><b>Kelola di MikroTik NMS</b><small>Sinkron PPPoE dan monitoring dilakukan terpusat</small></span></a>
               <% if(wa.length>=9){ %><a class="ink-action-item compact success" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp"></i><span><b>WhatsApp</b><small>Hubungi pelanggan</small></span></a><% } %>
               <div class="ink-action-separator"></div><div class="system-validation-note"><i class="bi bi-cpu-fill"></i><span><b>Validasi WhatsApp otomatis</b><small>Status dihitung sistem setiap nomor disimpan.</small></span></div>
               <% if(user.role==='admin' && c.customer_status!=='terminated'){ %><div class="ink-action-separator"></div><form method="post" action="/customers/<%= c.id %>/delete" onsubmit="return confirm('Arsipkan pelanggan ini? Riwayat tagihan dan pembayaran tetap disimpan.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="ink-action-item compact danger" type="submit"><i class="bi bi-archive"></i><span><b>Hapus / Arsipkan</b><small>Riwayat keuangan tetap disimpan</small></span></button></form><% } %>
@@ -55,7 +53,7 @@
           </div>
         </td>
       </tr><% }) %>
-      <% if(!customers.length){ %><tr><td colspan="9"><div class="empty-state"><i class="bi bi-people"></i><strong>Data pelanggan tidak ditemukan</strong><small>Coba ubah filter atau tambahkan pelanggan baru.</small></div></td></tr><% } %>
+      <% if(!customers.length){ %><tr><td colspan="7"><div class="empty-state"><i class="bi bi-people"></i><strong>Data pelanggan tidak ditemukan</strong><small>Coba ubah filter atau tambahkan pelanggan baru.</small></div></td></tr><% } %>
       </tbody></table>
     </div>
   </div>
@@ -113,25 +111,3 @@
     </form>
   </div>
 </div>
-
-<div class="modal fade" id="customerPppoeModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><form class="modal-content pppoe-customer-modal" method="post" id="customerPppoeForm"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="return_to" value="/customers?<%= customerFilterQuery %>"><input type="hidden" name="router_id"><input type="hidden" name="secret_id"><input type="hidden" name="confirmed" value="0"><div class="modal-header"><div><div class="module-kicker">SUGEST SECRET MIKROTIK</div><h5 class="modal-title">Pilih Secret PPPoE Pelanggan</h5><small id="pppoeCustomerContext">Memuat pelanggan…</small></div><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="pppoe-site-lock"><i class="bi bi-shield-lock-fill"></i><div><strong>Secret diambil langsung dari MikroTik pada site yang sama</strong><small>Sistem tidak pernah mencampur site. Secret yang sudah dipakai pelanggan lain atau username yang terdeteksi ganda otomatis disembunyikan.</small></div><b id="pppoeLockedSite">-</b></div><div class="pppoe-suggestion-list" id="pppoeSuggestionList"><div class="pppoe-suggestion-loading"><span class="spinner-border spinner-border-sm"></span>Memindai secret MikroTik pada site…</div></div><div class="pppoe-sync-warning" id="pppoeSuggestionWarning" hidden></div><label class="pppoe-confirm-check"><input class="form-check-input" type="checkbox" id="pppoeConfirmed"><span><b>Saya sudah memeriksa pelanggan, site, router, dan username PPPoE.</b><small>Sinkronisasi hanya menghubungkan data billing pelanggan ke secret terpilih; akun MikroTik tidak diubah atau dihapus.</small></span></label></div><div class="modal-footer"><button class="btn-tech" type="button" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary" id="pppoeSyncSubmit" disabled><i class="bi bi-link-45deg"></i>Hubungkan Secret Terpilih</button></div></form></div></div></div>
-
-<script>
-(()=>{
-  const modal=document.getElementById('customerPppoeModal'),form=document.getElementById('customerPppoeForm'),list=document.getElementById('pppoeSuggestionList'),warning=document.getElementById('pppoeSuggestionWarning'),confirmed=document.getElementById('pppoeConfirmed'),submit=document.getElementById('pppoeSyncSubmit');
-  if(!modal||!form)return;
-  const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-  const syncSubmit=()=>{const selected=form.querySelector('input[name="pppoe_suggestion"]:checked');form.elements.router_id.value=selected?.dataset.routerId||'';form.elements.secret_id.value=selected?.value||'';form.elements.confirmed.value=confirmed.checked?'1':'0';submit.disabled=!selected||!confirmed.checked;};
-  confirmed.addEventListener('change',syncSubmit);
-  modal.addEventListener('show.bs.modal',async event=>{
-    const button=event.relatedTarget,id=button?.dataset.customerId;if(!id)return;
-    document.getElementById('pppoeCustomerContext').textContent=`${button.dataset.customerCode} · ${button.dataset.customerName}`;document.getElementById('pppoeLockedSite').textContent=button.dataset.site||'-';form.action=`/customers/${id}/sync-pppoe`;confirmed.checked=false;warning.hidden=true;list.innerHTML='<div class="pppoe-suggestion-loading"><span class="spinner-border spinner-border-sm"></span>Memindai secret MikroTik pada site…</div>';syncSubmit();
-    try{const response=await fetch(`/customers/${id}/pppoe-suggestions`,{headers:{Accept:'application/json'}}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'Gagal memuat saran PPPoE');
-      list.innerHTML=data.suggestions.length?data.suggestions.map((item,index)=>`<label class="pppoe-suggestion-card"><input type="radio" name="pppoe_suggestion" value="${esc(item.secretId)}" data-router-id="${esc(item.routerId)}" ${index===0?'checked':''}><span class="pppoe-match-score">${Number(item.score||0)}%</span><span><b>${esc(item.secretName)}</b><small>${esc(item.routerName)} · ${esc(item.siteCode)} · profile ${esc(item.profile)}</small><em>${esc(item.comment||'Tanpa komentar MikroTik')}</em></span><i class="bi bi-check-circle-fill"></i></label>`).join(''):'<div class="empty-state"><i class="bi bi-search"></i><strong>Tidak ada saran aman</strong><small>Isi username PPPoE di form pelanggan atau periksa secret pada MikroTik NMS.</small></div>';
-      list.querySelectorAll('input[name="pppoe_suggestion"]').forEach(input=>input.addEventListener('change',syncSubmit));
-      const notes=[];if(data.routerFailures?.length)notes.push(`Router gagal dibaca: ${data.routerFailures.join(', ')}`);if(data.duplicateNames?.length)notes.push(`${data.duplicateNames.length} username ganda disembunyikan demi keamanan.`);if(notes.length){warning.textContent=notes.join(' ');warning.hidden=false;}syncSubmit();
-    }catch(error){list.innerHTML=`<div class="empty-state danger"><i class="bi bi-exclamation-octagon"></i><strong>Saran tidak dapat dimuat</strong><small>${esc(error.message)}</small></div>`;syncSubmit();}
-  });
-  form.addEventListener('submit',event=>{syncSubmit();if(submit.disabled){event.preventDefault();return;}if(!confirm('Pastikan pelanggan, site, router, dan username sudah benar. Lanjutkan sinkronisasi PPPoE?'))event.preventDefault();});
-})();
-</script>

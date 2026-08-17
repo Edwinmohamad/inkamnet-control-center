@@ -29,6 +29,7 @@
         <article class="nms-router-card loading" data-router="<%= r.id %>">
           <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><div class="nms-router-health"><span class="nms-health-score" data-health-score>HEALTH --</span><b class="nms-health">CONNECTING</b></div></div>
           <div class="nms-router-core"><div class="nms-radar"><i></i><i></i><span><b>--</b><small>CPU</small></span></div><div class="nms-router-spec"><span><small>RouterOS</small><b>--</b></span><span><small>Uptime</small><b>--</b></span><span><small>Latency</small><b>--</b></span></div></div>
+          <div class="nms-resource-grid"><span><i class="bi bi-memory"></i><small>RAM TERPAKAI</small><b data-resource-memory>--</b></span><span><i class="bi bi-device-ssd-fill"></i><small>PENYIMPANAN</small><b data-resource-storage>--</b></span><span><i class="bi bi-cpu-fill"></i><small>ARSITEKTUR</small><b data-resource-architecture>--</b></span><span><i class="bi bi-thermometer-half"></i><small>SUHU / BOARD</small><b data-resource-board>--</b></span></div>
           <div class="nms-router-counts"><span class="online"><b>0</b><small>Online</small></span><span class="offline"><b>0</b><small>Offline</small></span><span class="isolated"><b>0</b><small>Isolir</small></span><span class="linked"><b>0</b><small>Billing</small></span></div>
         </article>
         <section class="nms-traffic-panel" data-traffic-panel="<%= r.id %>">
@@ -48,10 +49,10 @@
       <div class="nms-exempt-note"><i class="bi bi-shield-check"></i><div><b>Akun non-billing tidak dihitung sebagai masalah sinkronisasi</b><small>Tambahkan tag <code>[ADMIN]</code> atau <code>[FREE]</code> pada comment/profile secret untuk akun admin, monitoring, server, staf, gratis, dan layanan internal.</small></div></div>
     </div>
     <div class="nms-workspace-head">
-      <div><span class="module-kicker">PPPoE SECRET REGISTRY</span><h3>Subscriber Operations</h3><small>Data live dari RouterOS; billing dicocokkan melalui username PPPoE.</small></div>
+      <div><span class="module-kicker">REGISTRI SECRET PPPoE</span><h3>Operasional Pelanggan & Auto Suggest</h3><small>Data langsung dari RouterOS; saran pelanggan otomatis dibatasi ke site router yang sama.</small></div>
       <div class="nms-tools"><label><i class="bi bi-search"></i><input id="nmsSearch" type="search" placeholder="Cari username, pelanggan, IP…"></label><select id="nmsStatusFilter"><option value="all">Semua Status</option><option value="online">Online</option><option value="offline">Offline</option><option value="isolated">Isolir</option></select></div>
     </div>
-    <div class="table-responsive"><table class="app-table nms-table"><thead><tr><th>Status</th><th>PPPoE Secret</th><th>Pelanggan Billing / Saran</th><th>Site / Router</th><th>Profile</th><th>Session / Remote</th><th>Outstanding</th><th>Action</th></tr></thead><tbody id="nmsSecretRows"><tr><td colspan="8"><div class="nms-loading-state"><i class="bi bi-router"></i><strong>Mengambil telemetry MikroTik</strong><small>Sinkronisasi tiga site sedang berjalan…</small></div></td></tr></tbody></table></div>
+    <div class="table-responsive"><table class="app-table nms-table"><thead><tr><th>Status</th><th>Secret PPPoE</th><th>Auto Suggest Pelanggan</th><th>Site / Router</th><th>Profil</th><th>Sesi / Remote</th><th>Sisa Tagihan</th><th>Tindakan</th></tr></thead><tbody id="nmsSecretRows"><tr><td colspan="8"><div class="nms-loading-state"><i class="bi bi-router"></i><strong>Mengambil telemetri MikroTik</strong><small>Sinkronisasi seluruh site sedang berjalan…</small></div></td></tr></tbody></table></div>
   </div>
 
   <div class="nms-toast" id="nmsToast" hidden></div>

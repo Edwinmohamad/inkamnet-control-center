@@ -66,11 +66,14 @@ async function routerSnapshot(router) {
     const [resource,secrets,active,profiles,interfaces,customers]=await Promise.all([mt.testConnection(router),mt.listSecrets(router),mt.listActive(router),mt.listProfiles(router),mt.listInterfaces(router),customersForSite(router)]);
     const eligibleCustomers=customers.filter(x=>!x.router_id||Number(x.router_id)===Number(router.id));
     const activeMap=new Map(active.map(x=>[normalize(x.name),x])),linkedMap=new Map(eligibleCustomers.filter(x=>x.pppoe_username&&Number(x.router_id)===Number(router.id)).map(x=>[normalize(x.pppoe_username),x]));
-    const secretRows=secrets.map(secret=>{
+    const baseSecretRows=secrets.map(secret=>{
       const session=activeMap.get(normalize(secret.name))||null,customer=linkedMap.get(normalize(secret.name))||null,exempt=customer?null:exemptOf(secret);
-      const suggestions=customer||exempt?[]:eligibleCustomers.map(c=>({customer:c,score:matchScore(secret,c)})).filter(x=>x.score>=45).sort((a,b)=>b.score-a.score).slice(0,3);
-      return {...secret,status:statusOf(secret,session),active:session,customer,exempt,suggestions};
-    }).sort((a,b)=>a.name.localeCompare(b.name));
+      return {...secret,status:statusOf(secret,session),active:session,customer,exempt,suggestions:[]};
+    });
+    // Pelanggan yang sudah mempunyai pasangan secret valid tidak boleh disarankan ke secret lain.
+    const linkedCustomerIds=new Set(baseSecretRows.filter(row=>row.customer).map(row=>String(row.customer.id)));
+    const suggestionCustomers=eligibleCustomers.filter(customer=>!linkedCustomerIds.has(String(customer.id)));
+    const secretRows=baseSecretRows.map(secret=>secret.customer||secret.exempt?secret:{...secret,suggestions:suggestionCustomers.map(customer=>({customer,score:matchScore(secret,customer)})).filter(item=>item.score>=45).sort((a,b)=>b.score-a.score).slice(0,3)}).sort((a,b)=>a.name.localeCompare(b.name));
     await syncCustomerStatuses(secretRows);
     const secretNames=new Set(secrets.map(x=>normalize(x.name)));
     const unmatchedCustomers=eligibleCustomers.filter(c=>!c.pppoe_username||!secretNames.has(normalize(c.pppoe_username))).map(customer=>{
@@ -109,26 +112,6 @@ async function syncSecret(routerId,secretId,customerId){
   }catch(error){try{await conn.rollback();}catch(_){}throw error;}finally{if(locked){try{await conn.execute(`SELECT RELEASE_LOCK(?)`,[lockName]);}catch(_){}}conn.release();}
 }
 
-async function customerSyncSuggestions(customerId){
-  const [customerRows]=await db.execute(`SELECT c.id,c.customer_code,c.name,c.site_id,c.pppoe_username,c.router_id,s.code site_code,s.name site_name FROM customers c JOIN sites s ON s.id=c.site_id WHERE c.id=? AND c.customer_status='active' LIMIT 1`,[customerId]);
-  const customer=customerRows[0];if(!customer)throw new Error('Pelanggan aktif tidak ditemukan.');
-  const [routers]=await db.execute(`SELECT r.*,s.code site_code,s.name site_name FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.site_id=? AND r.is_active=1 ORDER BY r.name`,[customer.site_id]);
-  if(!routers.length)throw new Error(`Belum ada router aktif pada site ${customer.site_code}.`);
-  const [linked]=await db.execute(`SELECT id,name,router_id,pppoe_username FROM customers WHERE site_id=? AND id<>? AND pppoe_username IS NOT NULL`,[customer.site_id,customer.id]);
-  // Username billing harus unik di seluruh site, bukan hanya per-router.
-  const occupiedNames=new Set(linked.map(row=>normalize(row.pppoe_username)).filter(Boolean));
-  const scanned=await Promise.all(routers.map(async router=>{try{return {router,secrets:await mt.listSecrets(router),error:null};}catch(error){return {router,secrets:[],error:error.message};}}));
-  const nameCounts=new Map();for(const item of scanned)for(const secret of item.secrets){const key=normalize(secret.name);if(key)nameCounts.set(key,(nameCounts.get(key)||0)+1);}
-  const suggestions=[];
-  for(const item of scanned)for(const secret of item.secrets){
-    const key=normalize(secret.name);if(!key||!secret['.id']||exemptOf(secret)||occupiedNames.has(key))continue;
-    const score=matchScore(secret,customer),duplicateAcrossRouters=(nameCounts.get(key)||0)>1;
-    if(score<35||duplicateAcrossRouters)continue;
-    suggestions.push({secretId:secret['.id'],secretName:secret.name,profile:secret.profile||'-',comment:secret.comment||'',disabled:bool(secret.disabled),routerId:item.router.id,routerName:item.router.name,siteCode:item.router.site_code,score});
-  }
-  suggestions.sort((a,b)=>b.score-a.score||a.secretName.localeCompare(b.secretName));
-  return {customer,suggestions:suggestions.slice(0,12),routerFailures:scanned.filter(item=>item.error).map(item=>`${item.router.name}: ${item.error}`),duplicateNames:[...nameCounts].filter(([,count])=>count>1).map(([name])=>name)};
-}
 async function removeSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.deleteSecret(router,secretId);const [linked]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),pppoe_username=NULL,network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result,linkedCustomers:linked};}
 async function disconnectSecret(routerId,secretId){const router=await routerById(routerId),result=await mt.disconnectSecret(router,secretId);if(result.disconnected)await db.execute(`UPDATE customers SET status_changed_at=IF(network_status<>'offline',NOW(),status_changed_at),network_status='offline' WHERE router_id=? AND pppoe_username=?`,[router.id,result.secret.name]);return {router,...result};}
 async function customersForRouter(routerId){const router=await routerById(routerId);return customersForSite(router);}
@@ -188,4 +171,4 @@ async function syncActiveCustomers(siteCode=''){
   return summary;
 }
 
-module.exports={allSnapshots,routerById,saveSecret,syncSecret,customerSyncSuggestions,removeSecret,disconnectSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};
+module.exports={allSnapshots,routerById,saveSecret,syncSecret,removeSecret,disconnectSecret,customersForRouter,syncActiveCustomers,cleanPayload,matchScore,exemptOf};
