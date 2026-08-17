@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.13.0 - vendor cash analytics, master payment approval, one-page invoices, safe PPPoE suggestions, and clickable dashboards",
+  "description": "INKAMNET Control Center v1.14.0 - repaired master access, complete site analytics, compact one-page invoices, localized statuses, and safe row-level PPPoE linking",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

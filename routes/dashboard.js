@@ -82,9 +82,10 @@ router.get('/', async (req, res) => {
     COUNT(*) total,
     SUM(c.customer_status='active') active,
     SUM(c.customer_status<>'active') inactive,
-    SUM(c.network_status='isolated') isolated
+    SUM(c.network_status='isolated') isolated,
+    SUM(c.customer_status='active' AND c.network_status IN ('offline','router_unreachable')) offline
     FROM customers c WHERE 1=1${customerScope}`, customerParams);
-  const customer={total:Number(customerStats.total||0),active:Number(customerStats.active||0),inactive:Number(customerStats.inactive||0),isolated:Number(customerStats.isolated||0)};
+  const customer={total:Number(customerStats.total||0),active:Number(customerStats.active||0),inactive:Number(customerStats.inactive||0),isolated:Number(customerStats.isolated||0),offline:Number(customerStats.offline||0)};
 
   const [[revenue]] = await db.execute(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.status='confirmed' AND YEAR(p.paid_at)=? AND MONTH(p.paid_at)=?${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected,COALESCE(SUM(i.status='paid'),0) paid_count,COALESCE(SUM(i.status='unpaid'),0) unpaid_count,COALESCE(SUM(i.status='partial'),0) partial_count,COALESCE(SUM(i.status='overdue'),0) overdue_count FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${kpiScope}`,[kpiYear,kpiMonth,...kpiParams]);
@@ -111,7 +112,8 @@ router.get('/', async (req, res) => {
     COUNT(c.id) total,
     COALESCE(SUM(c.customer_status='active'),0) active,
     COALESCE(SUM(c.customer_status<>'active'),0) inactive,
-    COALESCE(SUM(c.network_status='isolated'),0) isolated
+    COALESCE(SUM(c.network_status='isolated'),0) isolated,
+    COALESCE(SUM(c.customer_status='active' AND c.network_status IN ('offline','router_unreachable')),0) offline
     FROM sites s LEFT JOIN customers c ON c.site_id=s.id
     WHERE s.is_active=1
     GROUP BY s.id,s.code,s.name ORDER BY s.code`);
@@ -141,13 +143,15 @@ router.get('/', async (req, res) => {
   const routerRate=Number(noc.routers_total)>0?Math.round(Number(noc.routers_online||0)/Number(noc.routers_total)*100):100;
   const invoiceKpi={total:Number(billed.count||0),paid:Number(billed.paid_count||0),unpaid:Number(billed.unpaid_count||0),partial:Number(billed.partial_count||0),overdue:Number(billed.overdue_count||0)};
   const todayKey=isoDate(now),todayDuty=weekDuty.filter(row=>row.duty_date_key===todayKey);
+  const jakartaHour=Number(new Intl.DateTimeFormat('en-GB',{hour:'2-digit',hourCycle:'h23',timeZone:'Asia/Jakarta'}).format(now));
+  const greeting=jakartaHour<11?'Selamat pagi':jakartaHour<15?'Selamat siang':jakartaHour<18?'Selamat sore':'Selamat malam';
   const years=Array.from({length:5},(_,i)=>now.getFullYear()-2+i);for(const year of [selectedYear,kpiYear,psbYear,offYear])if(!years.includes(year))years.push(year);years.sort((a,b)=>a-b);
 
   res.render('dashboard/index',{
     title:'Dashboard',customer,revenue,billed,unpaid,newCustomers,psbCustomers,network,noc,recent,siteOptions,siteCustomerRows,weekDuty,todayDuty,week,invoiceKpi,hardOverdueCustomers,inactiveCustomers,isolatedCustomers,
     selectedSiteCode:selectedSite?.code||'',selectedSiteName:selectedSite?.name||'Semua Site',collectionRate,routerRate,
     selectedMonth,selectedYear,years,kpiMonth,kpiYear,kpiSiteCode:kpiSite?.code||'',psbMonth,psbYear,psbSiteCode:psbSite?.code||'',offMonth,offYear,offSiteCode:offSite?.code||'',
-    monthly:{labels:monthLabels,invoices:monthlyInvoices,payments:monthlyPayments,psbLabels,psb:dailyPsb}
+    greeting,monthly:{labels:monthLabels,invoices:monthlyInvoices,payments:monthlyPayments,psbLabels,psb:dailyPsb}
   });
 });
 module.exports=router;

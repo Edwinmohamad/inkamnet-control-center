@@ -1,6 +1,6 @@
 const express=require('express');
 const db=require('../config/db');
-const { createReportPdf, rupiah, date, COLORS }=require('../services/reportPdf');
+const { createReportPdf, rupiah, date, documentLabel, COLORS }=require('../services/reportPdf');
 const router=express.Router();
 const MONTHS=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 
@@ -88,12 +88,12 @@ router.get('/pdf',async(req,res)=>{
   if(type==='customers'){
     rows=await customerReport(f);
     title='LAPORAN PELANGGAN';
-    subtitle=`Scope: ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''} | ${rows.length} pelanggan${f.status?` | Status ${f.status}`:''}`;
+    subtitle=`Scope: ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''} | ${rows.length} pelanggan${f.status?` | Status ${documentLabel(f.status,'id')}`:''}`;
     filename=`laporan-pelanggan-INKAMNET-${new Date().toISOString().slice(0,10)}.pdf`;
     summaryItems=[
       {label:'TOTAL PELANGGAN',value:rows.length,color:COLORS.purple},
       {label:'AKTIF',value:rows.filter(x=>x.customer_status==='active').length,color:COLORS.green},
-      {label:'SUSPENDED',value:rows.filter(x=>x.customer_status==='suspended').length,color:COLORS.red}
+      {label:'DITANGGUHKAN',value:rows.filter(x=>x.customer_status==='suspended').length,color:COLORS.red}
     ];
     columns=[
       {label:'Customer ID',width:1.15,key:'customer_code',bold:true},
@@ -101,7 +101,7 @@ router.get('/pdf',async(req,res)=>{
       {label:'Site / Cluster',width:1.15,value:r=>`${r.site_code} / ${r.cluster_name||'-'}`},
       {label:'Paket',width:1.25,key:'package_name'},
       {label:'WhatsApp',width:1.1,key:'phone'},
-      {label:'Status',width:.85,value:r=>String(r.customer_status).toUpperCase()}
+      {label:'Status',width:.85,value:r=>documentLabel(r.customer_status,'id').toUpperCase()}
     ];
   } else if(type==='cash'){
     rows=await cashReport(f);
@@ -129,23 +129,23 @@ router.get('/pdf',async(req,res)=>{
     const billed=rows.reduce((a,x)=>a+Number(x.total||0),0);
     const paid=rows.reduce((a,x)=>a+Number(x.paid_amount||0),0);
     const out=rows.reduce((a,x)=>a+Number(x.outstanding||0),0);
-    title=type==='invoice'?'REGISTER FAKTUR / INVOICE':'LAPORAN TAGIHAN';
-    subtitle=`Periode ${MONTHS[f.month-1]} ${f.year} | ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''}${f.status?` | Status ${f.status}`:''}`;
+    title=type==='invoice'?'REGISTER FAKTUR':'LAPORAN TAGIHAN';
+    subtitle=`Periode ${MONTHS[f.month-1]} ${f.year} | ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''}${f.status?` | Status ${documentLabel(f.status,'id')}`:''}`;
     filename=`${type==='invoice'?'register-faktur':'laporan-tagihan'}-INKAMNET-${f.year}-${String(f.month).padStart(2,'0')}.pdf`;
     summaryItems=[
       {label:'TOTAL TAGIHAN',value:rupiah(billed),color:COLORS.purple},
       {label:'TERBAYAR',value:rupiah(paid),color:COLORS.green},
       {label:'OUTSTANDING',value:rupiah(out),color:COLORS.red},
-      {label:'JUMLAH INVOICE',value:rows.length,color:COLORS.blue}
+      {label:'JUMLAH FAKTUR',value:rows.length,color:COLORS.blue}
     ];
     columns=[
-      {label:'Invoice',width:1.35,key:'invoice_number',bold:true},
+      {label:'Faktur',width:1.35,key:'invoice_number',bold:true},
       {label:'Pelanggan',width:1.65,key:'customer_name'},
       {label:'Site / Cluster',width:1,value:r=>`${r.site_code} / ${r.cluster_name||'-'}`},
       {label:'Jatuh Tempo',width:1,value:r=>date(r.due_date)},
       {label:'Tagihan',width:1.05,value:r=>rupiah(r.total),align:'right'},
       {label:'Sisa',width:1.05,value:r=>rupiah(r.outstanding),bold:true,align:'right'},
-      {label:'Status',width:.85,value:r=>String(r.status).toUpperCase()}
+      {label:'Status',width:.85,value:r=>documentLabel(r.status,'id').toUpperCase()}
     ];
   }
 

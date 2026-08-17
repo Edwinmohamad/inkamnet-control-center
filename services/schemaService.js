@@ -247,7 +247,7 @@ async function ensureV22Schema() {
 
   // Akun master bootstrap dibuat satu kali. Hash adalah bcrypt dari password awal yang diminta;
   // startup berikutnya tidak menimpa password sehingga tetap bisa diganti dari menu profil.
-  const masterPasswordHash = '$2b$12$rmK/tNnmnROuvMTKkaJisOJW2mkVWU2kDZ3IR1kzN7ohtfVwO8PnG';
+  const masterPasswordHash = '$2b$12$jWCDPPi4xfy9s2fb6mkdvOn3bt2yQH7662vO4mIsKgNPF6SWDzF1W';
   await db.execute(`INSERT INTO users(name,username,password_hash,role,is_active)
     SELECT 'Master Administrator','masteradminn',?,'master_admin',1
     WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='masteradminn')`, [masterPasswordHash]);
@@ -282,4 +282,34 @@ async function ensureV23Schema() {
   }
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema };
+async function ensureV24Schema() {
+  // v1.14: reset satu kali sesuai kredensial yang diminta pengguna. Marker migrasi mencegah
+  // restart aplikasi menimpa password yang nantinya sudah diganti dari menu profil.
+  const validBootstrapHash = '$2b$12$jWCDPPi4xfy9s2fb6mkdvOn3bt2yQH7662vO4mIsKgNPF6SWDzF1W';
+  await db.query(`CREATE TABLE IF NOT EXISTS schema_revisions (
+    revision_key VARCHAR(100) PRIMARY KEY,
+    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await db.execute(`UPDATE users u LEFT JOIN schema_revisions r ON r.revision_key='v24_masteradmin_password_reset'
+    SET u.password_hash=? WHERE u.username='masteradminn' AND r.revision_key IS NULL`, [validBootstrapHash]);
+  await db.execute(`INSERT INTO users(name,username,password_hash,role,is_active)
+    SELECT 'Master Administrator','masteradminn',?,'master_admin',1
+    WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='masteradminn')`, [validBootstrapHash]);
+  await db.query(`INSERT IGNORE INTO schema_revisions(revision_key) VALUES('v24_masteradmin_password_reset')`);
+
+  // Kedua akun yang diminta menjadi Master Admin aktif. Pencocokan Edwin dibuat exact
+  // (bukan LIKE) agar tidak menaikkan hak akun lain yang kebetulan memiliki nama serupa.
+  await db.query(`UPDATE users SET role='master_admin',is_active=1
+    WHERE username='masteradminn' OR LOWER(TRIM(username))='edwin' OR LOWER(TRIM(name))='edwin'`);
+  await db.query(`INSERT INTO role_permissions(role_key,role_name,permissions_json,permission_schema_version)
+    VALUES('master_admin','Master Admin',JSON_ARRAY('dashboard','customers','billing','warehouse','support','network','finance','reports','logs','settings'),4)
+    ON DUPLICATE KEY UPDATE role_name='Master Admin',permissions_json=VALUES(permissions_json),permission_schema_version=4`);
+  await db.query(`INSERT INTO employees(employee_code,name,user_id,is_active)
+    SELECT CONCAT('USR-',LPAD(u.id,4,'0')),u.name,u.id,1 FROM users u
+    WHERE (u.username='masteradminn' OR LOWER(TRIM(u.username))='edwin' OR LOWER(TRIM(u.name))='edwin')
+      AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.user_id=u.id)`);
+  await db.query(`UPDATE employees e JOIN users u ON u.id=e.user_id SET e.is_active=1
+    WHERE u.username='masteradminn' OR LOWER(TRIM(u.username))='edwin' OR LOWER(TRIM(u.name))='edwin'`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema };
