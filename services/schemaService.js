@@ -312,4 +312,21 @@ async function ensureV24Schema() {
     WHERE u.username='masteradminn' OR LOWER(TRIM(u.username))='edwin' OR LOWER(TRIM(u.name))='edwin'`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema };
+async function ensureV25Schema() {
+  // Pesan internal disimpan per penerima sehingga badge unread tetap konsisten
+  // walaupun user membuka aplikasi dari perangkat berbeda.
+  await db.query(`CREATE TABLE IF NOT EXISTS internal_messages (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    sender_id BIGINT UNSIGNED NOT NULL,
+    recipient_id BIGINT UNSIGNED NOT NULL,
+    subject VARCHAR(140) NOT NULL,
+    body TEXT NOT NULL,
+    read_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_internal_messages_recipient (recipient_id,read_at,created_at),
+    INDEX idx_internal_messages_sender (sender_id,created_at)
+  )`);
+  await db.query(`UPDATE role_permissions SET permission_schema_version=5 WHERE permission_schema_version<5`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema };

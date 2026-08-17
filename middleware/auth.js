@@ -28,10 +28,10 @@ function normalizePermissions(value, role = 'staff') {
   if (Array.isArray(parsed)) parsed = parsed.map(item => item === 'tickets' ? 'support' : item);
   const allowed = new Set(PERMISSIONS);
   let result = Array.isArray(parsed) ? parsed.filter(item => allowed.has(item)) : [];
-  if (!isAdminRole(role)) result = result.filter(item => item !== 'settings');
-  if (!result.length) result.push(...(DEFAULT_PERMISSIONS[role] || DEFAULT_PERMISSIONS.staff));
+  // Custom roles deliberately start with dashboard only. Every extra permission is
+  // granted explicitly by Master Admin from the access-control screen.
+  if (!result.length) result.push(...(DEFAULT_PERMISSIONS[role] || ['dashboard']));
   if (!result.includes('dashboard')) result.unshift('dashboard');
-  if (isAdminRole(role) && !result.includes('settings')) result.push('settings');
   return [...new Set(result)];
 }
 
@@ -84,8 +84,8 @@ function requireAdmin(req, res, next) {
 function requireMasterAdmin(req, res, next) {
   if (!req.session.user) return res.redirect('/login');
   if (!isMasterAdminRole(req.session.user.role)) {
-    req.session.flash = { type: 'danger', message: 'Approval pembayaran hanya dapat dilakukan oleh Master Admin.' };
-    return res.redirect('/payments');
+    req.session.flash = { type: 'danger', message: 'Tindakan ini hanya dapat dilakukan oleh Master Admin.' };
+    return res.redirect(req.originalUrl.startsWith('/settings') ? '/settings?tab=roles' : '/payments');
   }
   next();
 }

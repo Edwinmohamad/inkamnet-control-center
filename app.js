@@ -24,7 +24,7 @@ const { requireAuth, loadPermissions, requirePermission } = require('./middlewar
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
 const { purgeOldLogs } = require('./services/logRetentionService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema } = require('./services/schemaService');
 
 const app = express();
 const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
@@ -193,6 +193,7 @@ app.use('/routers', requireAuth, requirePermission('network'), require('./routes
 app.use('/network', requireAuth, requirePermission('network'), require('./routes/network'));
 app.use('/settings', requireAuth, requirePermission('settings'), require('./routes/settings'));
 app.use('/profile', requireAuth, require('./routes/profile'));
+app.use('/communication', requireAuth, require('./routes/communication'));
 app.use('/clusters', requireAuth, requirePermission('network'), require('./routes/clusters'));
 app.use('/tickets', requireAuth, requirePermission('support'), require('./routes/tickets'));
 app.use('/team-kpi', requireAuth, requirePermission('support'), require('./routes/teamKpi'));
@@ -232,6 +233,7 @@ async function bootstrap() {
   await ensureV22Schema();
   await ensureV23Schema();
   await ensureV24Schema();
+  await ensureV25Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';

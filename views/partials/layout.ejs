@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#090d1a">
+  <meta name="csrf-token" content="<%= csrfToken %>">
   <title><%= translateTitle(title) %> · <%= appName %></title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,13 +12,14 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>">
-  <script>(()=>{try{const allowed=['nebula','ocean','emerald','sunset','rose','ice'];const pref=localStorage.getItem('inkamnet-theme')||<%- JSON.stringify(defaultTheme||'dark') %>;document.documentElement.dataset.theme=pref==='system'?(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):pref;const palette=localStorage.getItem('inkamnet-palette')||<%- JSON.stringify(defaultUiPalette||'nebula') %>;document.documentElement.dataset.palette=allowed.includes(palette)?palette:'nebula'}catch(e){}})();</script>
+  <script>(()=>{try{const allowed=['nebula','ocean','emerald','sunset','rose','ice'];const pref=localStorage.getItem('inkamnet-theme')||<%- JSON.stringify(defaultTheme||'dark') %>;document.documentElement.dataset.theme=pref==='system'?(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):pref;const palette=localStorage.getItem('inkamnet-palette')||<%- JSON.stringify(defaultUiPalette||'nebula') %>;document.documentElement.dataset.palette=allowed.includes(palette)?palette:'nebula';if(sessionStorage.getItem('inkamnet-instant-filter')==='1'){sessionStorage.removeItem('inkamnet-instant-filter');document.documentElement.classList.add('instant-filter-nav')}}catch(e){}})();</script>
   <style id="inkamnet-critical-ui">
     /* Critical shell/loader CSS prevents FOUC and oversized logo while the main stylesheet is loading. */
     #appLoader{position:fixed!important;inset:0!important;z-index:3000!important;display:grid!important;place-items:center!important;align-content:center!important;gap:18px!important;overflow:hidden!important;background:#070a13!important;color:#fff!important;transition:opacity .34s ease,visibility .34s ease!important}
     #appLoader .boot-logo{width:min(250px,72vw)!important;height:88px!important;display:grid!important;place-items:center!important;position:relative!important}
     #appLoader .boot-logo img{display:block!important;width:100%!important;max-width:250px!important;max-height:88px!important;height:auto!important;object-fit:contain!important}
     #appLoader.is-hidden{opacity:0!important;visibility:hidden!important;pointer-events:none!important}
+    html.instant-filter-nav #appLoader{display:none!important}html.instant-filter-nav .page-enter{animation:none!important;transition:none!important}
   </style>
 </head>
 <body>
@@ -121,7 +123,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.15.0</span>
+        <span class="version-pill">CONTROL CENTER v1.16.0</span>
       </div>
     </aside>
 
@@ -137,6 +139,14 @@
           <button class="command-button d-none d-md-flex" type="button" data-command-open><i class="bi bi-command"></i><span><%= t('quickCommand') %></span><kbd>Ctrl K</kbd></button>
           <div class="live-clock d-none d-xl-flex"><i class="bi bi-clock-history"></i><span data-live-clock>--:--:-- WIB</span></div>
           <div class="live-chip d-none d-xl-flex"><span class="pulse-dot"></span> <%= t('systemLive') %></div>
+          <div class="dropdown header-center-dropdown">
+            <button class="icon-button header-center-button" id="headerNotificationButton" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-label="Notifikasi" title="Notifikasi"><i class="bi bi-bell-fill"></i><span class="header-center-badge" id="headerNotificationBadge" hidden>0</span></button>
+            <div class="dropdown-menu dropdown-menu-end app-dropdown header-center-menu"><div class="header-center-head"><span><i class="bi bi-bell-fill"></i><strong>Notifikasi</strong></span><small>Operasional & approval</small></div><div class="header-center-list" id="headerNotificationList"><div class="header-center-loading"><span class="spinner-border spinner-border-sm"></span>Memuat notifikasi…</div></div></div>
+          </div>
+          <div class="dropdown header-center-dropdown">
+            <button class="icon-button header-center-button" id="headerMessageButton" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-label="Pesan internal" title="Pesan internal"><i class="bi bi-chat-dots-fill"></i><span class="header-center-badge message" id="headerMessageBadge" hidden>0</span></button>
+            <div class="dropdown-menu dropdown-menu-end app-dropdown header-center-menu"><div class="header-center-head"><span><i class="bi bi-chat-dots-fill"></i><strong>Pesan Tim</strong></span><button type="button" data-bs-toggle="modal" data-bs-target="#headerMessageComposeModal"><i class="bi bi-pencil-square"></i>Pesan Baru</button></div><div class="header-center-list" id="headerMessageList"><div class="header-center-loading"><span class="spinner-border spinner-border-sm"></span>Memuat pesan…</div></div><button type="button" class="header-read-all" id="headerMessageReadAll"><i class="bi bi-check2-all"></i>Tandai semua sudah dibaca</button></div>
+          </div>
           <form method="post" action="/profile/language" class="language-switch"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="return_to" value="<%= currentPath %>"><select name="language" onchange="this.form.submit()" aria-label="Language"><option value="id" <%= language==='id'?'selected':'' %>>ID</option><option value="en" <%= language==='en'?'selected':'' %>>EN</option></select></form>
           <div class="dropdown palette-switcher">
             <button class="icon-button" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Pilih kombinasi warna" aria-label="Pilih kombinasi warna"><i class="bi bi-palette2"></i></button>
@@ -157,6 +167,10 @@
       </main>
     </div>
   </div>
+
+  <div class="modal fade" id="headerMessageComposeModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><form class="modal-content" id="headerMessageComposeForm"><div class="modal-header"><div><div class="module-kicker">INTERNAL TEAM MESSAGE</div><h5 class="modal-title">Kirim Pesan</h5><small class="text-secondary">Pesan langsung antar-user INKAMNET.</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row g-3"><div class="col-12"><label class="form-label">Penerima</label><select class="form-select" name="recipient_id" id="headerMessageRecipient" required><option value="">Memuat user…</option></select></div><div class="col-12"><label class="form-label">Subjek</label><input class="form-control" name="subject" maxlength="140" placeholder="Subjek singkat"></div><div class="col-12"><label class="form-label">Isi Pesan</label><textarea class="form-control" name="body" rows="5" maxlength="2000" required placeholder="Tulis pesan untuk tim…"></textarea></div></div><div class="header-message-status" id="headerMessageStatus" hidden></div></div><div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary" data-no-loading="true"><i class="bi bi-send-fill"></i>Kirim Pesan</button></div></form></div></div>
+
+  <div class="modal fade" id="headerMessageViewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><div><div class="module-kicker" id="headerMessageSender">PESAN TIM</div><h5 class="modal-title" id="headerMessageSubject">Pesan</h5><small class="text-secondary" id="headerMessageTime">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="header-message-body" id="headerMessageBody"></div></div><div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Tutup</button><button type="button" class="btn-tech primary" id="headerMessageReply"><i class="bi bi-reply-fill"></i>Balas</button></div></div></div></div>
 
   <div class="command-palette" id="commandPalette" aria-hidden="true">
     <div class="command-backdrop" data-command-close></div>
