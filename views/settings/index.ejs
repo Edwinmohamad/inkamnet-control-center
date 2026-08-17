@@ -2,7 +2,7 @@
   <div class="module-head"><div><div class="module-kicker">SYSTEM CONFIGURATION</div><h1><%= language==='en'?'Settings':'Pengaturan' %></h1><p><%= language==='en'?'Company, application, employees, payments and access management.':'Perusahaan, aplikasi, karyawan, pembayaran, dan pengelolaan akses.' %></p></div></div>
   <div class="settings-layout">
     <aside class="settings-nav-card">
-      <% const menus=[['company','Perusahaan','bi-buildings'],['application','Aplikasi','bi-grid'],['employees','Karyawan','bi-people'],['departments','Departemen','bi-diagram-3'],['positions','Posisi','bi-person-badge'],['banks','Bank','bi-bank'],['gateways','Payment Gateway','bi-credit-card'],['roles','Roles & Permissions','bi-shield-lock']]; %>
+      <% const menus=[['company','Perusahaan','bi-buildings'],['invoice','Identitas Invoice','bi-receipt-cutoff'],['application','Aplikasi','bi-grid'],['employees','Karyawan','bi-people'],['departments','Departemen','bi-diagram-3'],['positions','Posisi','bi-person-badge'],['banks','Bank','bi-bank'],['gateways','Payment Gateway','bi-credit-card'],['roles','Roles & Permissions','bi-shield-lock']]; %>
       <% menus.forEach(m=>{ %><a class="settings-nav-link <%= tab===m[0]?'active':'' %>" href="/settings?tab=<%= m[0] %>"><i class="bi <%= m[2] %>"></i><span><%= m[1] %></span></a><% }) %>
     </aside>
     <div class="settings-content">
@@ -11,6 +11,34 @@
         <div class="data-card-head"><div><h3>Perusahaan</h3><small>Identitas yang dipakai pada sistem, laporan, dan faktur.</small></div><span class="status-badge purple">INKAMNET</span></div>
         <div class="data-card-body"><div class="row g-3"><div class="col-md-8"><label class="form-label">Nama Perusahaan</label><input class="form-control" name="company_name" value="<%= settings.company_name %>" required></div><div class="col-md-4"><label class="form-label">Telepon</label><input class="form-control" name="company_phone" value="<%= settings.company_phone||'' %>"></div><div class="col-md-6"><label class="form-label">Email</label><input class="form-control" type="email" name="company_email" value="<%= settings.company_email||'' %>"></div><div class="col-md-6"><label class="form-label">Website</label><input class="form-control" name="company_website" value="<%= settings.company_website||'' %>"></div><div class="col-12"><label class="form-label">Tagline</label><input class="form-control" name="company_tagline" value="<%= settings.company_tagline||'' %>"></div><div class="col-12"><label class="form-label">Alamat</label><textarea class="form-control" name="company_address" rows="4"><%= settings.company_address||'' %></textarea></div></div>
         <input type="hidden" name="default_due_day" value="<%= settings.default_due_day %>"><input type="hidden" name="default_grace_days" value="<%= settings.default_grace_days %>"><input type="hidden" name="invoice_generate_days" value="<%= settings.invoice_generate_days %>"><input type="hidden" name="default_theme" value="<%= settings.default_theme %>"><input type="hidden" name="default_language" value="<%= settings.default_language||'id' %>"><div class="mt-4"><button class="btn-tech primary"><i class="bi bi-check2-circle"></i>Simpan Perusahaan</button></div></div>
+      </form>
+      <% } %>
+
+      <% if(tab==='invoice'){ %>
+      <form method="post" action="/settings/invoice-branding" enctype="multipart/form-data" class="data-card invoice-branding-card">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div class="data-card-head"><div><h3>Identitas Invoice</h3><small>Satu sumber identitas untuk invoice versi cetak dan PDF.</small></div><span class="status-badge green"><i class="bi bi-arrow-repeat"></i> TERSINKRON</span></div>
+        <div class="data-card-body">
+          <div class="invoice-branding-layout">
+            <div class="invoice-logo-editor">
+              <span>LOGO INVOICE</span>
+              <div class="invoice-logo-preview"><% if(settings.invoice_logo_path){ %><img src="/invoices/branding/logo/<%= encodeURIComponent(settings.invoice_logo_path) %>" alt="Logo invoice"><% }else{ %><img src="/img/inkamnet-wordmark-hq.png" alt="Logo default"><% } %></div>
+              <label class="proof-dropzone"><input type="file" name="invoice_logo" accept="image/png,image/jpeg"><span class="proof-drop-icon"><i class="bi bi-cloud-arrow-up"></i></span><span><strong>Upload Logo</strong><small>PNG/JPG · maks. 3 MB</small></span></label>
+              <% if(settings.invoice_logo_path){ %><label class="form-check mt-2"><input class="form-check-input" type="checkbox" name="remove_logo" value="1"><span class="form-check-label">Hapus logo khusus, gunakan logo bawaan</span></label><% } %>
+            </div>
+            <div class="row g-3">
+              <div class="col-md-8"><label class="form-label">Nama PT / Perusahaan *</label><input class="form-control" name="invoice_company_name" value="<%= settings.invoice_company_name||settings.company_name||'' %>" required></div>
+              <div class="col-md-4"><label class="form-label">NPWP / Identitas Pajak</label><input class="form-control" name="invoice_tax_id" value="<%= settings.invoice_tax_id||'' %>"></div>
+              <div class="col-md-6"><label class="form-label">No. Telepon</label><input class="form-control" name="invoice_phone" value="<%= settings.invoice_phone||settings.company_phone||'' %>"></div>
+              <div class="col-md-6"><label class="form-label">Email</label><input class="form-control" type="email" name="invoice_email" value="<%= settings.invoice_email||settings.company_email||'' %>"></div>
+              <div class="col-md-6"><label class="form-label">Website</label><input class="form-control" name="invoice_website" value="<%= settings.invoice_website||settings.company_website||'' %>"></div>
+              <div class="col-12"><label class="form-label">Alamat Invoice</label><textarea class="form-control" name="invoice_address" rows="3"><%= settings.invoice_address||settings.company_address||'' %></textarea></div>
+              <div class="col-12"><label class="form-label">Catatan Footer</label><textarea class="form-control" name="invoice_footer" rows="2" placeholder="Contoh: Dokumen digital resmi..."><%= settings.invoice_footer||'' %></textarea></div>
+            </div>
+          </div>
+          <div class="secure-file-note mt-3"><i class="bi bi-receipt-cutoff"></i><span>Perubahan langsung digunakan saat invoice dibuka, dicetak, atau diunduh. Data invoice lama tidak perlu digenerate ulang.</span></div>
+          <button class="btn-tech primary mt-4"><i class="bi bi-check2-circle"></i>Simpan Identitas Invoice</button>
+        </div>
       </form>
       <% } %>
 
@@ -40,7 +68,20 @@
       <% } %>
 
       <% if(tab==='roles'){ %>
-      <div class="data-card"><div class="data-card-head"><div><h3>Roles & Permissions</h3><small>Matriks akses role yang digunakan aplikasi saat ini.</small></div></div><div class="data-card-body"><div class="role-grid"><% roles.forEach(r=>{ let perms=[];try{perms=typeof r.permissions_json==='string'?JSON.parse(r.permissions_json):(r.permissions_json||[]);}catch(e){} %><article class="role-card"><div><span class="status-badge purple"><%= r.role_key %></span><h3><%= r.role_name %></h3></div><div class="role-permissions"><% perms.forEach(p=>{ %><span><i class="bi bi-check2-circle"></i><%= p %></span><% }) %></div></article><% }) %></div><div class="secure-file-note mt-3"><i class="bi bi-shield-lock"></i><span>Role admin tetap memiliki akses pengaturan penuh. Role staff dibatasi pada operasi harian; perubahan permission granular disiapkan di versi berikutnya agar tidak merusak rule keamanan yang sudah berjalan.</span></div></div></div>
+      <div class="data-card"><div class="data-card-head"><div><h3>Roles & Permissions</h3><small>Atur menu dan route yang dapat dibuka oleh setiap role.</small></div><span class="status-badge green">EDITABLE</span></div><div class="data-card-body">
+        <div class="role-grid editable"><% roles.forEach(r=>{ let perms=[];try{perms=typeof r.permissions_json==='string'?JSON.parse(r.permissions_json):(r.permissions_json||[]);}catch(e){} %>
+          <form class="role-card role-editor" method="post" action="/settings/roles/<%= encodeURIComponent(r.role_key) %>">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="role-editor-head"><span class="status-badge purple"><%= r.role_key %></span><input class="form-control" name="role_name" value="<%= r.role_name %>" aria-label="Nama role <%= r.role_key %>"></div>
+            <div class="permission-check-grid"><% permissionCatalog.forEach(permission=>{ const lockedOn=permission.key==='dashboard'||(r.role_key==='admin'&&permission.key==='settings'); const lockedOff=r.role_key!=='admin'&&permission.key==='settings'; %>
+              <label class="permission-check <%= perms.includes(permission.key)||lockedOn?'selected':'' %> <%= lockedOff?'disabled':'' %>"><input type="checkbox" name="permissions" value="<%= permission.key %>" <%= perms.includes(permission.key)||lockedOn?'checked':'' %> <%= lockedOn||lockedOff?'disabled':'' %>><i class="bi bi-check2"></i><span><strong><%= permission.label %></strong><small><%= lockedOff?'khusus admin':permission.key %></small></span></label>
+              <% if(lockedOn){ %><input type="hidden" name="permissions" value="<%= permission.key %>"><% } %>
+            <% }) %></div>
+            <button class="btn-tech primary w-100"><i class="bi bi-floppy"></i>Simpan Permission <%= r.role_name %></button>
+          </form>
+        <% }) %></div>
+        <div class="secure-file-note mt-3"><i class="bi bi-shield-lock"></i><span>Dashboard selalu aktif agar akun tidak kehilangan halaman awal. Pengaturan hanya tersedia untuk admin supaya akses pengelolaan role tetap dapat dipulihkan.</span></div>
+      </div></div>
       <% } %>
     </div>
   </div>

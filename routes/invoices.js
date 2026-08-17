@@ -1,10 +1,13 @@
 const express=require('express');
+const fs=require('fs');
+const path=require('path');
 const db=require('../config/db');
 const { generateMonthlyInvoices }=require('../services/invoiceService');
 const { requireAdmin }=require('../middleware/auth');
 const { createCorporateInvoicePdf }=require('../services/reportPdf');
 const { audit }=require('../services/auditService');
 const router=express.Router();
+const invoiceLogoDir=path.join(__dirname,'..','storage','invoice-branding');
 
 const MONTH_NAMES=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 function intInRange(value,min,max,fallback){const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;}
@@ -23,6 +26,17 @@ function periodQuery(filters){
   if(filters.customer) p.set('customer',filters.customer);
   if(filters.q) p.set('q',filters.q);
   return p.toString();
+}
+async function loadInvoiceBranding(){
+  const [[s]]=await db.query(`SELECT company_name,company_address,company_phone,company_email,company_website,company_tagline,invoice_company_name,invoice_address,invoice_phone,invoice_email,invoice_website,invoice_tax_id,invoice_footer,invoice_logo_path FROM settings WHERE id=1`);
+  const branding={
+    companyName:s?.invoice_company_name||s?.company_name||'PT INKAMNET NEXERA TECHNOLOGY',
+    address:s?.invoice_address||s?.company_address||'',phone:s?.invoice_phone||s?.company_phone||'',email:s?.invoice_email||s?.company_email||'',website:s?.invoice_website||s?.company_website||'',
+    taxId:s?.invoice_tax_id||'',footer:s?.invoice_footer||'Dokumen digital resmi. Tidak memerlukan tanda tangan basah.',tagline:s?.company_tagline||'From the Village, Online Everywhere',logoPath:s?.invoice_logo_path||null
+  };
+  branding.logoFilePath=branding.logoPath?path.join(invoiceLogoDir,path.basename(branding.logoPath)):null;
+  if(branding.logoFilePath&&!fs.existsSync(branding.logoFilePath)){branding.logoFilePath=null;branding.logoPath=null;}
+  return branding;
 }
 
 router.get('/',async(req,res)=>{
@@ -106,12 +120,21 @@ router.post('/generate',async(req,res)=>{
 });
 
 
+router.get('/branding/logo/:filename',(req,res)=>{
+  const safe=path.basename(req.params.filename||'');
+  const file=path.join(invoiceLogoDir,safe);
+  if(!safe||!fs.existsSync(file))return res.status(404).end();
+  res.setHeader('Cache-Control','private, max-age=3600');
+  res.sendFile(file);
+});
+
 router.get('/:id/pdf',async(req,res)=>{
   const [rows]=await db.execute(`SELECT i.*,c.customer_code,c.name customer_name,c.phone,c.address,p.name package_name,s.code site_code,s.name site_name,cl.name cluster_name FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN packages p ON p.id=c.package_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id WHERE i.id=? LIMIT 1`,[req.params.id]);
   if(!rows.length)return res.status(404).send('Tagihan tidak ditemukan.');const x=rows[0];
   const [bankRows]=await db.query(`SELECT bank_name,account_name,account_number FROM banks WHERE is_active=1 ORDER BY id LIMIT 1`);
   const [payments]=await db.execute(`SELECT amount,method,reference,status,paid_at FROM payments WHERE invoice_id=? ORDER BY paid_at`,[req.params.id]);
-  createCorporateInvoicePdf(res,{invoice:x,bank:bankRows[0]||null,payments,filename:`invoice-${x.invoice_number.replace(/[^A-Za-z0-9_-]/g,'-')}.pdf`,disposition:req.query.download==='1'?'attachment':'inline'});
+  const branding=await loadInvoiceBranding();
+  createCorporateInvoicePdf(res,{invoice:x,bank:bankRows[0]||null,payments,branding,filename:`invoice-${x.invoice_number.replace(/[^A-Za-z0-9_-]/g,'-')}.pdf`,disposition:req.query.download==='1'?'attachment':'inline'});
 });
 
 router.get('/:id/print',async(req,res)=>{
@@ -120,7 +143,8 @@ router.get('/:id/print',async(req,res)=>{
   if(!rows.length) return res.status(404).send('Tagihan tidak ditemukan.');
   const [payments]=await db.execute(`SELECT amount,method,reference,status,paid_at FROM payments WHERE invoice_id=? ORDER BY paid_at`,[req.params.id]);
   const [bankRows]=await db.query(`SELECT bank_name,account_name,account_number,type FROM banks WHERE is_active=1 ORDER BY id LIMIT 1`);
-  res.render('invoices/print',{title:`Faktur ${rows[0].invoice_number}`,invoice:rows[0],payments,bank:bankRows[0]||null});
+  const branding=await loadInvoiceBranding();
+  res.render('invoices/print',{title:`Faktur ${rows[0].invoice_number}`,invoice:rows[0],payments,bank:bankRows[0]||null,branding});
 });
 
 

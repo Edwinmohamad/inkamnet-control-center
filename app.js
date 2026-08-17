@@ -19,10 +19,11 @@ const profilePhotoUpload = require('./middleware/profilePhotoUpload');
 const cashProofUpload = require('./middleware/cashProofUpload');
 const ticketPhotoUpload = require('./middleware/ticketPhotoUpload');
 const dutyProofUpload = require('./middleware/dutyProofUpload');
-const { requireAuth } = require('./middleware/auth');
+const invoiceLogoUpload = require('./middleware/invoiceLogoUpload');
+const { requireAuth, loadPermissions, requirePermission } = require('./middleware/auth');
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema } = require('./services/schemaService');
 
 const app = express();
 const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
@@ -65,6 +66,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.COOKIE_SECURE === 'true', maxAge: 1000*60*60*12 }
 }));
+app.use(loadPermissions);
 app.use(commonLocals);
 // Parse multipart payment-proof forms before CSRF validation so the hidden token is available.
 app.use('/customers/import', (req, res, next) => {
@@ -152,6 +154,21 @@ app.use('/server-duty', (req, res, next) => {
   }
   next();
 });
+app.use('/settings/invoice-branding', requireAuth, (req, res, next) => {
+  if (!(req.permissions || []).includes('settings')) return res.status(403).send('Akses pengaturan dibatasi.');
+  next();
+}, (req, res, next) => {
+  if (req.method === 'POST' && req.is('multipart/form-data')) {
+    return invoiceLogoUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'Logo invoice maksimal 3 MB.' : err.message };
+        return res.redirect('/settings?tab=invoice');
+      }
+      next();
+    });
+  }
+  next();
+});
 app.use(csrf);
 
 // Lightweight health endpoint used by Docker/operations monitoring.
@@ -165,25 +182,25 @@ app.get('/healthz', async (req, res) => {
 });
 
 app.use(require('./routes/auth'));
-app.use('/', requireAuth, require('./routes/dashboard'));
-app.use('/customers', requireAuth, require('./routes/customers'));
-app.use('/packages', requireAuth, require('./routes/packages'));
-app.use('/invoices', requireAuth, require('./routes/invoices'));
-app.use('/payments', requireAuth, require('./routes/payments'));
-app.use('/reports', requireAuth, require('./routes/reports'));
-app.use('/routers', requireAuth, require('./routes/routers'));
-app.use('/network', requireAuth, require('./routes/network'));
-app.use('/settings', requireAuth, require('./routes/settings'));
+app.use('/', requireAuth, requirePermission('dashboard'), require('./routes/dashboard'));
+app.use('/customers', requireAuth, requirePermission('customers'), require('./routes/customers'));
+app.use('/packages', requireAuth, requirePermission('customers'), require('./routes/packages'));
+app.use('/invoices', requireAuth, requirePermission('billing'), require('./routes/invoices'));
+app.use('/payments', requireAuth, requirePermission('billing'), require('./routes/payments'));
+app.use('/reports', requireAuth, requirePermission('reports'), require('./routes/reports'));
+app.use('/routers', requireAuth, requirePermission('network'), require('./routes/routers'));
+app.use('/network', requireAuth, requirePermission('network'), require('./routes/network'));
+app.use('/settings', requireAuth, requirePermission('settings'), require('./routes/settings'));
 app.use('/profile', requireAuth, require('./routes/profile'));
-app.use('/clusters', requireAuth, require('./routes/clusters'));
-app.use('/tickets', requireAuth, require('./routes/tickets'));
-app.use('/team-kpi', requireAuth, require('./routes/teamKpi'));
-app.use('/schedules', requireAuth, require('./routes/schedules'));
-app.use('/server-duty', requireAuth, require('./routes/serverDuty'));
-app.use('/inventory', requireAuth, require('./routes/inventory'));
-app.use('/sites', requireAuth, require('./routes/sites'));
-app.use('/custom-invoices', requireAuth, require('./routes/customInvoices'));
-app.use('/logs', requireAuth, require('./routes/logs'));
+app.use('/clusters', requireAuth, requirePermission('network'), require('./routes/clusters'));
+app.use('/tickets', requireAuth, requirePermission('support'), require('./routes/tickets'));
+app.use('/team-kpi', requireAuth, requirePermission('support'), require('./routes/teamKpi'));
+app.use('/schedules', requireAuth, requirePermission('support'), require('./routes/schedules'));
+app.use('/server-duty', requireAuth, requirePermission('support'), require('./routes/serverDuty'));
+app.use('/inventory', requireAuth, requirePermission('warehouse'), require('./routes/inventory'));
+app.use('/sites', requireAuth, requirePermission('network'), require('./routes/sites'));
+app.use('/custom-invoices', requireAuth, requirePermission('billing'), require('./routes/customInvoices'));
+app.use('/logs', requireAuth, requirePermission('logs'), require('./routes/logs'));
 app.use('/', requireAuth, require('./routes/finance'));
 
 app.use((err, req, res, next) => {
@@ -209,6 +226,7 @@ async function bootstrap() {
   await ensureV17Schema();
   await ensureV18Schema();
   await ensureV19Schema();
+  await ensureV20Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';

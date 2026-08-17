@@ -3,9 +3,11 @@ const fs=require('fs');
 const path=require('path');
 const crypto=require('crypto');
 const db=require('../config/db');
-const { requireAdmin }=require('../middleware/auth');
+const { requireAdmin, requirePermission }=require('../middleware/auth');
 const { assignCashTransactionCode,normalizeCategoryCode }=require('../services/cashService');
 const router=express.Router();
+router.use(['/discounts','/charges'],requirePermission('billing'));
+router.use('/cash',requirePermission('finance'));
 
 const CASH_PROOF_DIR=path.join(__dirname,'..','storage','cash-proofs');
 fs.mkdirSync(CASH_PROOF_DIR,{recursive:true});

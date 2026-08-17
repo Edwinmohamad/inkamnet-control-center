@@ -199,4 +199,30 @@ async function ensureV19Schema() {
   await db.query(`UPDATE payments SET reference=CONCAT('PAY-',DATE_FORMAT(paid_at,'%Y%m%d'),'-',LPAD(id,6,'0')) WHERE reference IS NULL OR TRIM(reference)=''`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema };
+async function ensureV20Schema() {
+  // Identitas khusus invoice. Nilai kosong akan menggunakan identitas perusahaan lama sebagai fallback.
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_company_name VARCHAR(180) NULL AFTER company_tagline`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_address TEXT NULL AFTER invoice_company_name`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_phone VARCHAR(80) NULL AFTER invoice_address`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_email VARCHAR(150) NULL AFTER invoice_phone`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_website VARCHAR(180) NULL AFTER invoice_email`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_tax_id VARCHAR(100) NULL AFTER invoice_website`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_footer TEXT NULL AFTER invoice_tax_id`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS invoice_logo_path VARCHAR(255) NULL AFTER invoice_footer`);
+  await db.query(`UPDATE settings SET
+    invoice_company_name=COALESCE(NULLIF(invoice_company_name,''),company_name),
+    invoice_address=COALESCE(NULLIF(invoice_address,''),company_address),
+    invoice_phone=COALESCE(NULLIF(invoice_phone,''),company_phone),
+    invoice_email=COALESCE(NULLIF(invoice_email,''),company_email),
+    invoice_website=COALESCE(NULLIF(invoice_website,''),company_website),
+    invoice_footer=COALESCE(NULLIF(invoice_footer,''),'Dokumen digital resmi. Tidak memerlukan tanda tangan basah.')
+    WHERE id=1`);
+
+  // Migrasi matriks lama sekali saja; edit admin setelah migrasi tidak akan ditimpa saat restart.
+  await db.query(`ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS permission_schema_version TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER permissions_json`);
+  await db.query(`UPDATE role_permissions SET permissions_json=JSON_ARRAY('dashboard','customers','billing','warehouse','support','network','finance','reports','logs','settings'),permission_schema_version=2 WHERE role_key='admin' AND permission_schema_version<2`);
+  await db.query(`UPDATE role_permissions SET permissions_json=JSON_ARRAY('dashboard','customers','billing','support','reports'),permission_schema_version=2 WHERE role_key='staff' AND permission_schema_version<2`);
+  await db.query(`UPDATE role_permissions SET permission_schema_version=2 WHERE permission_schema_version<2`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema };
