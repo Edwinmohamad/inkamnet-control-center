@@ -9,18 +9,22 @@ const clean = (value, max) => String(value || '').trim().slice(0, max);
 router.get('/header', async (req, res) => {
   const userId = Number(req.session.user.id);
   const permissions = new Set(req.permissions || []);
-  const [messagesResult, unreadResult, usersResult] = await Promise.all([
+  const [messagesResult, unreadResult, usersResult, systemResult, systemUnreadResult] = await Promise.all([
     db.execute(`SELECT m.id,m.sender_id,m.subject,m.body,m.read_at,m.created_at,u.name sender_name,u.profile_photo sender_photo
       FROM internal_messages m JOIN users u ON u.id=m.sender_id
       WHERE m.recipient_id=? ORDER BY m.created_at DESC LIMIT 8`, [userId]),
     db.execute(`SELECT COUNT(*) total FROM internal_messages WHERE recipient_id=? AND read_at IS NULL`, [userId]),
-    db.execute(`SELECT id,name,username,role,profile_photo FROM users WHERE is_active=1 AND id<>? ORDER BY name`, [userId])
+    db.execute(`SELECT id,name,username,role,profile_photo FROM users WHERE is_active=1 AND id<>? ORDER BY name`, [userId]),
+    db.execute(`SELECT id,type,tone,icon,title,detail,href,entity_type,entity_id,read_at,created_at
+      FROM system_notifications WHERE recipient_id=? ORDER BY created_at DESC,id DESC LIMIT 8`, [userId]),
+    db.execute(`SELECT COUNT(*) total FROM system_notifications WHERE recipient_id=? AND read_at IS NULL`, [userId])
   ]);
 
-  const notifications = [];
+  const persistentNotifications = systemResult[0].map(item => ({...item, persistent: true}));
+  const dynamicNotifications = [];
   if (isMasterAdminRole(req.session.user.role)) {
     const [[pending]] = await db.query(`SELECT COUNT(*) total,COALESCE(SUM(amount),0) amount FROM payments WHERE status='pending'`);
-    if (Number(pending.total)) notifications.push({
+    if (Number(pending.total)) dynamicNotifications.push({
       type: 'approval', icon: 'bi-shield-exclamation', tone: 'warning',
       title: `${Number(pending.total)} pembayaran menunggu approval`,
       detail: `Total Rp${Number(pending.amount || 0).toLocaleString('id-ID')}`,
@@ -29,25 +33,35 @@ router.get('/header', async (req, res) => {
   }
   if (permissions.has('support')) {
     const [[tickets]] = await db.execute(`SELECT COUNT(*) total FROM tickets WHERE assigned_to=? AND status IN ('open','progress')`, [userId]);
-    if (Number(tickets.total)) notifications.push({type:'ticket',icon:'bi-life-preserver',tone:'purple',title:`${Number(tickets.total)} tiket aktif ditugaskan kepada Anda`,detail:'Buka daftar tiket dan perbarui progres.',href:'/tickets?status=active'});
+    if (Number(tickets.total)) dynamicNotifications.push({type:'ticket',icon:'bi-life-preserver',tone:'purple',title:`${Number(tickets.total)} tiket aktif ditugaskan kepada Anda`,detail:'Buka daftar tiket dan perbarui progres.',href:'/tickets?status=active'});
   }
   if (permissions.has('billing')) {
     const [[overdue]] = await db.query(`SELECT COUNT(*) total FROM invoices WHERE status IN ('unpaid','partial','overdue') AND outstanding>0 AND due_date<DATE_SUB(CURDATE(),INTERVAL 2 DAY)`);
-    if (Number(overdue.total)) notifications.push({type:'billing',icon:'bi-exclamation-diamond-fill',tone:'danger',title:`${Number(overdue.total)} tagihan lewat tempo lebih dari 2 hari`,detail:'Prioritaskan pengingat dan penagihan pelanggan.',href:'/invoices?status=overdue'});
+    if (Number(overdue.total)) dynamicNotifications.push({type:'billing',icon:'bi-exclamation-diamond-fill',tone:'danger',title:`${Number(overdue.total)} tagihan lewat tempo lebih dari 2 hari`,detail:'Prioritaskan pengingat dan penagihan pelanggan.',href:'/invoices?status=overdue'});
   }
   if (permissions.has('network')) {
     const [[isolated]] = await db.query(`SELECT COUNT(*) total FROM customers WHERE customer_status='active' AND network_status='isolated'`);
-    if (Number(isolated.total)) notifications.push({type:'network',icon:'bi-wifi-off',tone:'danger',title:`${Number(isolated.total)} pelanggan sedang terisolir`,detail:'Periksa status billing dan jaringan pelanggan.',href:'/customers?status=active&network=isolated'});
+    if (Number(isolated.total)) dynamicNotifications.push({type:'network',icon:'bi-wifi-off',tone:'danger',title:`${Number(isolated.total)} pelanggan sedang terisolir`,detail:'Periksa status billing dan jaringan pelanggan.',href:'/customers?status=active&network=isolated'});
   }
 
   res.set('Cache-Control', 'no-store').json({
     ok: true,
-    notifications,
-    notificationCount: notifications.length,
+    notifications: [...persistentNotifications, ...dynamicNotifications].slice(0, 12),
+    notificationCount: Number(systemUnreadResult[0][0]?.total || 0) + dynamicNotifications.length,
     unreadMessages: Number(unreadResult[0][0]?.total || 0),
     messages: messagesResult[0],
     users: usersResult[0]
   });
+});
+
+router.post('/notifications/:id/read', async (req, res) => {
+  await db.execute(`UPDATE system_notifications SET read_at=COALESCE(read_at,NOW()) WHERE id=? AND recipient_id=?`, [req.params.id, req.session.user.id]);
+  res.json({ok:true});
+});
+
+router.post('/notifications/read-all', async (req, res) => {
+  await db.execute(`UPDATE system_notifications SET read_at=NOW() WHERE recipient_id=? AND read_at IS NULL`, [req.session.user.id]);
+  res.json({ok:true});
 });
 
 router.post('/messages', async (req, res) => {

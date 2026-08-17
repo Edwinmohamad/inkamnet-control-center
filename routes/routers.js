@@ -2,19 +2,78 @@ const express=require('express');
 const db=require('../config/db');
 const { encrypt }=require('../services/cryptoService');
 const { testConnection }=require('../services/mikrotikRest');
+const { requireAdmin }=require('../middleware/auth');
+const { audit }=require('../services/auditService');
 const router=express.Router();
 
+function routerInput(body,{passwordRequired=false}={}){
+  const siteId=Number(body.site_id);
+  const name=String(body.name||'').trim().slice(0,120);
+  const username=String(body.username||'').trim().slice(0,120);
+  const password=String(body.password||'');
+  let baseUrl=String(body.base_url||'').trim().replace(/\/+$/,'');
+  if(!Number.isInteger(siteId)||siteId<=0)throw new Error('Site router wajib dipilih.');
+  if(!name)throw new Error('Nama router wajib diisi.');
+  if(!username)throw new Error('Username REST wajib diisi.');
+  if(passwordRequired&&!password)throw new Error('Password REST wajib diisi.');
+  let parsed;
+  try{parsed=new URL(baseUrl);}catch(_){throw new Error('REST Base URL tidak valid. Contoh: https://192.168.77.1:8443/rest');}
+  if(!['http:','https:'].includes(parsed.protocol))throw new Error('REST Base URL hanya boleh menggunakan HTTP atau HTTPS.');
+  baseUrl=parsed.toString().replace(/\/$/,'');
+  return {siteId,name,username,password,baseUrl,verifyTls:body.verify_tls?1:0};
+}
+
 router.get('/',async(req,res)=>{
-  const [routers]=await db.query(`SELECT r.id,r.name,r.base_url,r.username,r.verify_tls,r.is_active,r.last_status,r.last_error,r.last_seen_at,s.code site_code FROM routers r JOIN sites s ON s.id=r.site_id ORDER BY s.code,r.name`);
+  const [routers]=await db.query(`SELECT r.id,r.site_id,r.name,r.base_url,r.username,r.verify_tls,r.is_active,r.last_status,r.last_error,r.last_seen_at,s.code site_code,
+    (SELECT COUNT(*) FROM customers c WHERE c.router_id=r.id) linked_customers
+    FROM routers r JOIN sites s ON s.id=r.site_id ORDER BY s.code,r.name`);
   const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
   res.render('routers/index',{title:'Router MikroTik',routers,sites});
 });
 
-router.post('/',async(req,res)=>{
-  const b=req.body;
-  const passwordEnc=encrypt(b.password);
-  await db.execute(`INSERT INTO routers(site_id,name,base_url,username,password_enc,verify_tls,is_active) VALUES(?,?,?,?,?,?,1)`,[b.site_id,b.name,b.base_url.replace(/\/$/,''),b.username,passwordEnc,b.verify_tls?1:0]);
-  req.session.flash={type:'success',message:'Router tersimpan. Jalankan Periksa Koneksi.'};
+router.post('/',requireAdmin,async(req,res)=>{
+  try{
+    const b=routerInput(req.body,{passwordRequired:true});
+    const [site]=await db.execute(`SELECT id FROM sites WHERE id=? AND is_active=1 LIMIT 1`,[b.siteId]);
+    if(!site.length)throw new Error('Site tidak ditemukan atau tidak aktif.');
+    const passwordEnc=encrypt(b.password);
+    const [result]=await db.execute(`INSERT INTO routers(site_id,name,base_url,username,password_enc,verify_tls,is_active) VALUES(?,?,?,?,?,?,1)`,[b.siteId,b.name,b.baseUrl,b.username,passwordEnc,b.verifyTls]);
+    await audit({userId:req.session.user.id,action:'create',entityType:'router',entityId:result.insertId,description:`Tambah router ${b.name}`,ip:req.ip});
+    req.session.flash={type:'success',message:'Router tersimpan. Jalankan Test untuk memvalidasi koneksi.'};
+  }catch(e){req.session.flash={type:'danger',message:`Router gagal disimpan: ${e.message}`};}
+  res.redirect('/routers');
+});
+
+router.post('/:id/update',requireAdmin,async(req,res)=>{
+  try{
+    const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)throw new Error('ID router tidak valid.');
+    const b=routerInput(req.body);
+    const [rows]=await db.execute(`SELECT id,site_id,name FROM routers WHERE id=? LIMIT 1`,[id]);
+    const current=rows[0];if(!current)throw new Error('Router tidak ditemukan.');
+    const [site]=await db.execute(`SELECT id FROM sites WHERE id=? AND is_active=1 LIMIT 1`,[b.siteId]);if(!site.length)throw new Error('Site tidak ditemukan atau tidak aktif.');
+    const [[usage]]=await db.execute(`SELECT COUNT(*) total FROM customers WHERE router_id=?`,[id]);
+    if(Number(current.site_id)!==b.siteId&&Number(usage.total)>0)throw new Error(`Site tidak dapat diubah karena router masih terhubung ke ${Number(usage.total)} pelanggan.`);
+    if(b.password){
+      await db.execute(`UPDATE routers SET site_id=?,name=?,base_url=?,username=?,password_enc=?,verify_tls=?,last_error=NULL WHERE id=?`,[b.siteId,b.name,b.baseUrl,b.username,encrypt(b.password),b.verifyTls,id]);
+    }else{
+      await db.execute(`UPDATE routers SET site_id=?,name=?,base_url=?,username=?,verify_tls=?,last_error=NULL WHERE id=?`,[b.siteId,b.name,b.baseUrl,b.username,b.verifyTls,id]);
+    }
+    await audit({userId:req.session.user.id,action:'update',entityType:'router',entityId:id,description:`Ubah router ${current.name} menjadi ${b.name}`,ip:req.ip});
+    req.session.flash={type:'success',message:`Router ${b.name} berhasil diperbarui. Jalankan Test untuk memastikan endpoint baru aktif.`};
+  }catch(e){req.session.flash={type:'danger',message:`Update router gagal: ${e.message}`};}
+  res.redirect('/routers');
+});
+
+router.post('/:id/delete',requireAdmin,async(req,res)=>{
+  try{
+    const id=Number(req.params.id);if(!Number.isInteger(id)||id<=0)throw new Error('ID router tidak valid.');
+    const [rows]=await db.execute(`SELECT id,name FROM routers WHERE id=? LIMIT 1`,[id]);const current=rows[0];if(!current)throw new Error('Router tidak ditemukan.');
+    const [[usage]]=await db.execute(`SELECT COUNT(*) total FROM customers WHERE router_id=?`,[id]);
+    if(Number(usage.total)>0)throw new Error(`Router masih digunakan ${Number(usage.total)} pelanggan. Pindahkan/unlink pelanggan terlebih dahulu.`);
+    await db.execute(`DELETE FROM routers WHERE id=?`,[id]);
+    await audit({userId:req.session.user.id,action:'delete',entityType:'router',entityId:id,description:`Hapus router ${current.name}`,ip:req.ip});
+    req.session.flash={type:'success',message:`Router ${current.name} berhasil dihapus.`};
+  }catch(e){req.session.flash={type:'danger',message:`Hapus router gagal: ${e.message}`};}
   res.redirect('/routers');
 });
 

@@ -1,8 +1,8 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "private": true,
-  "description": "INKAMNET Control Center v1.16.0 - integrated operator greeting, master approval controls, customizable roles, header notifications, and team messaging",
+  "description": "INKAMNET Control Center v1.17.0 - compact NMS/dashboard, PPPoE sync actions, router management, and payment reject notifications",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

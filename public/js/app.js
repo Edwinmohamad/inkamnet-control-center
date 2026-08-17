@@ -56,28 +56,8 @@
   });
 
 
-  // Subtle cursor spotlight for a modern NOC feel (desktop only).
-  if (window.matchMedia('(pointer:fine)').matches) {
-    document.querySelectorAll('.metric-card,.data-card,.ink-kpi,.ink-panel,.collector-card,.timeline-card,.plan-card,.growth-insight-card').forEach(card => {
-      card.classList.add('interactive-spotlight');
-      card.addEventListener('pointermove', e => {
-        const r=card.getBoundingClientRect();
-        card.style.setProperty('--spot-x', `${e.clientX-r.left}px`);
-        card.style.setProperty('--spot-y', `${e.clientY-r.top}px`);
-        card.classList.add('spotlight-on');
-      });
-      card.addEventListener('pointerleave',()=>card.classList.remove('spotlight-on'));
-    });
-  }
-
-  // Perspective motion gives major control surfaces real depth while remaining subtle enough for dense data screens.
-  if (window.matchMedia('(pointer:fine)').matches && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    document.querySelectorAll('.data-card,.filter-card,.nms-router-card,.nms-traffic-panel,.plan-card').forEach(card=>{
-      card.classList.add('ui-3d-card');let frame=0;
-      card.addEventListener('pointermove',event=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const r=card.getBoundingClientRect(),x=(event.clientX-r.left)/r.width,y=(event.clientY-r.top)/r.height;card.style.setProperty('--ui-rotate-x',`${((.5-y)*2.8).toFixed(2)}deg`);card.style.setProperty('--ui-rotate-y',`${((x-.5)*3.6).toFixed(2)}deg`);card.style.setProperty('--ui-depth-x',`${Math.round(x*100)}%`);card.style.setProperty('--ui-depth-y',`${Math.round(y*100)}%`)})});
-      card.addEventListener('pointerleave',()=>{cancelAnimationFrame(frame);card.style.removeProperty('--ui-rotate-x');card.style.removeProperty('--ui-rotate-y')});
-    });
-  }
+  // v1.17: pointer-following spotlight and 3D lighting intentionally disabled.
+  // Static hover/reveal animations remain, but nothing follows the mouse cursor.
 
   document.querySelectorAll('form').forEach(form => form.addEventListener('submit', event => {
     const button = event.submitter;
@@ -211,13 +191,15 @@
   const setHeaderBadge=(element,value)=>{if(!element)return;element.textContent=value>99?'99+':String(value);element.hidden=!value};
   const renderHeaderCenter=data=>{
     setHeaderBadge(notificationBadge,Number(data.notificationCount||0));setHeaderBadge(messageBadge,Number(data.unreadMessages||0));
-    if(notificationList)notificationList.innerHTML=data.notifications?.length?data.notifications.map(item=>`<a class="header-center-item ${escapeHtml(item.tone||'')}" href="${escapeHtml(item.href||'#')}"><i class="bi ${escapeHtml(item.icon||'bi-bell')}"></i><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.detail||'')}</small></span><em class="bi bi-chevron-right"></em></a>`).join(''):'<div class="header-center-empty"><i class="bi bi-check2-circle"></i><strong>Semua terkendali</strong><small>Belum ada notifikasi yang perlu ditindaklanjuti.</small></div>';
+    if(notificationList)notificationList.innerHTML=data.notifications?.length?data.notifications.map(item=>`<a class="header-center-item ${escapeHtml(item.tone||'')} ${item.persistent?(item.read_at?'read':'unread'):''}" href="${escapeHtml(item.href||'#')}" ${item.persistent?`data-header-notification="${item.id}"`:''}><i class="bi ${escapeHtml(item.icon||'bi-bell')}"></i><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.detail||'')}</small></span><em class="bi bi-chevron-right"></em></a>`).join(''):'<div class="header-center-empty"><i class="bi bi-check2-circle"></i><strong>Semua terkendali</strong><small>Belum ada notifikasi yang perlu ditindaklanjuti.</small></div>';
     headerMessages=new Map((data.messages||[]).map(message=>[String(message.id),message]));
     if(messageList)messageList.innerHTML=data.messages?.length?data.messages.map(message=>`<button type="button" class="header-message-item ${message.read_at?'':'unread'}" data-header-message="${message.id}"><span class="header-message-avatar">${escapeHtml(String(message.sender_name||'?').charAt(0).toUpperCase())}</span><span><strong>${escapeHtml(message.sender_name)}</strong><b>${escapeHtml(message.subject)}</b><small>${escapeHtml(String(message.body||'').slice(0,90))}</small></span><time>${relativeTime(message.created_at)}</time></button>`).join(''):'<div class="header-center-empty"><i class="bi bi-chat-heart"></i><strong>Belum ada pesan</strong><small>Kirim pesan baru untuk berkomunikasi dengan tim.</small></div>';
     headerUsers=data.users||[];if(recipientSelect){const current=recipientSelect.value;recipientSelect.innerHTML='<option value="">Pilih user penerima…</option>'+headerUsers.map(user=>`<option value="${user.id}">${escapeHtml(user.name)} · ${escapeHtml(user.role)}</option>`).join('');if(headerUsers.some(user=>String(user.id)===String(current)))recipientSelect.value=current;}
   };
   const loadHeaderCenter=async()=>{if(!notificationList&&!messageList)return;try{const response=await fetch('/communication/header',{headers:{Accept:'application/json'}}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'Gagal memuat header');renderHeaderCenter(data)}catch(error){const failed=`<div class="header-center-empty danger"><i class="bi bi-wifi-off"></i><strong>Data belum tersedia</strong><small>${escapeHtml(error.message)}</small></div>`;if(notificationList)notificationList.innerHTML=failed;if(messageList)messageList.innerHTML=failed;}};
   const communicationPost=async(url,payload={})=>{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken,Accept:'application/json'},body:JSON.stringify(payload)}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||'Permintaan gagal');return data};
+  notificationList?.addEventListener('click',async event=>{const link=event.target.closest('[data-header-notification]');if(!link)return;event.preventDefault();const href=link.getAttribute('href')||'#';try{if(link.classList.contains('unread'))await communicationPost(`/communication/notifications/${link.dataset.headerNotification}/read`)}catch(_){}if(href&&href!=='#')window.location.href=href;else await loadHeaderCenter()});
+  document.getElementById('headerNotificationReadAll')?.addEventListener('click',async()=>{try{await communicationPost('/communication/notifications/read-all');await loadHeaderCenter()}catch(_){}});
   messageList?.addEventListener('click',async event=>{const button=event.target.closest('[data-header-message]');if(!button)return;const message=headerMessages.get(button.dataset.headerMessage);if(!message)return;document.getElementById('headerMessageSender').textContent=`DARI ${message.sender_name}`;document.getElementById('headerMessageSubject').textContent=message.subject;document.getElementById('headerMessageTime').textContent=new Date(message.created_at).toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'});document.getElementById('headerMessageBody').textContent=message.body;const reply=document.getElementById('headerMessageReply');reply.dataset.recipient=message.sender_id;reply.dataset.subject=message.subject;bootstrap.Modal.getOrCreateInstance(document.getElementById('headerMessageViewModal')).show();if(!message.read_at){button.classList.remove('unread');message.read_at=new Date().toISOString();try{await communicationPost(`/communication/messages/${message.id}/read`);setHeaderBadge(messageBadge,Math.max(0,Number(messageBadge.textContent||0)-1))}catch(_){}}});
   document.getElementById('headerMessageReadAll')?.addEventListener('click',async()=>{try{await communicationPost('/communication/messages/read-all');messageList?.querySelectorAll('.unread').forEach(item=>item.classList.remove('unread'));setHeaderBadge(messageBadge,0)}catch(_){}});
   document.getElementById('headerMessageReply')?.addEventListener('click',event=>{const button=event.currentTarget,compose=document.getElementById('headerMessageComposeModal'),view=document.getElementById('headerMessageViewModal');bootstrap.Modal.getOrCreateInstance(view).hide();if(recipientSelect)recipientSelect.value=button.dataset.recipient||'';if(composeForm?.elements.subject)composeForm.elements.subject.value=`Re: ${button.dataset.subject||''}`.slice(0,140);setTimeout(()=>bootstrap.Modal.getOrCreateInstance(compose).show(),180)});

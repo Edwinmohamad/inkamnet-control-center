@@ -228,20 +228,34 @@ router.post('/:id/verify',requireMasterAdmin,async(req,res)=>{
 });
 
 router.post('/:id/reject',requireMasterAdmin,async(req,res)=>{
-  const reason=String(req.body.reason||'Data pembayaran belum dapat divalidasi.').trim().slice(0,500);
-  const conn=await db.getConnection();let payment=null;
+  const reason=String(req.body.reason||'').trim().slice(0,500);
+  const returnTo=localReturn(req.body.return_to,'/payments');
+  if(reason.length<3){
+    req.session.flash={type:'danger',message:'Alasan penolakan wajib diisi minimal 3 karakter.'};
+    return res.redirect(returnTo);
+  }
+  const conn=await db.getConnection();let payment=null;let notified=0;
   try{
     await conn.beginTransaction();
-    const [rows]=await conn.execute(`SELECT * FROM payments WHERE id=? FOR UPDATE`,[req.params.id]);
+    const [rows]=await conn.execute(`SELECT p.*,i.invoice_number,c.customer_code,c.name customer_name
+      FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id
+      WHERE p.id=? FOR UPDATE`,[req.params.id]);
     payment=rows[0];if(!payment)throw new Error('Pembayaran tidak ditemukan.');
     if(payment.status!=='pending')throw new Error('Hanya pembayaran berstatus menunggu yang dapat ditolak.');
-    await conn.execute(`UPDATE payments SET status='failed',settlement_status='not_applicable',verified_by=?,verified_at=NOW(),notes=CONCAT_WS('\n',NULLIF(notes,''),?) WHERE id=?`,[req.session.user.id,`DITOLAK MASTER ADMIN: ${reason}`,payment.id]);
+    await conn.execute(`UPDATE payments SET status='failed',settlement_status='not_applicable',verified_by=?,verified_at=NOW(),rejection_reason=?,rejected_by=?,rejected_at=NOW(),notes=CONCAT_WS('\n',NULLIF(notes,''),?) WHERE id=?`,[req.session.user.id,reason,req.session.user.id,`DITOLAK MASTER ADMIN: ${reason}`,payment.id]);
     await refreshInvoiceStatus(conn,payment.invoice_id);
+    const title=`Pembayaran ${payment.reference||payment.id} ditolak`;
+    const detail=`${payment.customer_name} · ${payment.invoice_number} · Alasan: ${reason}`.slice(0,700);
+    const href=`/payments?approval=failed&q=${encodeURIComponent(payment.reference||payment.invoice_number||payment.customer_code||'')}`;
+    const [notifyResult]=await conn.execute(`INSERT INTO system_notifications(recipient_id,type,tone,icon,title,detail,href,entity_type,entity_id)
+      SELECT u.id,'payment_rejected','danger','bi-x-octagon-fill',?,?,?,'payment',? FROM users u
+      WHERE u.is_active=1 AND (LOWER(TRIM(u.role)) IN ('admin','master_admin') OR LOWER(TRIM(u.name)) LIKE '%padilah%' OR LOWER(TRIM(u.username)) LIKE '%padilah%')`,[title,detail,href,payment.id]);
+    notified=Number(notifyResult.affectedRows||0);
     await conn.commit();
     await audit({userId:req.session.user.id,action:'reject',entityType:'payment',entityId:payment.id,description:`Pembayaran ${payment.reference||payment.id} ditolak: ${reason}`,ip:req.ip});
-    req.session.flash={type:'warning',message:'Pembayaran ditolak. Faktur tetap terbuka dan dapat diajukan ulang.'};
+    req.session.flash={type:'warning',message:`Pembayaran ditolak. Alasan tersimpan dan notifikasi dikirim ke ${notified} akun Admin/Padilah. Faktur tetap terbuka.`};
   }catch(e){await conn.rollback();req.session.flash={type:'danger',message:`Penolakan gagal: ${e.message}`};}finally{conn.release();}
-  res.redirect(localReturn(req.body.return_to,'/payments'));
+  res.redirect(returnTo);
 });
 
 router.get('/reconciliation',requireAdmin,async(req,res)=>{

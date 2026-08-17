@@ -329,4 +329,28 @@ async function ensureV25Schema() {
   await db.query(`UPDATE role_permissions SET permission_schema_version=5 WHERE permission_schema_version<5`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema };
+
+async function ensureV26Schema() {
+  // v1.17: alasan reject tersimpan terstruktur dan notifikasi operasional bersifat persisten.
+  await db.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS rejection_reason VARCHAR(500) NULL AFTER notes`);
+  await db.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS rejected_by BIGINT UNSIGNED NULL AFTER rejection_reason`);
+  await db.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS rejected_at DATETIME NULL AFTER rejected_by`);
+  await db.query(`CREATE TABLE IF NOT EXISTS system_notifications (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    recipient_id BIGINT UNSIGNED NOT NULL,
+    type VARCHAR(60) NOT NULL,
+    tone VARCHAR(20) NOT NULL DEFAULT 'info',
+    icon VARCHAR(80) NOT NULL DEFAULT 'bi-bell-fill',
+    title VARCHAR(180) NOT NULL,
+    detail VARCHAR(700) NULL,
+    href VARCHAR(500) NULL,
+    entity_type VARCHAR(60) NULL,
+    entity_id BIGINT UNSIGNED NULL,
+    read_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_system_notifications_recipient (recipient_id,read_at,created_at),
+    INDEX idx_system_notifications_entity (entity_type,entity_id)
+  )`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema };

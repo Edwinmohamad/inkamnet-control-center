@@ -1,0 +1,32 @@
+INKAMNET CONTROL CENTER v1.17.0 — MANUAL UPDATE
+================================================
+Base source: v1.16.0
+
+CARA UPDATE MANUAL
+1. Backup source/database seperti biasa.
+2. Extract ZIP ini ke root repository INKAMNET Control Center dan pilih Replace/Merge.
+3. JANGAN hapus/replace .env atau folder storage private.
+4. Jalankan: npm run validate
+5. Commit & push ke GitHub main bila hasil validasi OK.
+6. Saat aplikasi start/restart, migrasi v26 otomatis menambah kolom alasan reject dan tabel system_notifications.
+
+FITUR/FIX
+- Efek cahaya yang mengikuti kursor dihilangkan.
+- Dashboard dense core dirapikan dan ruang kosong dikurangi.
+- MikroTik NMS Live Traffic dibuat compact.
+- Registri PPPoE mendapat tindakan Sync Auto dan Sync Manual.
+- Router MikroTik mendapat Edit dan Hapus, dengan proteksi router yang masih dipakai pelanggan.
+- Reject pembayaran wajib alasan minimal 3 karakter.
+- Alasan reject tersimpan dan tampil di riwayat pembayaran.
+- Reject membuat notifikasi persisten untuk akun Admin/Master Admin dan akun bernama/username Padilah bila tersedia.
+- Notifikasi bisa ditandai dibaca / semua dibaca.
+
+VALIDASI YANG SUDAH DIJALANKAN
+- npm run validate : OK
+- node --check public/js/app.js : OK
+- node --check public/js/nms.js : OK
+- git diff --check : OK
+- patch apply test terhadap clean HEAD v1.16.0 : OK
+
+CATATAN
+Patch tidak berisi .env, .git, node_modules, database, atau storage bukti pembayaran.
