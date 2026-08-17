@@ -27,13 +27,14 @@
     <% routers.forEach((r,index)=>{ %>
       <div class="nms-router-row" data-router-shell="<%= r.id %>" data-site="<%= r.site_code %>" style="--delay:<%= index*80 %>ms">
         <article class="nms-router-card loading" data-router="<%= r.id %>">
-          <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><b class="nms-health">CONNECTING</b></div>
+          <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><div class="nms-router-health"><span class="nms-health-score" data-health-score>HEALTH --</span><b class="nms-health">CONNECTING</b></div></div>
           <div class="nms-router-core"><div class="nms-radar"><i></i><i></i><span><b>--</b><small>CPU</small></span></div><div class="nms-router-spec"><span><small>RouterOS</small><b>--</b></span><span><small>Uptime</small><b>--</b></span><span><small>Latency</small><b>--</b></span></div></div>
           <div class="nms-router-counts"><span class="online"><b>0</b><small>Online</small></span><span class="offline"><b>0</b><small>Offline</small></span><span class="isolated"><b>0</b><small>Isolir</small></span><span class="linked"><b>0</b><small>Billing</small></span></div>
         </article>
         <section class="nms-traffic-panel" data-traffic-panel="<%= r.id %>">
-          <div class="nms-traffic-panel-head"><div><span><i class="bi bi-activity"></i> LIVE INTERFACE TRAFFIC</span><h3><%= r.name %></h3><small>Realtime RX/TX · refresh otomatis 15 detik</small></div><label><span>INTERFACE</span><select data-interface-select data-router="<%= r.id %>" aria-label="Pilih interface"><option>Memuat…</option></select></label></div>
-          <div class="nms-traffic-metrics"><span class="rx"><small>DOWNLOAD / RX</small><b>0 bps</b></span><span class="tx"><small>UPLOAD / TX</small><b>0 bps</b></span><span><small>STATUS LINK</small><b data-interface-state>MENUNGGU</b></span></div>
+          <div class="nms-traffic-panel-head"><div><span><i class="bi bi-activity"></i> LIVE INTERFACE TRAFFIC</span><h3><%= r.name %></h3><small>Realtime RX/TX · riwayat 12 menit · refresh otomatis 15 detik</small></div><div class="nms-interface-control"><span class="nms-live-capture"><i></i>LIVE CAPTURE</span><label><span>INTERFACE</span><select data-interface-select data-router="<%= r.id %>" aria-label="Pilih interface"><option>Memuat…</option></select></label></div></div>
+          <div class="nms-traffic-metrics"><span class="rx"><small><i class="bi bi-arrow-down"></i> DOWNLOAD / RX</small><b>0 bps</b></span><span class="tx"><small><i class="bi bi-arrow-up"></i> UPLOAD / TX</small><b>0 bps</b></span><span class="peak"><small><i class="bi bi-graph-up-arrow"></i> PEAK WINDOW</small><b data-peak-rate>0 bps</b></span><span class="average"><small><i class="bi bi-speedometer"></i> RATA-RATA</small><b data-avg-rate>0 bps</b></span></div>
+          <div class="nms-traffic-state"><span><i class="bi bi-ethernet"></i><b data-interface-name>Memuat interface…</b></span><em data-interface-state>MENUNGGU</em></div>
           <div class="nms-traffic-chart large"><canvas data-traffic-chart></canvas><div class="nms-traffic-legend"><span class="rx"><i></i>RX <b>0 bps</b></span><span class="tx"><i></i>TX <b>0 bps</b></span></div></div>
         </section>
       </div>

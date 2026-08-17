@@ -10,6 +10,8 @@ function commonLocals(req,res,next){
   res.locals.isAdmin=isAdminRole(sessionUser?.role);
   res.locals.isMasterAdmin=isMasterAdminRole(sessionUser?.role);
   res.locals.actualRole=sessionUser?.role||null;
+  res.locals.defaultTheme=req.session?.uiTheme||'dark';
+  res.locals.defaultUiPalette=req.session?.uiPalette||'nebula';
   // View lama yang masih membandingkan role dengan "admin" tetap memberi kontrol penuh kepada Master Admin.
   res.locals.user=sessionUser&&res.locals.isMasterAdmin?{...sessionUser,role:'admin'}:sessionUser;
   res.locals.language=language;

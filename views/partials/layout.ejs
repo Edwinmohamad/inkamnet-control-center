@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="<%= language %>" data-theme="dark">
+<html lang="<%= language %>" data-theme="dark" data-palette="nebula">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -11,7 +11,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>">
-  <script>(()=>{try{const t=localStorage.getItem('inkamnet-theme')||'dark';document.documentElement.dataset.theme=t}catch(e){}})();</script>
+  <script>(()=>{try{const allowed=['nebula','ocean','emerald','sunset','rose','ice'];const pref=localStorage.getItem('inkamnet-theme')||<%- JSON.stringify(defaultTheme||'dark') %>;document.documentElement.dataset.theme=pref==='system'?(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):pref;const palette=localStorage.getItem('inkamnet-palette')||<%- JSON.stringify(defaultUiPalette||'nebula') %>;document.documentElement.dataset.palette=allowed.includes(palette)?palette:'nebula'}catch(e){}})();</script>
   <style id="inkamnet-critical-ui">
     /* Critical shell/loader CSS prevents FOUC and oversized logo while the main stylesheet is loading. */
     #appLoader{position:fixed!important;inset:0!important;z-index:3000!important;display:grid!important;place-items:center!important;align-content:center!important;gap:18px!important;overflow:hidden!important;background:#070a13!important;color:#fff!important;transition:opacity .34s ease,visibility .34s ease!important}
@@ -138,6 +138,10 @@
           <div class="live-clock d-none d-xl-flex"><i class="bi bi-clock-history"></i><span data-live-clock>--:--:-- WIB</span></div>
           <div class="live-chip d-none d-xl-flex"><span class="pulse-dot"></span> <%= t('systemLive') %></div>
           <form method="post" action="/profile/language" class="language-switch"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="return_to" value="<%= currentPath %>"><select name="language" onchange="this.form.submit()" aria-label="Language"><option value="id" <%= language==='id'?'selected':'' %>>ID</option><option value="en" <%= language==='en'?'selected':'' %>>EN</option></select></form>
+          <div class="dropdown palette-switcher">
+            <button class="icon-button" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Pilih kombinasi warna" aria-label="Pilih kombinasi warna"><i class="bi bi-palette2"></i></button>
+            <div class="dropdown-menu dropdown-menu-end app-dropdown palette-dropdown p-2"><div class="palette-dropdown-head"><span>WARNA UI</span><small>Pilih kombinasi favorit</small></div><% [['nebula','Nebula'],['ocean','Ocean'],['emerald','Emerald'],['sunset','Sunset'],['rose','Rose'],['ice','Ice']].forEach(p=>{ %><button type="button" class="palette-choice" data-palette-value="<%= p[0] %>"><i data-swatch="<%= p[0] %>"><b></b><b></b></i><span><%= p[1] %></span><em class="bi bi-check2"></em></button><% }) %></div>
+          </div>
           <button class="icon-button theme-toggle" type="button" data-theme-toggle title="Dark / Light Mode"><i class="bi bi-moon-stars-fill"></i></button>
           <div class="user-menu dropdown">
             <button class="user-button dropdown-toggle" data-bs-toggle="dropdown" data-bs-boundary="viewport" data-bs-offset="0,8" aria-expanded="false"><span class="avatar"><% if(user?.profile_photo){ %><img src="/profile/photo/<%= encodeURIComponent(user.profile_photo) %>" alt="Profil"><% } else { %><%= (user?.name || 'A').charAt(0).toUpperCase() %><% } %></span><span class="user-copy d-none d-sm-flex"><strong><%= user?.name || 'Administrator' %></strong><small><%= actualRole || user?.role || 'admin' %></small></span></button>

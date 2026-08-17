@@ -7,6 +7,10 @@
       <h1>Operational Pulse</h1>
       <p>Ringkasan pelanggan, PSB, billing, site, dan piket untuk keputusan operasional harian.</p>
     </div>
+    <a href="/profile" class="dashboard-user-identity">
+      <span class="dashboard-user-photo"><% if(user?.profile_photo){ %><img src="/profile/photo/<%= encodeURIComponent(user.profile_photo) %>" alt="Foto <%= user.name %>"><% }else{ %><b><%= (user?.name||'A').charAt(0).toUpperCase() %></b><i class="bi bi-person-fill"></i><% } %></span>
+      <span><small>OPERATOR ONLINE</small><strong><%= user?.name||'Administrator' %></strong><em><i></i><%= (actualRole||user?.role||'admin').replaceAll('_',' ') %> · secure session</em></span><i class="bi bi-arrow-up-right"></i>
+    </a>
     <div class="command-hero-actions">
       <form class="command-period" method="get" action="/">
         <select name="site" onchange="this.form.submit()"><option value="">Semua Site</option><% siteOptions.forEach(s=>{ %><option value="<%= s.code %>" <%= selectedSiteCode===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select>
@@ -61,19 +65,10 @@
       <div class="psb-trend-content"><div class="command-chart command-chart-psb"><canvas id="commandPsbChart"></canvas></div><div class="psb-dashboard-names"><div><span>NAMA PSB</span><button type="button" data-bs-toggle="modal" data-bs-target="#psbCustomerModal">Lihat semua</button></div><% psbCustomers.slice(0,6).forEach(c=>{ %><a href="/customers/<%= c.id %>"><span><%= c.name.charAt(0).toUpperCase() %></span><div><b><%= c.name %></b><small><%= c.customer_code %> · <%= c.site_code %></small></div><i class="bi bi-chevron-right"></i></a><% }) %><% if(!psbCustomers.length){ %><div class="ink-empty">Belum ada PSB pada filter ini.</div><% } %></div></div>
     </article>
 
-    <article class="command-panel site-summary-panel">
-      <div class="command-panel-head"><div><span>DISTRIBUSI PELANGGAN</span><h3>Rincian Pelanggan per Site</h3></div><i class="bi bi-hdd-network-fill"></i></div>
-      <div class="site-summary-list">
-        <% siteCustomerRows.forEach(s=>{ const pct=Number(s.total)>0?Math.round(Number(s.active||0)/Number(s.total)*100):0; %>
-          <a class="site-summary-row" href="/?site=<%= encodeURIComponent(s.code) %>&month=<%= selectedMonth %>&year=<%= selectedYear %>">
-            <div class="site-summary-title"><span class="site-code-pill"><%= s.code %></span><div><strong><%= s.name %></strong><small><%= Number(s.total||0) %> pelanggan</small></div><b><%= pct %>% aktif</b></div>
-            <div class="site-summary-metrics"><span class="ok"><i></i>Aktif <b><%= Number(s.active||0) %></b></span><span class="muted"><i></i>Tidak Aktif <b><%= Number(s.inactive||0) %></b></span><span class="danger"><i></i>Isolir <b><%= Number(s.isolated||0) %></b></span></div>
-            <div class="site-summary-bar"><span style="width:<%= pct %>%"></span></div>
-          </a>
-        <% }) %>
-        <% if(!siteCustomerRows.length){ %><div class="ink-empty">Belum ada site aktif.</div><% } %>
-      </div>
-      <div class="site-summary-total"><span>TOTAL SELURUH SITE</span><strong><%= siteCustomerRows.reduce((n,s)=>n+Number(s.total||0),0) %> pelanggan</strong></div>
+    <article class="command-panel site-summary-panel site-pie-panel">
+      <div class="command-panel-head"><div><span>DISTRIBUSI PELANGGAN</span><h3>Rincian Pelanggan per Site</h3></div><i class="bi bi-pie-chart-fill"></i></div>
+      <% if(siteCustomerRows.length){ %><div class="site-pie-layout"><div class="site-pie-canvas"><canvas id="siteCustomerPieChart"></canvas><div><strong><%= siteCustomerRows.reduce((n,s)=>n+Number(s.total||0),0) %></strong><small>PELANGGAN</small></div></div><div class="site-pie-legend"><% siteCustomerRows.forEach((s,index)=>{ %><a href="/?site=<%= encodeURIComponent(s.code) %>&month=<%= selectedMonth %>&year=<%= selectedYear %>" style="--site-color:var(--site-color-<%= index%8 %>)"><i></i><span><b><%= s.code %> · <%= s.name %></b><small><%= Number(s.total||0) %> pelanggan</small></span><strong><%= siteCustomerRows.reduce((n,x)=>n+Number(x.total||0),0)?Math.round(Number(s.total||0)/siteCustomerRows.reduce((n,x)=>n+Number(x.total||0),0)*100):0 %>%</strong></a><% }) %></div></div><% }else{ %><div class="ink-empty">Belum ada site aktif.</div><% } %>
+      <div class="site-pie-note"><i class="bi bi-cursor-fill"></i>Klik irisan atau legenda untuk memfilter dashboard berdasarkan site.</div>
     </article>
   </div>
 
@@ -162,6 +157,7 @@
 (()=>{
   const data=<%- JSON.stringify(monthly) %>;
   const invoiceKpi=<%- JSON.stringify(invoiceKpi) %>;
+  const siteDistribution=<%- JSON.stringify(siteCustomerRows.map(s=>({code:s.code,name:s.name,total:Number(s.total||0)}))) %>;
   const money=v=>'Rp '+new Intl.NumberFormat('id-ID',{maximumFractionDigits:0}).format(v||0);
   const popup=document.getElementById('dashboardImportantPopup');
   if(popup){const close=()=>{popup.classList.add('leaving');setTimeout(()=>popup.remove(),280)};popup.querySelector('[data-important-close]')?.addEventListener('click',close);setTimeout(close,9000);}
@@ -179,6 +175,8 @@
   }
   const kpiCanvas=document.getElementById('invoiceKpiChart');
   if(kpiCanvas){new Chart(kpiCanvas,{type:'doughnut',data:{labels:['Lunas','Belum Lunas','Sebagian','Terlambat'],datasets:[{data:[invoiceKpi.paid,invoiceKpi.unpaid,invoiceKpi.partial,invoiceKpi.overdue],backgroundColor:['#2ed6a1','#65758b','#ffbd5b','#ff6969'],borderColor:'rgba(8,12,25,.9)',borderWidth:4,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,cutout:'72%',plugins:{legend:{display:false},tooltip:{backgroundColor:'#0b1020',callbacks:{label:c=>`${c.label}: ${Number(c.raw||0)} tagihan`}}}}});}
+  const sitePie=document.getElementById('siteCustomerPieChart');
+  if(sitePie&&siteDistribution.length){const colors=['#7656ff','#2ed6a1','#55a8ff','#ffbd5b','#ff6969','#d946ef','#22d3ee','#a3e635'];new Chart(sitePie,{type:'doughnut',data:{labels:siteDistribution.map(s=>`${s.code} · ${s.name}`),datasets:[{data:siteDistribution.map(s=>s.total),backgroundColor:colors,borderColor:'rgba(8,12,25,.82)',borderWidth:4,hoverOffset:10}]},options:{responsive:true,maintainAspectRatio:false,cutout:'63%',animation:{duration:1050,easing:'easeOutQuart'},plugins:{legend:{display:false},tooltip:{backgroundColor:'#0b1020',padding:12,callbacks:{label:c=>`${c.label}: ${Number(c.raw||0)} pelanggan`}}},onClick:(_event,elements)=>{if(!elements.length)return;const site=siteDistribution[elements[0].index];location.href=`/?site=${encodeURIComponent(site.code)}&month=<%= selectedMonth %>&year=<%= selectedYear %>`}}});}
 
   // v1.12 subtle pointer telemetry: purely visual, disabled for touch/reduced-motion.
   const dashboard=document.querySelector('.dashboard-v112');
