@@ -1,4 +1,4 @@
-<section class="nms-page" id="nmsApp" data-csrf="<%= csrfToken %>" data-admin="<%= user?.role==='admin'?'1':'0' %>">
+<section class="nms-page" id="nmsApp" data-nms-v2="1" data-csrf="<%= csrfToken %>" data-admin="<%= user?.role==='admin'?'1':'0' %>">
   <div class="nms-ambient"><i></i><i></i><i></i></div>
   <div class="module-head nms-hero">
     <div><div class="module-kicker"><span class="nms-live-dot"></span> NETWORK OPERATIONS CENTER</div><h1>MikroTik NMS <em>// LIVE</em></h1><p>PPPoE, pelanggan billing, health router, dan traffic lintas site dalam satu command center.</p></div>
@@ -10,10 +10,11 @@
 
   <div class="nms-status-rail">
     <div><span class="nms-orbit online"><i></i></span><small>ROUTER ONLINE</small><strong id="nmsRouterCount">0/<%= routers.length %></strong></div>
-    <div><span class="nms-orbit online"><i></i></span><small>PPPoE ONLINE</small><strong id="nmsOnlineCount">0</strong></div>
-    <div><span class="nms-orbit offline"><i></i></span><small>PPPoE OFFLINE</small><strong id="nmsOfflineCount">0</strong></div>
-    <div><span class="nms-orbit isolated"><i></i></span><small>ISOLIR</small><strong id="nmsIsolatedCount">0</strong></div>
+    <button type="button" data-status-quick="online"><span class="nms-orbit online"><i></i></span><small>PPPoE ONLINE</small><strong id="nmsOnlineCount">0</strong><em>lihat daftar →</em></button>
+    <button type="button" data-status-quick="offline"><span class="nms-orbit offline"><i></i></span><small>PPPoE OFFLINE</small><strong id="nmsOfflineCount">0</strong><em>lihat daftar →</em></button>
+    <button type="button" data-status-quick="isolated"><span class="nms-orbit isolated"><i></i></span><small>ISOLIR</small><strong id="nmsIsolatedCount">0</strong><em>lihat daftar →</em></button>
     <div><span class="nms-orbit linked"><i></i></span><small>TERHUBUNG BILLING</small><strong id="nmsLinkedCount">0</strong></div>
+    <button type="button" data-unmatched-open><span class="nms-orbit offline"><i></i></span><small>BELUM SINKRON</small><strong id="nmsUnmatchedCount">0</strong><em>rekonsiliasi →</em></button>
     <div class="nms-sync-state"><i class="bi bi-broadcast-pin"></i><span><small>LAST TELEMETRY</small><strong id="nmsLastSync">Menghubungkan…</strong></span></div>
   </div>
 
@@ -28,17 +29,23 @@
         <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><b class="nms-health">CONNECTING</b></div>
         <div class="nms-router-core"><div class="nms-radar"><i></i><i></i><span><b>--</b><small>CPU</small></span></div><div class="nms-router-spec"><span><small>RouterOS</small><b>--</b></span><span><small>Uptime</small><b>--</b></span><span><small>Latency</small><b>--</b></span></div></div>
         <div class="nms-router-counts"><span class="online"><b>0</b><small>Online</small></span><span class="offline"><b>0</b><small>Offline</small></span><span class="isolated"><b>0</b><small>Isolir</small></span><span class="linked"><b>0</b><small>Billing</small></span></div>
-        <div class="nms-interface-bars"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+        <div class="nms-traffic-head"><span><i class="bi bi-activity"></i>LIVE TRAFFIC</span><select data-interface-select aria-label="Pilih interface"><option>Memuat…</option></select></div>
+        <div class="nms-traffic-chart"><canvas data-traffic-chart></canvas><div class="nms-traffic-legend"><span class="rx"><i></i>RX <b>0 bps</b></span><span class="tx"><i></i>TX <b>0 bps</b></span></div></div>
       </article>
     <% }) %>
   </div>
 
   <div class="nms-workspace">
+    <div class="nms-reconcile" id="nmsReconcile" hidden>
+      <div class="nms-reconcile-head"><div><span class="module-kicker">BILLING RECONCILIATION</span><h3>Pelanggan Belum Sinkron</h3><small>Pelanggan aktif tanpa pasangan secret yang valid. Pilih saran atau kelola manual.</small></div><button type="button" data-unmatched-close><i class="bi bi-x-lg"></i></button></div>
+      <div class="nms-unmatched-grid" id="nmsUnmatchedRows"></div>
+      <div class="nms-exempt-note"><i class="bi bi-shield-check"></i><div><b>Akun non-billing tidak dihitung sebagai masalah sinkronisasi</b><small>Tambahkan tag <code>[ADMIN]</code> atau <code>[FREE]</code> pada comment/profile secret untuk akun admin, monitoring, server, staf, gratis, dan layanan internal.</small></div></div>
+    </div>
     <div class="nms-workspace-head">
       <div><span class="module-kicker">PPPoE SECRET REGISTRY</span><h3>Subscriber Operations</h3><small>Data live dari RouterOS; billing dicocokkan melalui username PPPoE.</small></div>
       <div class="nms-tools"><label><i class="bi bi-search"></i><input id="nmsSearch" type="search" placeholder="Cari username, pelanggan, IP…"></label><select id="nmsStatusFilter"><option value="all">Semua Status</option><option value="online">Online</option><option value="offline">Offline</option><option value="isolated">Isolir</option></select></div>
     </div>
-    <div class="table-responsive"><table class="app-table nms-table"><thead><tr><th>Status</th><th>PPPoE Secret</th><th>Pelanggan Billing</th><th>Site / Router</th><th>Profile</th><th>Session</th><th>Outstanding</th><th></th></tr></thead><tbody id="nmsSecretRows"><tr><td colspan="8"><div class="nms-loading-state"><i class="bi bi-router"></i><strong>Mengambil telemetry MikroTik</strong><small>Sinkronisasi tiga site sedang berjalan…</small></div></td></tr></tbody></table></div>
+    <div class="table-responsive"><table class="app-table nms-table"><thead><tr><th>Status</th><th>PPPoE Secret</th><th>Pelanggan Billing / Saran</th><th>Site / Router</th><th>Profile</th><th>Session</th><th>Outstanding</th><th>Action</th></tr></thead><tbody id="nmsSecretRows"><tr><td colspan="8"><div class="nms-loading-state"><i class="bi bi-router"></i><strong>Mengambil telemetry MikroTik</strong><small>Sinkronisasi tiga site sedang berjalan…</small></div></td></tr></tbody></table></div>
   </div>
 
   <div class="nms-toast" id="nmsToast" hidden></div>

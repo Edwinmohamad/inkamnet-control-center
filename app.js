@@ -25,7 +25,7 @@ const { runAutoIsolation } = require('./services/networkService');
 const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema } = require('./services/schemaService');
 
 const app = express();
-const assetVersion = ['public/css/app.css','public/js/app.js']
+const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
   .map(file => Math.floor(fs.statSync(path.join(__dirname,file)).mtimeMs).toString(36))
   .join('-');
 app.set('view engine', 'ejs');

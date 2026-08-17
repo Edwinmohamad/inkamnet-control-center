@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../config/db');
 const { requireAdmin } = require('../middleware/auth');
 const { checkCustomer, isolateCustomer, unisolateCustomer } = require('../services/networkService');
-const { allSnapshots, saveSecret, customersForRouter } = require('../services/nmsService');
+const { allSnapshots, saveSecret, syncSecret, removeSecret, customersForRouter } = require('../services/nmsService');
 const { audit } = require('../services/auditService');
 const router = express.Router();
 
@@ -36,6 +36,22 @@ router.post('/secrets/:secretId', requireAdmin, async (req,res) => {
     await audit({userId:req.session.user.id,action:'update',entityType:'pppoe_secret',entityId:req.params.secretId,description:`Ubah PPPoE ${result.payload.name} di ${result.router.name}`,ip:req.ip});
     res.json({ok:true,message:'PPPoE secret berhasil diperbarui.'});
   } catch (error) { res.status(400).json({ok:false,error:error.message}); }
+});
+
+router.post('/secrets/:secretId/sync', requireAdmin, async (req,res) => {
+  try {
+    const result=await syncSecret(req.body.router_id,req.params.secretId,req.body.customer_id);
+    await audit({userId:req.session.user.id,action:'sync',entityType:'pppoe_secret',entityId:req.params.secretId,description:`Sinkron ${result.secret.name} ke ${result.customer.customer_code} - ${result.customer.name}`,ip:req.ip});
+    res.json({ok:true,message:`${result.secret.name} berhasil disinkronkan ke ${result.customer.name}.`});
+  } catch(error) { res.status(400).json({ok:false,error:error.message}); }
+});
+
+router.post('/secrets/:secretId/delete', requireAdmin, async (req,res) => {
+  try {
+    const result=await removeSecret(req.body.router_id,req.params.secretId);
+    await audit({userId:req.session.user.id,action:'delete',entityType:'pppoe_secret',entityId:req.params.secretId,description:`Hapus PPPoE ${result.secret.name} dari ${result.router.name}; unlink=${result.linkedCustomers.length}`,ip:req.ip});
+    res.json({ok:true,message:`Secret ${result.secret.name} dihapus${result.disconnected?' dan sesi aktif diputus':''}. ${result.linkedCustomers.length} link billing dilepas.`});
+  } catch(error) { res.status(400).json({ok:false,error:error.message}); }
 });
 
 router.post('/:customerId/check',async(req,res)=>{

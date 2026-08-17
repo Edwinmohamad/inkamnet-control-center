@@ -181,7 +181,7 @@
 // MikroTik NMS — isolated page controller. Router credentials never enter this client.
 (() => {
   const root=document.getElementById('nmsApp');
-  if(!root)return;
+  if(!root||root.dataset.nmsV2==='1')return;
   const $=s=>root.querySelector(s), $$=s=>[...root.querySelectorAll(s)];
   const csrf=root.dataset.csrf, isAdmin=root.dataset.admin==='1';
   const modalEl=document.getElementById('nmsSecretModal'), form=document.getElementById('nmsSecretForm');

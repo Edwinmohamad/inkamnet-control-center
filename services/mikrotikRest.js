@@ -106,7 +106,21 @@ async function updateSecret(router, id, payload) {
   return request(router, 'PATCH', `/ppp/secret/${encodeURIComponent(id)}`, payload);
 }
 
+async function getSecret(router, id) {
+  const result = await request(router, 'GET', `/ppp/secret/${encodeURIComponent(id)}?.proplist=.id,name,profile,disabled,comment`);
+  return Array.isArray(result) ? result[0] || null : result;
+}
+
+async function deleteSecret(router, id) {
+  const secret = await getSecret(router,id);
+  if (!secret?.name) throw new Error('PPPoE secret tidak ditemukan');
+  const active = await findActive(router,secret.name);
+  if (active?.['.id']) await request(router,'DELETE',`/ppp/active/${encodeURIComponent(active['.id'])}`);
+  await request(router,'DELETE',`/ppp/secret/${encodeURIComponent(id)}`);
+  return {secret,disconnected:!!active};
+}
+
 module.exports = {
   request, testConnection, findSecret, findActive, isolatePppoe, unisolatePppoe,
-  listSecrets, listActive, listProfiles, listInterfaces, createSecret, updateSecret
+  listSecrets, listActive, listProfiles, listInterfaces, createSecret, updateSecret, getSecret, deleteSecret
 };
