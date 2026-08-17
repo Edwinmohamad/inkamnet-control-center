@@ -98,6 +98,7 @@ router.get('/',async(req,res)=>{
   const cluster=String(req.query.cluster||'').trim();
   const month=Number(req.query.month)>=1&&Number(req.query.month)<=12?Number(req.query.month):'';
   const year=Number(req.query.year)>=2020&&Number(req.query.year)<=2100?Number(req.query.year):'';
+  const approval=['pending','confirmed','failed'].includes(String(req.query.approval||''))?String(req.query.approval):'';
   let sql=`SELECT p.*,i.invoice_number,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name,u.name collector_name,v.name verifier_name,pu.name proof_uploader_name
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     LEFT JOIN users u ON u.id=COALESCE(p.collector_user_id,p.received_by) LEFT JOIN users v ON v.id=p.verified_by LEFT JOIN users pu ON pu.id=p.proof_uploaded_by WHERE 1=1`;
@@ -105,6 +106,7 @@ router.get('/',async(req,res)=>{
   if(site){sql+=` AND s.code=?`;params.push(site);}
   if(cluster){sql+=` AND c.cluster_id=?`;params.push(Number(cluster));}
   if(month&&year){sql+=` AND MONTH(p.paid_at)=? AND YEAR(p.paid_at)=?`;params.push(month,year);}
+  if(approval){sql+=` AND p.status=?`;params.push(approval);}
   if(q){const like=`%${q}%`;sql+=` AND (c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR p.reference LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;params.push(like,like,like,like,like,like);}
   sql+=` ORDER BY p.id DESC LIMIT 500`;
   const [payments]=await db.execute(sql,params);
@@ -123,7 +125,7 @@ router.get('/',async(req,res)=>{
     SUM(p.status='confirmed') confirmed_count
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE ${summaryWhere.join(' AND ')}`,summaryParams);
   const preselectedInvoiceId=Number(req.query.invoice_id||0)||null;
-  res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,banks,sites,clusters,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year},summaryMonth,summaryYear});
+  res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,banks,sites,clusters,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year,approval},summaryMonth,summaryYear});
 });
 
 router.post('/',requireAdmin,async(req,res)=>{
@@ -137,7 +139,6 @@ router.post('/',requireAdmin,async(req,res)=>{
     if(!bankRows.length)throw new Error('Pilih bank tujuan yang aktif dari Pengaturan → Bank.');
     const bank=bankRows[0];bankName=`${bank.bank_name} · ${bank.account_number} · ${bank.account_name}`;
   }else if(normalizedMethod==='qris')bankName='QRIS';
-  if(!req.file)throw new Error('Bukti pembayaran wajib diupload sebelum dikirim untuk approval Master Admin.');
   const isAdmin=isAdminRole(req.session.user.role);
   const status='pending';
   const settlement='not_applicable';
@@ -170,7 +171,7 @@ router.post('/',requireAdmin,async(req,res)=>{
     await conn.commit();
     await audit({userId:req.session.user.id,action:'create',entityType:'payment_batch',entityId:created[0]?.paymentId||null,description:`Pembayaran ${normalizedMethod} ${created.length} faktur · total Rp${created.reduce((a,x)=>a+x.amount,0)}${req.file?' · bukti terupload':' · tanpa bukti'}`,ip:req.ip});
     const total=created.reduce((a,x)=>a+x.amount,0);
-    req.session.flash={type:'success',message:`${created.length} pembayaran berbukti berhasil diajukan dengan total Rp${total.toLocaleString('id-ID')}. Menunggu approval Master Admin sebelum tagihan dinyatakan lunas.`};
+    req.session.flash={type:'success',message:`${created.length} pembayaran berhasil diajukan dengan total Rp${total.toLocaleString('id-ID')}${req.file?' beserta bukti':' tanpa bukti'}. Menunggu approval Master Admin sebelum tagihan dinyatakan lunas.`};
   }catch(e){await conn.rollback();for(const f of savedFiles)await removeProofFile(f);throw e;}finally{conn.release();}
   res.redirect(localReturn(req.body.return_to,'/payments'));
 });
@@ -211,20 +212,35 @@ router.post('/:id/verify',requireMasterAdmin,async(req,res)=>{
     await conn.beginTransaction();
     const [rows]=await conn.execute(`SELECT * FROM payments WHERE id=? FOR UPDATE`,[req.params.id]);
     const p=rows[0];if(!p)throw new Error('Pembayaran tidak ditemukan');
-    if(p.status!=='confirmed'){
-      if(!p.proof_path)throw new Error('Bukti pembayaran wajib tersedia sebelum approval.');
-      const [invoiceRows]=await conn.execute(`SELECT outstanding,status FROM invoices WHERE id=? FOR UPDATE`,[p.invoice_id]);
-      if(!invoiceRows.length)throw new Error('Faktur pembayaran tidak ditemukan.');
-      if(Number(p.amount)>Number(invoiceRows[0].outstanding))throw new Error('Nominal transfer melebihi sisa tagihan saat ini. Periksa pembayaran lain sebelum verifikasi.');
-      await conn.execute(`UPDATE payments SET status='confirmed',settlement_status=?,verified_by=?,verified_at=NOW() WHERE id=?`,[p.method==='cash'?'held_by_staff':'not_applicable',req.session.user.id,p.id]);
-      await refreshInvoiceStatus(conn,p.invoice_id);
-      if(p.method!=='cash')await postCashTransaction(conn,{paymentId:p.id,invoiceId:p.invoice_id,amount:p.amount,reference:p.reference,actorUserId:req.session.user.id});
-    }
+    if(p.status!=='pending')throw new Error('Hanya pembayaran berstatus menunggu yang dapat disetujui.');
+    const [invoiceRows]=await conn.execute(`SELECT outstanding,status FROM invoices WHERE id=? FOR UPDATE`,[p.invoice_id]);
+    if(!invoiceRows.length)throw new Error('Faktur pembayaran tidak ditemukan.');
+    if(Number(p.amount)>Number(invoiceRows[0].outstanding))throw new Error('Nominal transfer melebihi sisa tagihan saat ini. Periksa pembayaran lain sebelum verifikasi.');
+    await conn.execute(`UPDATE payments SET status='confirmed',settlement_status=?,verified_by=?,verified_at=NOW() WHERE id=?`,[p.method==='cash'?'held_by_staff':'not_applicable',req.session.user.id,p.id]);
+    await refreshInvoiceStatus(conn,p.invoice_id);
+    if(p.method!=='cash')await postCashTransaction(conn,{paymentId:p.id,invoiceId:p.invoice_id,amount:p.amount,reference:p.reference,actorUserId:req.session.user.id});
     await conn.commit();
-    await audit({userId:req.session.user.id,action:'approve',entityType:'payment',entityId:p.id,description:`Approval Master Admin berdasarkan bukti pembayaran ${p.reference||p.id}`,ip:req.ip});
+    await audit({userId:req.session.user.id,action:'approve',entityType:'payment',entityId:p.id,description:`Approval Master Admin ${p.proof_path?'dengan bukti':'tanpa bukti'} untuk pembayaran ${p.reference||p.id}`,ip:req.ip});
     await maybeAutoUnisolate(p.invoice_id);
-    req.session.flash={type:'success',message:'Pembayaran disetujui Master Admin berdasarkan bukti. Tagihan dan jurnal terkait sudah diperbarui.'};
+    req.session.flash={type:'success',message:`Pembayaran disetujui Master Admin ${p.proof_path?'berdasarkan bukti':'tanpa bukti lampiran'}. Tagihan dan jurnal terkait sudah diperbarui.`};
   }catch(e){await conn.rollback();req.session.flash={type:'danger',message:`Verifikasi gagal: ${e.message}`};}finally{conn.release();}
+  res.redirect(localReturn(req.body.return_to,'/payments'));
+});
+
+router.post('/:id/reject',requireMasterAdmin,async(req,res)=>{
+  const reason=String(req.body.reason||'Data pembayaran belum dapat divalidasi.').trim().slice(0,500);
+  const conn=await db.getConnection();let payment=null;
+  try{
+    await conn.beginTransaction();
+    const [rows]=await conn.execute(`SELECT * FROM payments WHERE id=? FOR UPDATE`,[req.params.id]);
+    payment=rows[0];if(!payment)throw new Error('Pembayaran tidak ditemukan.');
+    if(payment.status!=='pending')throw new Error('Hanya pembayaran berstatus menunggu yang dapat ditolak.');
+    await conn.execute(`UPDATE payments SET status='failed',settlement_status='not_applicable',verified_by=?,verified_at=NOW(),notes=CONCAT_WS('\n',NULLIF(notes,''),?) WHERE id=?`,[req.session.user.id,`DITOLAK MASTER ADMIN: ${reason}`,payment.id]);
+    await refreshInvoiceStatus(conn,payment.invoice_id);
+    await conn.commit();
+    await audit({userId:req.session.user.id,action:'reject',entityType:'payment',entityId:payment.id,description:`Pembayaran ${payment.reference||payment.id} ditolak: ${reason}`,ip:req.ip});
+    req.session.flash={type:'warning',message:'Pembayaran ditolak. Faktur tetap terbuka dan dapat diajukan ulang.'};
+  }catch(e){await conn.rollback();req.session.flash={type:'danger',message:`Penolakan gagal: ${e.message}`};}finally{conn.release();}
   res.redirect(localReturn(req.body.return_to,'/payments'));
 });
 

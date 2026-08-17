@@ -1,16 +1,17 @@
 <% const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; const siteQuery=selectedSiteCode?`&site=${encodeURIComponent(selectedSiteCode)}`:''; const customerSiteQuery=selectedSiteCode?`site=${encodeURIComponent(selectedSiteCode)}`:''; const kpiSiteQuery=kpiSiteCode?`&site=${encodeURIComponent(kpiSiteCode)}`:''; const networkTarget=can('network')?'/network/monitor':`/customers?${customerSiteQuery}${customerSiteQuery?'&':''}status=active&network=problem`; const ticketTarget=can('support')?`/tickets?status=active${siteQuery}`:'/'; const cashTarget=isAdmin?'/payments/reconciliation':(can('billing')?'/payments':'/'); %>
-<section class="command-dashboard dashboard-v19 dashboard-v112 dashboard-v114 dashboard-v115">
+<section class="command-dashboard dashboard-v19 dashboard-v112 dashboard-v114 dashboard-v115 dashboard-v116">
   <div class="command-tech-mesh" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
   <div class="command-hero">
     <div class="command-hero-copy">
       <div class="command-eyebrow"><span class="command-live-dot"></span> INKAMNET NETWORK & BILLING COMMAND CENTER</div>
-      <h1>Operational Pulse</h1>
-      <p>Ringkasan pelanggan, PSB, billing, site, dan piket untuk keputusan operasional harian.</p>
+      <div class="command-welcome-line">
+        <a href="/profile" class="dashboard-user-identity" title="Buka profil <%= user?.name||'Administrator' %>">
+          <span class="dashboard-user-photo"><% if(user?.profile_photo){ %><img src="/profile/photo/<%= encodeURIComponent(user.profile_photo) %>" alt="Foto <%= user.name %>"><% }else{ %><b><%= (user?.name||'A').charAt(0).toUpperCase() %></b><i class="bi bi-person-fill"></i><% } %></span>
+          <span class="dashboard-user-copy"><small><i></i> SEDANG ONLINE</small><strong><%= statusLabel(actualRole||user?.role||'admin') %></strong><em><i class="bi bi-person-circle"></i> Buka profil</em></span>
+        </a>
+        <div class="command-welcome-copy"><h1><%= greeting %>, <%= user?.name||'Administrator' %> <span>👋</span></h1><p>Selamat datang kembali di pusat kendali INKAMNET. Semoga operasional hari ini berjalan lancar—berikut Operational Pulse terbaru untuk Anda.</p></div>
+      </div>
     </div>
-    <a href="/profile" class="dashboard-user-identity">
-      <span class="dashboard-user-photo"><% if(user?.profile_photo){ %><img src="/profile/photo/<%= encodeURIComponent(user.profile_photo) %>" alt="Foto <%= user.name %>"><% }else{ %><b><%= (user?.name||'A').charAt(0).toUpperCase() %></b><i class="bi bi-person-fill"></i><% } %></span>
-      <span class="dashboard-user-copy"><small><i></i> SEDANG ONLINE</small><em><%= greeting %>,</em><strong><%= user?.name||'Administrator' %></strong><span><b><%= statusLabel(actualRole||user?.role||'admin') %></b> · Sesi aman</span></span><span class="dashboard-profile-action"><i class="bi bi-person-circle"></i><small>Lihat profil</small></span>
-    </a>
     <div class="command-hero-actions">
       <form class="command-period" method="get" action="/" data-auto-filter>
         <select name="site"><option value="">Semua Site</option><% siteOptions.forEach(s=>{ %><option value="<%= s.code %>" <%= selectedSiteCode===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select>

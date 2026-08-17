@@ -4,10 +4,9 @@ const fs=require('fs');
 const path=require('path');
 const crypto=require('crypto');
 const db=require('../config/db');
-const { requireAdmin, PERMISSIONS, normalizePermissions, normalizeRole, isMasterAdminRole }=require('../middleware/auth');
+const { requireAdmin, requireMasterAdmin, PERMISSIONS, normalizePermissions, normalizeRole, isMasterAdminRole }=require('../middleware/auth');
 const { audit }=require('../services/auditService');
 const router=express.Router();
-router.use(requireAdmin);
 
 const tabs=new Set(['company','invoice','application','accounts','employees','departments','positions','banks','gateways','roles']);
 const uiPalettes=new Set(['nebula','ocean','emerald','sunset','rose','ice']);
@@ -102,7 +101,21 @@ router.post('/banks/:id/toggle',async(req,res)=>{await db.execute(`UPDATE banks 
 router.post('/gateways',async(req,res)=>{const allowed=new Set(['active','inactive','testing']);await db.execute(`INSERT INTO payment_gateways(name,provider,channel,status,notes) VALUES(?,?,?,?,?)`,[clean(req.body.name),nullable(req.body.provider),nullable(req.body.channel),allowed.has(req.body.status)?req.body.status:'inactive',nullable(req.body.notes)]);req.session.flash={type:'success',message:'Payment gateway ditambahkan.'};res.redirect('/settings?tab=gateways');});
 router.post('/gateways/:id/toggle',async(req,res)=>{await db.execute(`UPDATE payment_gateways SET status=IF(status='active','inactive','active') WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=gateways');});
 
-router.post('/roles/:roleKey',async(req,res)=>{
+router.post('/roles',requireMasterAdmin,async(req,res)=>{
+  const roleKey=normalizeRole(req.body.role_key);
+  const roleName=(clean(req.body.role_name)||roleKey).slice(0,100);
+  if(!/^[a-z][a-z0-9_]{2,49}$/.test(roleKey)){req.session.flash={type:'danger',message:'Kode role harus 3-50 karakter: huruf kecil, angka, dan underscore.'};return res.redirect('/settings?tab=roles');}
+  const [exists]=await db.execute(`SELECT id FROM role_permissions WHERE role_key=? LIMIT 1`,[roleKey]);
+  if(exists.length){req.session.flash={type:'warning',message:'Kode role sudah digunakan.'};return res.redirect('/settings?tab=roles');}
+  const requested=Array.isArray(req.body.permissions)?req.body.permissions:[req.body.permissions].filter(Boolean);
+  const permissions=normalizePermissions(requested,roleKey);
+  const [result]=await db.execute(`INSERT INTO role_permissions(role_key,role_name,permissions_json,permission_schema_version) VALUES(?,?,?,5)`,[roleKey,roleName,JSON.stringify(permissions)]);
+  await audit({userId:req.session.user.id,action:'create',entityType:'role_permission',entityId:result.insertId,description:`Custom role ${roleKey} dibuat: ${permissions.join(', ')}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Custom role ${roleName} berhasil dibuat.`};
+  res.redirect('/settings?tab=roles');
+});
+
+router.post('/roles/:roleKey',requireMasterAdmin,async(req,res)=>{
   const roleKey=normalizeRole(req.params.roleKey);
   const [rows]=await db.execute(`SELECT id,role_key FROM role_permissions WHERE role_key=? LIMIT 1`,[roleKey]);
   if(!rows.length){req.session.flash={type:'danger',message:'Role tidak ditemukan.'};return res.redirect('/settings?tab=roles');}
@@ -115,10 +128,22 @@ router.post('/roles/:roleKey',async(req,res)=>{
   res.redirect('/settings?tab=roles');
 });
 
-router.post('/users',async(req,res)=>{
+router.post('/roles/:roleKey/delete',requireMasterAdmin,async(req,res)=>{
+  const roleKey=normalizeRole(req.params.roleKey);
+  if(['master_admin','admin','staff'].includes(roleKey)){req.session.flash={type:'danger',message:'Role sistem tidak dapat dihapus.'};return res.redirect('/settings?tab=roles');}
+  const [[usage]]=await db.execute(`SELECT COUNT(*) total FROM users WHERE role=?`,[roleKey]);
+  if(Number(usage.total)>0){req.session.flash={type:'warning',message:`Role masih dipakai ${Number(usage.total)} akun. Pindahkan role akun terlebih dahulu.`};return res.redirect('/settings?tab=roles');}
+  const [result]=await db.execute(`DELETE FROM role_permissions WHERE role_key=?`,[roleKey]);
+  if(result.affectedRows)await audit({userId:req.session.user.id,action:'delete',entityType:'role_permission',entityId:null,description:`Custom role ${roleKey} dihapus`,ip:req.ip});
+  req.session.flash={type:'success',message:'Custom role berhasil dihapus.'};res.redirect('/settings?tab=roles');
+});
+
+router.post('/users',requireAdmin,async(req,res)=>{
   const b=req.body,name=clean(b.name),username=clean(b.username).toLowerCase(),password=String(b.password||'');
   if(!name||!/^[-a-z0-9._]{3,50}$/i.test(username)||password.length<8){req.session.flash={type:'danger',message:'Nama, username 3-50 karakter, dan password minimal 8 karakter wajib diisi.'};return res.redirect('/settings?tab=accounts');}
-  const requestedRole=normalizeRole(b.role),role=['staff','admin','master_admin'].includes(requestedRole)?requestedRole:'staff';
+  const requestedRole=normalizeRole(b.role);
+  const [roleRows]=await db.execute(`SELECT role_key FROM role_permissions WHERE role_key=? LIMIT 1`,[requestedRole]);
+  const role=roleRows.length?roleRows[0].role_key:'staff';
   if(role==='master_admin'&&!isMasterAdminRole(req.session.user.role)){req.session.flash={type:'danger',message:'Hanya Master Admin yang dapat membuat Master Admin baru.'};return res.redirect('/settings?tab=accounts');}
   const [duplicate]=await db.execute(`SELECT id FROM users WHERE username=? LIMIT 1`,[username]);
   if(duplicate.length){req.session.flash={type:'danger',message:'Username sudah digunakan akun lain.'};return res.redirect('/settings?tab=accounts');}
@@ -129,11 +154,13 @@ router.post('/users',async(req,res)=>{
   req.session.flash={type:'success',message:`Akun ${role==='master_admin'?'Master Admin':role} berhasil dibuat.`};res.redirect('/settings?tab=accounts');
 });
 
-router.post('/users/:id',async(req,res)=>{
+router.post('/users/:id',requireAdmin,async(req,res)=>{
   const id=Number(req.params.id),name=clean(req.body.name),username=clean(req.body.username).toLowerCase();
   const [rows]=await db.execute(`SELECT id,username,role,is_active FROM users WHERE id=? LIMIT 1`,[id]);
   if(!rows.length){req.session.flash={type:'danger',message:'Akun tidak ditemukan.'};return res.redirect('/settings?tab=accounts');}
-  const target=rows[0],actorIsMaster=isMasterAdminRole(req.session.user.role),requested=normalizeRole(req.body.role),role=['staff','admin','master_admin'].includes(requested)?requested:'staff';
+  const target=rows[0],actorIsMaster=isMasterAdminRole(req.session.user.role),requested=normalizeRole(req.body.role);
+  const [roleRows]=await db.execute(`SELECT role_key FROM role_permissions WHERE role_key=? LIMIT 1`,[requested]);
+  const role=roleRows.length?roleRows[0].role_key:'staff';
   if(!name||!/^[-a-z0-9._]{3,50}$/i.test(username)){req.session.flash={type:'danger',message:'Nama dan username akun tidak valid.'};return res.redirect('/settings?tab=accounts');}
   if((isMasterAdminRole(target.role)||role==='master_admin')&&!actorIsMaster){req.session.flash={type:'danger',message:'Hanya Master Admin yang dapat mengubah akun Master Admin.'};return res.redirect('/settings?tab=accounts');}
   if(id===Number(req.session.user.id)&&normalizeRole(target.role)!==role){req.session.flash={type:'warning',message:'Role akun yang sedang dipakai tidak dapat diubah sendiri.'};return res.redirect('/settings?tab=accounts');}
@@ -150,7 +177,7 @@ router.post('/users/:id',async(req,res)=>{
   req.session.flash={type:'success',message:'Konfigurasi akun berhasil diperbarui.'};res.redirect('/settings?tab=accounts');
 });
 
-router.post('/users/:id/toggle',async(req,res)=>{
+router.post('/users/:id/toggle',requireAdmin,async(req,res)=>{
   const id=Number(req.params.id);
   if(id===Number(req.session.user.id)){req.session.flash={type:'warning',message:'Akun yang sedang dipakai tidak bisa dinonaktifkan.'};return res.redirect('/settings?tab=accounts');}
   const [rows]=await db.execute(`SELECT id,username,role,is_active FROM users WHERE id=? LIMIT 1`,[id]);
@@ -164,7 +191,7 @@ router.post('/users/:id/toggle',async(req,res)=>{
   req.session.flash={type:'success',message:'Status akun berhasil diubah.'};res.redirect('/settings?tab=accounts');
 });
 
-router.post('/users/:id/password',async(req,res)=>{
+router.post('/users/:id/password',requireAdmin,async(req,res)=>{
   const id=Number(req.params.id),password=String(req.body.password||'');
   if(password.length<8){req.session.flash={type:'danger',message:'Password baru minimal 8 karakter.'};return res.redirect('/settings?tab=accounts');}
   const [rows]=await db.execute(`SELECT username,role FROM users WHERE id=? LIMIT 1`,[id]);
