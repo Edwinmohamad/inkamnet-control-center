@@ -75,4 +75,38 @@ async function unisolatePppoe(router, username) {
   return { secret };
 }
 
-module.exports = { request, testConnection, findSecret, findActive, isolatePppoe, unisolatePppoe };
+async function listSecrets(router) {
+  const fields = '.id,name,service,profile,local-address,remote-address,caller-id,disabled,comment,last-logged-out';
+  const result = await request(router, 'GET', `/ppp/secret?.proplist=${fields}`);
+  return Array.isArray(result) ? result : [];
+}
+
+async function listActive(router) {
+  const fields = '.id,name,address,uptime,caller-id,service,encoding,session-id';
+  const result = await request(router, 'GET', `/ppp/active?.proplist=${fields}`);
+  return Array.isArray(result) ? result : [];
+}
+
+async function listProfiles(router) {
+  const result = await request(router, 'GET', '/ppp/profile?.proplist=.id,name,local-address,remote-address-list,rate-limit,only-one');
+  return Array.isArray(result) ? result : [];
+}
+
+async function listInterfaces(router) {
+  const fields = '.id,name,type,running,disabled,dynamic,rx-byte,tx-byte,rx-packet,tx-packet,actual-mtu,comment';
+  const result = await request(router, 'GET', `/interface?.proplist=${fields}`);
+  return Array.isArray(result) ? result : [];
+}
+
+async function createSecret(router, payload) {
+  return request(router, 'PUT', '/ppp/secret', payload);
+}
+
+async function updateSecret(router, id, payload) {
+  return request(router, 'PATCH', `/ppp/secret/${encodeURIComponent(id)}`, payload);
+}
+
+module.exports = {
+  request, testConnection, findSecret, findActive, isolatePppoe, unisolatePppoe,
+  listSecrets, listActive, listProfiles, listInterfaces, createSecret, updateSecret
+};
