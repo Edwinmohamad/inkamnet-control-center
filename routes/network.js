@@ -4,18 +4,41 @@ const { requireAdmin } = require('../middleware/auth');
 const { checkCustomer, isolateCustomer, unisolateCustomer } = require('../services/networkService');
 const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret, customersForRouter, customersForSync, smartSyncPlan, applySmartSync } = require('../services/nmsService');
 const { audit } = require('../services/auditService');
+const { proxyInfrastructure } = require('../services/infrastructureProxy');
 const router = express.Router();
 
-const REMOTE_TOOLS=[
-  {key:'proxmox',name:'Proxmox',description:'Virtualisasi server dan container',url:'https://inkampxmx.edwinpxmx.my.id',icon:'bi-boxes',tone:'orange'},
-  {key:'n8n',name:'n8n',description:'Otomasi workflow operasional',url:'https://ndepalann.edwinpxmx.my.id/',icon:'bi-diagram-2-fill',tone:'red'},
-  {key:'prtg',name:'PRTG',description:'Monitoring perangkat dan trafik',url:'https://inkamnetnms.edwinpxmx.my.id',icon:'bi-activity',tone:'blue'},
-  {key:'genieacs',name:'GenieACS',description:'Remote provisioning perangkat CPE',url:'https://geniinkamnet.edwinpxmx.my.id',icon:'bi-router-fill',tone:'green'},
-  {key:'panelacs',name:'Panel ACS',description:'Panel kendali dan administrasi ACS',url:'https://panelacs.edwinpxmx.my.id',icon:'bi-sliders2-vertical',tone:'purple'},
-  {key:'casaos',name:'CasaOS',description:'Workspace aplikasi dan storage server',url:'https://kasaos.edwinpxmx.my.id/#/',icon:'bi-grid-3x3-gap-fill',tone:'cyan'}
+const INFRA_GROUPS=[
+  {key:'server',name:'Server & OS',icon:'bi-server',tools:[
+    {key:'proxmox',name:'Proxmox VE',description:'Virtualisasi VM / LXC dan resource server',url:process.env.INFRA_PROXMOX_URL||'https://inkampxmx.edwinpxmx.my.id',icon:'bi-boxes',tone:'orange'},
+    {key:'casaos',name:'CasaOS',description:'Workspace aplikasi, storage, dan service host',url:process.env.INFRA_CASAOS_URL||'https://kasaos.edwinpxmx.my.id/',icon:'bi-grid-3x3-gap-fill',tone:'cyan'}
+  ]},
+  {key:'management',name:'TR-069 & Management',icon:'bi-router-fill',tools:[
+    {key:'genieacs',name:'GenieACS Portal',description:'TR-069 provisioning dan management ONT/CPE',url:process.env.INFRA_GENIEACS_URL||'https://geniinkamnet.edwinpxmx.my.id',icon:'bi-broadcast-pin',tone:'green'},
+    {key:'webfig',name:'MikroTik WebFig',description:'Panel RouterOS berbasis web',url:process.env.INFRA_MIKROTIK_WEBFIG_URL||'',icon:'bi-router',tone:'purple'},
+    {key:'nms',name:'MikroTik NMS',description:'NMS pelanggan dan sinkronisasi PPPoE INKAMNET',internal:'/network/monitor',icon:'bi-activity',tone:'blue'}
+  ]},
+  {key:'containers',name:'Container Services',icon:'bi-box-seam-fill',tools:[
+    {key:'portainer',name:'Portainer / Docker',description:'Management container dan Docker stack',url:process.env.INFRA_PORTAINER_URL||'',icon:'bi-box-seam-fill',tone:'blue'}
+  ]}
 ];
+function allInfrastructureTools(){return INFRA_GROUPS.flatMap(group=>group.tools.map(tool=>({...tool,groupKey:group.key,groupName:group.name})));}
+function infrastructureTool(key){return allInfrastructureTools().find(tool=>tool.key===String(key||''));}
 
-router.get('/tools',(req,res)=>res.render('network/tools',{title:'Remote Tools Jaringan',tools:REMOTE_TOOLS}));
+router.get('/tools',(req,res)=>{
+  const groupKey=String(req.query.group||'').trim();
+  const requested=String(req.query.tool||'').trim();
+  const group=INFRA_GROUPS.find(x=>x.key===groupKey)||INFRA_GROUPS[0];
+  const selected=infrastructureTool(requested)||group.tools[0]||allInfrastructureTools()[0];
+  const workspaceUrl=selected ? (selected.internal || (selected.url ? `/network/tools/proxy/${selected.key}/` : '')) : '';
+  res.render('network/tools',{title:'Infrastructure Hub',groups:INFRA_GROUPS,selected,workspaceUrl});
+});
+
+router.use('/tools/proxy/:toolKey',(req,res)=>{
+  const tool=infrastructureTool(req.params.toolKey);
+  if(!tool||tool.internal)return res.status(404).send('Infrastructure tool tidak ditemukan.');
+  if(!tool.url)return res.status(503).send('URL tool belum dikonfigurasi di environment.');
+  return proxyInfrastructure(req,res,{targetUrl:tool.url,prefix:`/network/tools/proxy/${tool.key}`});
+});
 
 router.get('/monitor', async (req,res) => {
   const [routers] = await db.query(`SELECT r.id,r.name,r.last_status,r.last_seen_at,r.last_error,s.code site_code,s.name site_name FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.is_active=1 ORDER BY s.code,r.name`);

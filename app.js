@@ -24,7 +24,7 @@ const { requireAuth, loadPermissions, requirePermission } = require('./middlewar
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
 const { purgeOldLogs } = require('./services/logRetentionService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema } = require('./services/schemaService');
 
 const app = express();
 const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
@@ -184,6 +184,7 @@ app.get('/healthz', async (req, res) => {
 
 app.use(require('./routes/auth'));
 app.use('/', requireAuth, requirePermission('dashboard'), require('./routes/dashboard'));
+app.use('/analytics', requireAuth, requirePermission('finance'), require('./routes/analytics'));
 app.use('/customers', requireAuth, requirePermission('customers'), require('./routes/customers'));
 app.use('/packages', requireAuth, requirePermission('customers'), require('./routes/packages'));
 app.use('/invoices', requireAuth, requirePermission('billing'), require('./routes/invoices'));
@@ -235,6 +236,7 @@ async function bootstrap() {
   await ensureV24Schema();
   await ensureV25Schema();
   await ensureV26Schema();
+  await ensureV27Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';

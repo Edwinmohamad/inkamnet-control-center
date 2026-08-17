@@ -49,6 +49,7 @@
         <div class="sidebar-section-label">CONTROL CENTER</div>
         <nav class="sidebar-nav">
           <a class="sidebar-link <%= currentPath === '/' ? 'active' : '' %>" href="/"><i class="bi bi-grid-1x2-fill"></i><span><%= t('dashboard') %></span><em>⌘</em></a>
+          <% if(can('finance')){ %><a class="sidebar-link <%= currentPath.startsWith('/analytics') ? 'active' : '' %>" href="/analytics"><i class="bi bi-graph-up-arrow"></i><span>Analitik Keuangan & PSB</span><em>AI</em></a><% } %>
         </nav>
 
         <% if(can('customers')){ %>
@@ -63,7 +64,7 @@
         <div class="sidebar-section-label"><%= language==='en'?'BILLING':'TAGIHAN' %></div>
         <nav class="sidebar-nav">
           <a class="sidebar-link <%= currentPath.startsWith('/invoices') ? 'active' : '' %>" href="/invoices"><i class="bi bi-receipt-cutoff"></i><span><%= t('invoices') %></span></a>
-          <a class="sidebar-link <%= currentPath === '/payments' ? 'active' : '' %>" href="/payments"><i class="bi bi-wallet2"></i><span><%= t('payments') %></span></a>
+          <a class="sidebar-link <%= currentPath === '/payments' ? 'active' : '' %>" href="/payments"><i class="bi bi-shield-check"></i><span><%= language==='en'?'Approval & Transactions':'Approval & Transaksi' %></span></a>
           <% if(user?.role==='admin'){ %><a class="sidebar-link <%= currentPath.startsWith('/payments/reconciliation') ? 'active' : '' %>" href="/payments/reconciliation"><i class="bi bi-arrow-repeat"></i><span><%= t('reconciliation') %></span></a><% } %>
           <a class="sidebar-link <%= currentPath.startsWith('/custom-invoices') ? 'active' : '' %>" href="/custom-invoices"><i class="bi bi-file-earmark-text-fill"></i><span><%= t('customInvoices') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/discounts') ? 'active' : '' %>" href="/discounts"><i class="bi bi-percent"></i><span><%= t('discounts') %></span></a>
@@ -99,7 +100,10 @@
           <a class="sidebar-link <%= currentPath.startsWith('/routers') ? 'active' : '' %>" href="/routers"><i class="bi bi-router-fill"></i><span><%= t('routers') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/clusters') ? 'active' : '' %>" href="/clusters"><i class="bi bi-diagram-3-fill"></i><span><%= t('clusters') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/network/monitor') ? 'active' : '' %>" href="/network/monitor"><i class="bi bi-activity"></i><span><%= t('monitor') %></span></a>
-          <a class="sidebar-link <%= currentPath.startsWith('/network/tools') ? 'active' : '' %>" href="/network/tools"><i class="bi bi-box-arrow-up-right"></i><span>Remote Tools</span></a>
+          <details class="sidebar-nav-group infra-sidebar-group" <%= currentPath.startsWith('/network/tools') ? 'open' : '' %>>
+            <summary class="sidebar-link <%= currentPath.startsWith('/network/tools') ? 'active' : '' %>"><i class="bi bi-grid-1x2-fill"></i><span>Infrastructure Hub</span><em><i class="bi bi-chevron-down"></i></em></summary>
+            <div class="sidebar-subnav infra-sidebar-subnav"><a href="/network/tools"><i class="bi bi-grid"></i>Workspace Overview</a><a href="/network/tools?group=server"><i class="bi bi-server"></i>Server & OS</a><a href="/network/tools?group=management"><i class="bi bi-router-fill"></i>TR-069 & Management</a><a href="/network/tools?group=containers"><i class="bi bi-box-seam-fill"></i>Container Services</a></div>
+          </details>
         </nav>
         <% } %>
 
@@ -123,7 +127,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.17.0</span>
+        <span class="version-pill">CONTROL CENTER v1.19.0</span>
       </div>
     </aside>
 
@@ -179,14 +183,14 @@
       <div class="command-list" id="commandList">
         <% if(can('customers')){ %><a href="/customers/new" data-keywords="pelanggan baru psb tambah"><i class="bi bi-person-plus-fill"></i><div><strong>Tambah Pelanggan</strong><small>Registrasi PSB baru</small></div><span>→</span></a><% } %>
         <% if(can('billing')){ %><a href="/invoices" data-keywords="tagihan invoice generate"><i class="bi bi-receipt"></i><div><strong>Buka Tagihan</strong><small>Generate & kelola billing</small></div><span>→</span></a>
-        <a href="/payments" data-keywords="pembayaran transfer cash"><i class="bi bi-wallet2"></i><div><strong>Catat Pembayaran</strong><small>Transfer atau cash ke tim</small></div><span>→</span></a><% if(user?.role==='admin'){ %>
+        <a href="/payments" data-keywords="approval pembayaran transaksi kas"><i class="bi bi-shield-check"></i><div><strong>Approval & Transaksi</strong><small>Pembayaran dan approval kas</small></div><span>→</span></a><% if(user?.role==='admin'){ %>
         <a href="/payments/reconciliation" data-keywords="rekonsiliasi setoran cash staff"><i class="bi bi-arrow-repeat"></i><div><strong>Rekonsiliasi Cash</strong><small>Cek uang yang masih di staff</small></div><span>→</span></a><% } %><% } %>
         <% if(can('support')){ %><a href="/server-duty" data-keywords="piket server jadwal shift"><i class="bi bi-shield-check"></i><div><strong>Piket Server</strong><small>Jadwal piket mingguan</small></div><span>→</span></a>
         <a href="/tickets" data-keywords="tiket gangguan teknisi"><i class="bi bi-life-preserver"></i><div><strong>Ticketing</strong><small>Keluhan & pekerjaan teknisi</small></div><span>→</span></a>
         <a href="/team-kpi" data-keywords="kpi tim teknisi staff performance"><i class="bi bi-bar-chart-steps"></i><div><strong>KPI Tim</strong><small>Performa teknisi & staff</small></div><span>→</span></a><% } %>
-        <% if(can('network')){ %><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><% } %>
+        <% if(can('network')){ %><a href="/network/tools" data-keywords="infrastructure proxmox casaos genieacs portainer server"><i class="bi bi-grid-1x2-fill"></i><div><strong>Infrastructure Hub</strong><small>Server, TR-069 & container services</small></div><span>→</span></a><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><% } %>
         <% if(can('warehouse')){ %><a href="/inventory" data-keywords="gudang stock barang"><i class="bi bi-box-seam-fill"></i><div><strong>Stock Gudang</strong><small>Warehouse control</small></div><span>→</span></a><% } %>
-        <% if(can('finance')){ %><a href="/cash" data-keywords="kas uang pendapatan pengeluaran"><i class="bi bi-cash-stack"></i><div><strong>Arus Kas</strong><small>Income & expense</small></div><span>→</span></a><% } %>
+        <% if(can('finance')){ %><a href="/analytics" data-keywords="analitik finance psb mrr cashflow odp"><i class="bi bi-graph-up-arrow"></i><div><strong>Analitik Keuangan & PSB</strong><small>Executive, finance, PSB & infrastruktur</small></div><span>→</span></a><a href="/cash" data-keywords="kas uang pendapatan pengeluaran"><i class="bi bi-cash-stack"></i><div><strong>Arus Kas</strong><small>Income & expense</small></div><span>→</span></a><% } %>
         <% if(can('reports')){ %><a href="/reports" data-keywords="laporan report site"><i class="bi bi-bar-chart-line-fill"></i><div><strong>Laporan</strong><small>Billing, finance & site</small></div><span>→</span></a><% } %>
       </div>
       <div class="command-footer"><span><i class="bi bi-arrow-return-left"></i> Open</span><span><i class="bi bi-stars"></i> INKAMNET Command Center</span></div>

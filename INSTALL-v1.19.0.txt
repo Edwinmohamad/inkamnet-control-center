@@ -1,0 +1,32 @@
+INKAMNET CONTROL CENTER v1.19.0
+Dashboard + Analytics + Infrastructure Hub + Cash Approval
+
+UPDATE MANUAL (GitHub Desktop)
+1. Extract ZIP patch v1.19.0.
+2. Copy seluruh isi patch ke root repository lokal inkamnet-control-center dan pilih Replace/Merge.
+3. Jangan menimpa / memasukkan .env, .git, node_modules, atau file private di storage.
+4. Jalankan: npm run validate:v119
+5. Jika seluruh validasi OK, buka GitHub Desktop -> Changes -> Commit -> Push origin.
+
+DATABASE
+- Saat aplikasi restart, ensureV27Schema() otomatis menambahkan workflow approval kas dan tabel user_login_events.
+- Data kas lama dipertahankan sebagai APPROVED agar saldo/report historis tidak hilang.
+- Kas manual baru masuk PENDING_APPROVAL dan baru masuk saldo/report real setelah Master Admin menekan Approve.
+
+INFRASTRUCTURE HUB
+- Proxmox/CasaOS/GenieACS memiliki default sesuai konfigurasi project saat ini.
+- Untuk WebFig dan Portainer, isi URL pada .env server menggunakan contoh di .env.example.
+- INFRA_PROXY_TLS_VERIFY=false hanya untuk service internal terpercaya dengan sertifikat self-signed.
+- Workspace memakai target allowlist dari environment/project; user tidak dapat memasukkan URL proxy bebas.
+
+QA
+Jalankan npm run validate:v119. Command ini memeriksa:
+- syntax seluruh JS route/service/middleware/config
+- static EJS + CSRF forms + modal targets
+- reverse proxy framing header/path/body reconstruction
+- state transition cash approval/reject
+- responsive CSS contract desktop/tablet/mobile
+- kontrak fitur v1.19 dashboard/analytics/infrastructure/approval
+
+CATATAN
+Basic embedded web UI diuji melalui local reverse-proxy test. Login/vendor-specific WebSocket seperti noVNC/terminal Proxmox dan akses live database production tetap harus smoke-test setelah deploy karena service remote tidak tersedia dari environment build patch.

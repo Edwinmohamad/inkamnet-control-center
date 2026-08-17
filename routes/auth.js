@@ -17,6 +17,9 @@ router.post('/login', async (req, res) => {
   }
   const [[appSettings]] = await db.query(`SELECT default_language,default_theme,ui_palette FROM settings WHERE id=1 LIMIT 1`);
   const sessionUser = { id: user.id, name: user.name, username: user.username, role: user.role, profile_photo: user.profile_photo || null };
+  try {
+    await db.execute(`INSERT INTO user_login_events(user_id,ip_address,user_agent) VALUES(?,?,?)`, [user.id,String(req.ip||'').slice(0,64),String(req.get('user-agent')||'').slice(0,255)]);
+  } catch (logErr) { console.error('Gagal mencatat aktivitas login:', logErr.message); }
   // Regenerate session after login to prevent session fixation.
   req.session.regenerate((err) => {
     if (err) return res.status(500).send('Gagal membuat session login. Coba lagi.');

@@ -353,4 +353,25 @@ async function ensureV26Schema() {
   )`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema };
+
+async function ensureV27Schema() {
+  // v1.19: manual cash entries require explicit Master Admin approval before they enter real finance totals.
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS approval_status ENUM('PENDING_APPROVAL','APPROVED','REJECTED') NOT NULL DEFAULT 'APPROVED' AFTER source_type`);
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS approval_reason VARCHAR(500) NULL AFTER approval_status`);
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS reviewed_by BIGINT UNSIGNED NULL AFTER approval_reason`);
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS reviewed_at DATETIME NULL AFTER reviewed_by`);
+  await db.query(`ALTER TABLE cash_transactions ADD INDEX IF NOT EXISTS idx_cash_approval_status(approval_status)`);
+
+  // Login events power the dashboard activity ticker without changing authentication behavior.
+  await db.query(`CREATE TABLE IF NOT EXISTS user_login_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    logged_in_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ip_address VARCHAR(64) NULL,
+    user_agent VARCHAR(255) NULL,
+    INDEX idx_user_login_events_user (user_id,logged_in_at),
+    INDEX idx_user_login_events_time (logged_in_at)
+  )`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema };

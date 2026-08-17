@@ -7,7 +7,7 @@ const { refreshInvoiceStatus }=require('../services/invoiceService');
 const { audit }=require('../services/auditService');
 const { unisolateCustomer }=require('../services/networkService');
 const { assignCashTransactionCode }=require('../services/cashService');
-const { requireAdmin, requireMasterAdmin, isAdminRole }=require('../middleware/auth');
+const { requireAdmin, requireMasterAdmin, isAdminRole, isMasterAdminRole }=require('../middleware/auth');
 const router=express.Router();
 
 const PROOF_DIR=path.join(__dirname,'..','storage','payment-proofs');
@@ -125,7 +125,11 @@ router.get('/',async(req,res)=>{
     SUM(p.status='confirmed') confirmed_count
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE ${summaryWhere.join(' AND ')}`,summaryParams);
   const preselectedInvoiceId=Number(req.query.invoice_id||0)||null;
-  res.render('payments/index',{title:'Pembayaran',payments,openInvoices,staff,banks,sites,clusters,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year,approval},summaryMonth,summaryYear});
+  let cashApprovals=[];
+  if(isMasterAdminRole(req.session.user.role)){
+    [cashApprovals]=await db.query(`SELECT ct.id,ct.transaction_code,ct.transaction_date,ct.name,ct.amount,ct.notes,ct.proof_path,ct.proof_mime,ct.approval_status,cc.name category_name,cc.type category_type,s.code site_code,u.name creator_name FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id LEFT JOIN sites s ON s.id=ct.site_id LEFT JOIN users u ON u.id=ct.created_by WHERE COALESCE(ct.source_type,'manual')='manual' AND ct.approval_status='PENDING_APPROVAL' ORDER BY ct.transaction_date DESC,ct.id DESC LIMIT 250`);
+  }
+  res.render('payments/index',{title:'Approval & Transaksi',payments,openInvoices,staff,banks,sites,clusters,cashApprovals,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year,approval},summaryMonth,summaryYear});
 });
 
 router.post('/',requireAdmin,async(req,res)=>{
