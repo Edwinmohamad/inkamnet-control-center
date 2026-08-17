@@ -30,3 +30,14 @@ Secret dicocokkan dengan `customers.pppoe_username` pada router/site yang sama. 
 7. Password secret lama tidak pernah dikirim ke browser. Kolom password kosong saat edit berarti password tidak diubah.
 
 Jika satu router tidak dapat dijangkau, snapshot router tersebut mengembalikan status `UNREACHABLE`; router/site lain tetap dimuat sehingga kegagalan satu site tidak mematikan seluruh dashboard.
+
+## Rekonsiliasi subscriber
+
+NMS memberi saran pasangan secret dan pelanggan berdasarkan username, Customer ID, nama, komentar, serta token angka yang sama. Saran selalu memerlukan konfirmasi admin; pencocokan otomatis tidak menulis database tanpa tindakan pengguna.
+
+Secret non-billing dapat dikecualikan dari antrian rekonsiliasi dengan penanda pada nama profile atau komentar:
+
+- `[ADMIN]` untuk akun administrator, NOC, monitoring, router, server, teknisi, atau staf.
+- `[FREE]` untuk layanan gratis, internal, sponsor, atau owner.
+
+Tombol hapus secret memutus sesi aktif, menghapus secret dari RouterOS, melepaskan `pppoe_username` pelanggan yang terkait, lalu menyimpan aktivitas ke audit log. Gunakan hanya setelah memastikan subscriber memang harus dihapus permanen.
