@@ -3,7 +3,6 @@ const ExcelJS = require('exceljs');
 const db = require('../config/db');
 const { audit } = require('../services/auditService');
 const { requireAdmin } = require('../middleware/auth');
-const { syncActiveCustomers, customerSyncSuggestions, syncSecret } = require('../services/nmsService');
 const { validateWhatsapp } = require('../services/whatsappService');
 const router = express.Router();
 
@@ -104,36 +103,6 @@ router.get('/', async (req, res) => {
   const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated,SUM(customer_status='active' AND pppoe_username IS NOT NULL AND router_id IS NOT NULL) pppoe_linked,SUM(customer_status='active' AND (pppoe_username IS NULL OR router_id IS NULL)) pppoe_unlinked FROM customers`);
   res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,sales,stats:stats||{},filters});
 });
-
-router.post('/sync-pppoe',requireAdmin,async(req,res)=>{
-  const site=String(req.body.site||'').trim().toUpperCase();
-  const returnTo=String(req.body.return_to||'/customers');
-  const destination=returnTo.startsWith('/')&&!returnTo.startsWith('//')?returnTo:'/customers';
-  try{
-    const result=await syncActiveCustomers(site);
-    await audit({userId:req.session.user.id,action:'sync',entityType:'pppoe_customers',entityId:null,description:`Sinkron PPPoE ${result.scope}: matched=${result.matched}, online=${result.online}, offline=${result.offline}, isolated=${result.isolated}, unmatched=${result.unmatched}, duplicate=${result.duplicate}`,ip:req.ip});
-    const warnings=result.routerFailures+result.unconfigured+result.unmatched+result.duplicate;
-    req.session.flash={type:warnings?'warning':'success',message:`Sinkron PPPoE ${result.scope} selesai: ${result.matched}/${result.customers} pelanggan cocok (${result.online} online, ${result.offline} offline, ${result.isolated} isolir). Belum dikonfigurasi ${result.unconfigured}, tidak ditemukan ${result.unmatched}, duplikat ${result.duplicate}, router gagal ${result.routerFailures}.`};
-  }catch(error){req.session.flash={type:'danger',message:`Sinkron PPPoE gagal: ${error.message}`};}
-  res.redirect(destination);
-});
-
-router.get('/:id/pppoe-suggestions',requireAdmin,async(req,res)=>{
-  try{res.set('Cache-Control','no-store').json({ok:true,...await customerSyncSuggestions(req.params.id)});}
-  catch(error){res.status(400).json({ok:false,error:error.message});}
-});
-
-router.post('/:id/sync-pppoe',requireAdmin,async(req,res)=>{
-  const returnTo=String(req.body.return_to||'/customers'),destination=returnTo.startsWith('/')&&!returnTo.startsWith('//')?returnTo:'/customers';
-  if(req.body.confirmed!=='1'){req.session.flash={type:'danger',message:'Konfirmasi sinkronisasi PPPoE belum diberikan.'};return res.redirect(destination);}
-  try{
-    const result=await syncSecret(req.body.router_id,req.body.secret_id,req.params.id);
-    await audit({userId:req.session.user.id,action:'sync',entityType:'customer_pppoe',entityId:req.params.id,description:`Sinkron per pelanggan ${result.customer.customer_code} ke ${result.secret.name} · ${result.router.site_code}/${result.router.name}`,ip:req.ip});
-    req.session.flash={type:'success',message:`PPPoE ${result.secret.name} berhasil disinkronkan ke ${result.customer.name} pada site ${result.router.site_code}.`};
-  }catch(error){req.session.flash={type:'danger',message:`Sinkron PPPoE gagal: ${error.message}`};}
-  res.redirect(destination);
-});
-
 
 const IMPORT_ALIASES={
   name:['name','nama','nama pelanggan'],
@@ -386,7 +355,7 @@ router.post('/', async (req, res) => {
   }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
   const wa=validateWhatsapp(b.phone);
-  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,NOW(),?,?,?,?,?,?,?,?,?,?,?,?,?,'offline',NOW(),?,?)`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid',b.prorata_enabled?1:0,b.notes||null]);
+  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,NOW(),?,?,?,?,NULL,?,?,NULL,?,?,?,?,?,'offline',NOW(),?,?)`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid',b.prorata_enabled?1:0,b.notes||null]);
   await audit({userId:req.session.user.id,action:'create',entityType:'customer',entityId:result.insertId,description:`Tambah ${customerCode} - ${b.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan berhasil ditambahkan dengan Customer ID ${customerCode}.`};res.redirect('/customers');
 });
@@ -402,7 +371,7 @@ router.post('/:id',async(req,res)=>{
   }
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
   const wa=validateWhatsapp(b.phone);
-  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,router_id=?,cluster_id=?,package_id=?,pppoe_username=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.router_id||null,b.cluster_id||null,packageId,b.pppoe_username||null,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
+  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,cluster_id=?,package_id=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
   await audit({userId:req.session.user.id,action:'update',entityType:'customer',entityId:req.params.id,description:`Update ${customerCode} - ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Data pelanggan diperbarui.'};res.redirect('/customers');
 });
 router.post('/:id/delete',requireAdmin,async(req,res)=>{

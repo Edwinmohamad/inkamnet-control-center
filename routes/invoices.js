@@ -137,7 +137,7 @@ router.get('/:id/pdf',async(req,res)=>{
   const [bankRows]=await db.query(`SELECT bank_name,account_name,account_number FROM banks WHERE is_active=1 ORDER BY id LIMIT 1`);
   const [payments]=await db.execute(`SELECT amount,method,reference,status,paid_at FROM payments WHERE invoice_id=? ORDER BY paid_at`,[req.params.id]);
   const branding=await loadInvoiceBranding();
-  createCorporateInvoicePdf(res,{invoice:x,bank:bankRows[0]||null,payments,branding,filename:`invoice-${x.invoice_number.replace(/[^A-Za-z0-9_-]/g,'-')}.pdf`,disposition:req.query.download==='1'?'attachment':'inline'});
+  createCorporateInvoicePdf(res,{invoice:x,bank:bankRows[0]||null,payments,branding,language:req.session.language==='en'?'en':'id',filename:`invoice-${x.invoice_number.replace(/[^A-Za-z0-9_-]/g,'-')}.pdf`,disposition:req.query.download==='1'?'attachment':'inline'});
 });
 
 router.get('/:id/print',async(req,res)=>{
