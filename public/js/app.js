@@ -40,6 +40,17 @@
   applyTheme(localStorage.getItem('inkamnet-theme') || html.dataset.theme || 'dark');
   document.querySelectorAll('[data-theme-toggle]').forEach(btn => btn.addEventListener('click', () => applyTheme(html.dataset.theme === 'dark' ? 'light' : 'dark')));
 
+  const paletteNames=new Set(['nebula','ocean','emerald','sunset','rose','ice']);
+  const applyPalette=palette=>{
+    palette=paletteNames.has(palette)?palette:'nebula';
+    html.dataset.palette=palette;localStorage.setItem('inkamnet-palette',palette);
+    document.querySelectorAll('[data-palette-value]').forEach(button=>button.classList.toggle('active',button.dataset.paletteValue===palette));
+    window.dispatchEvent(new CustomEvent('inkamnet:palette',{detail:{palette}}));
+  };
+  applyPalette(localStorage.getItem('inkamnet-palette')||html.dataset.palette||'nebula');
+  document.querySelectorAll('[data-palette-value]').forEach(button=>button.addEventListener('click',()=>applyPalette(button.dataset.paletteValue)));
+  document.querySelectorAll('input[name="ui_palette"]').forEach(input=>input.addEventListener('change',()=>applyPalette(input.value)));
+
   document.querySelectorAll('.metric-card,.data-card,.filter-card,.ink-kpi,.ink-panel').forEach((el,index)=>{
     el.style.setProperty('--enter-delay', `${Math.min(index*38,280)}ms`); el.classList.add('reveal-item');
   });
@@ -59,6 +70,15 @@
     });
   }
 
+  // Perspective motion gives major control surfaces real depth while remaining subtle enough for dense data screens.
+  if (window.matchMedia('(pointer:fine)').matches && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.querySelectorAll('.data-card,.filter-card,.nms-router-card,.nms-traffic-panel,.plan-card,.dashboard-user-identity').forEach(card=>{
+      card.classList.add('ui-3d-card');let frame=0;
+      card.addEventListener('pointermove',event=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const r=card.getBoundingClientRect(),x=(event.clientX-r.left)/r.width,y=(event.clientY-r.top)/r.height;card.style.setProperty('--ui-rotate-x',`${((.5-y)*2.8).toFixed(2)}deg`);card.style.setProperty('--ui-rotate-y',`${((x-.5)*3.6).toFixed(2)}deg`);card.style.setProperty('--ui-depth-x',`${Math.round(x*100)}%`);card.style.setProperty('--ui-depth-y',`${Math.round(y*100)}%`)})});
+      card.addEventListener('pointerleave',()=>{cancelAnimationFrame(frame);card.style.removeProperty('--ui-rotate-x');card.style.removeProperty('--ui-rotate-y')});
+    });
+  }
+
   document.querySelectorAll('form').forEach(form => form.addEventListener('submit', event => {
     const button = event.submitter;
     if (!button || button.dataset.noLoading === 'true') return;
@@ -71,10 +91,11 @@
     const link = event.target.closest('a[href]');
     if (!link || link.target === '_blank' || link.hasAttribute('download') || link.href.startsWith('javascript:') || link.getAttribute('href').startsWith('#')) return;
     if (link.origin !== location.origin) return;
+    if(!progress)return;
     progress.style.opacity='1';progress.style.width='18%';
     requestAnimationFrame(()=>{progress.style.width='72%'});
   });
-  window.addEventListener('pageshow',()=>{progress.style.width='100%';setTimeout(()=>{progress.style.opacity='0';progress.style.width='0'},180)});
+  window.addEventListener('pageshow',()=>{if(!progress)return;progress.style.width='100%';setTimeout(()=>{progress.style.opacity='0';progress.style.width='0'},180)});
 
 
   // Bootstrap modals are moved to <body> to avoid stacking-context bugs caused by animated page containers.
@@ -201,6 +222,7 @@
       trafficPrevious.set(key,{rx:x.rxByte,tx:x.txByte,at:now});return {...x,rxRate:rx,txRate:tx};
     }).sort((a,b)=>(b.rxRate+b.txRate)-(a.rxRate+a.txRate)).slice(0,3);
   }
+
   function renderCard(snapshot){
     const card=root.querySelector(`[data-router="${snapshot.id}"]`);if(!card)return;
     card.classList.remove('loading','online','offline');card.classList.add(snapshot.ok?'online':'offline');

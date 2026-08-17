@@ -240,4 +240,20 @@ async function ensureV21Schema() {
   await db.query(`UPDATE customers SET status_changed_at=COALESCE(status_changed_at,updated_at,created_at) WHERE status_changed_at IS NULL`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema };
+async function ensureV22Schema() {
+  // Preferensi palet disimpan terpisah dari mode gelap/terang agar keduanya dapat dipilih independen.
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS ui_palette ENUM('nebula','ocean','emerald','sunset','rose','ice') NOT NULL DEFAULT 'nebula' AFTER default_theme`);
+
+  // Akun master bootstrap dibuat satu kali. Hash adalah bcrypt dari password awal yang diminta;
+  // startup berikutnya tidak menimpa password sehingga tetap bisa diganti dari menu profil.
+  const masterPasswordHash = '$2b$12$rmK/tNnmnROuvMTKkaJisOJW2mkVWU2kDZ3IR1kzN7ohtfVwO8PnG';
+  await db.execute(`INSERT INTO users(name,username,password_hash,role,is_active)
+    SELECT 'Master Administrator','masteradminn',?,'master_admin',1
+    WHERE NOT EXISTS (SELECT 1 FROM users WHERE username='masteradminn')`, [masterPasswordHash]);
+  await db.query(`UPDATE users SET role='master_admin',is_active=1 WHERE username='masteradminn'`);
+  await db.query(`INSERT INTO employees(employee_code,name,user_id,is_active)
+    SELECT CONCAT('USR-',LPAD(u.id,4,'0')),u.name,u.id,1 FROM users u
+    WHERE u.username='masteradminn' AND NOT EXISTS (SELECT 1 FROM employees e WHERE e.user_id=u.id)`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema };

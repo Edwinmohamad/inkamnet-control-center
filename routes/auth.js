@@ -15,13 +15,15 @@ router.post('/login', async (req, res) => {
   if (!user || !user.is_active || !(await bcrypt.compare(password || '', user.password_hash))) {
     return res.status(401).render('auth/login', { title: 'Login', layout: false, error: 'Username atau password salah.' });
   }
-  const [[appSettings]] = await db.query(`SELECT default_language FROM settings WHERE id=1 LIMIT 1`);
+  const [[appSettings]] = await db.query(`SELECT default_language,default_theme,ui_palette FROM settings WHERE id=1 LIMIT 1`);
   const sessionUser = { id: user.id, name: user.name, username: user.username, role: user.role, profile_photo: user.profile_photo || null };
   // Regenerate session after login to prevent session fixation.
   req.session.regenerate((err) => {
     if (err) return res.status(500).send('Gagal membuat session login. Coba lagi.');
     req.session.user = sessionUser;
     req.session.language = appSettings?.default_language === 'en' ? 'en' : 'id';
+    req.session.uiTheme = ['dark','light','system'].includes(appSettings?.default_theme) ? appSettings.default_theme : 'dark';
+    req.session.uiPalette = ['nebula','ocean','emerald','sunset','rose','ice'].includes(appSettings?.ui_palette) ? appSettings.ui_palette : 'nebula';
     req.session.save(() => res.redirect('/'));
   });
 });
