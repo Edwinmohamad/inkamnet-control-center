@@ -3,6 +3,7 @@ process.env.TZ = process.env.TZ || 'Asia/Jakarta';
 
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const session = require('express-session');
 const MySQLStoreFactory = require('express-mysql-session');
 const expressLayouts = require('express-ejs-layouts');
@@ -24,6 +25,9 @@ const { runAutoIsolation } = require('./services/networkService');
 const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema } = require('./services/schemaService');
 
 const app = express();
+const assetVersion = ['public/css/app.css','public/js/app.js']
+  .map(file => Math.floor(fs.statSync(path.join(__dirname,file)).mtimeMs).toString(36))
+  .join('-');
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(expressLayouts);
@@ -32,6 +36,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.set('trust proxy', 1);
+app.use((req,res,next)=>{res.locals.assetVersion=assetVersion;next();});
 
 // Baseline security headers for an internal admin application behind Cloudflare.
 app.use((req, res, next) => {
