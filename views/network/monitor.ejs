@@ -1,15 +1,63 @@
-<section>
-  <div class="module-head"><div><div class="module-kicker">NETWORK OPERATIONS CENTER</div><h1>Network Monitor</h1><p>Ringkasan kesehatan router, pelanggan online, isolir, dan status tiap site.</p></div><div class="module-actions"><a href="/routers" class="btn-tech primary"><i class="bi bi-router-fill"></i>Router MikroTik</a></div></div>
-  <div class="metric-grid">
-    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Router Online</span><span class="metric-icon"><i class="bi bi-router-fill"></i></span></div><strong><%= Number(summary.routers_online||0) %>/<%= Number(summary.routers_total||0) %></strong><small>Last known health</small></article>
-    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Customer Online</span><span class="metric-icon"><i class="bi bi-wifi"></i></span></div><strong><%= Number(summary.customers_online||0) %></strong><small>PPPoE/network status online</small></article>
-    <article class="metric-card red"><div class="metric-top"><span class="metric-label">Customer Isolir</span><span class="metric-icon"><i class="bi bi-wifi-off"></i></span></div><strong><%= Number(summary.customers_isolated||0) %></strong><small>Billing / manual isolation</small></article>
-    <article class="metric-card"><div class="metric-top"><span class="metric-label">Monitoring Mode</span><span class="metric-icon"><i class="bi bi-activity"></i></span></div><strong>LIVE</strong><small>Database + router health state</small></article>
+<section class="nms-page" id="nmsApp" data-csrf="<%= csrfToken %>" data-admin="<%= user?.role==='admin'?'1':'0' %>">
+  <div class="nms-ambient"><i></i><i></i><i></i></div>
+  <div class="module-head nms-hero">
+    <div><div class="module-kicker"><span class="nms-live-dot"></span> NETWORK OPERATIONS CENTER</div><h1>MikroTik NMS <em>// LIVE</em></h1><p>PPPoE, pelanggan billing, health router, dan traffic lintas site dalam satu command center.</p></div>
+    <div class="module-actions">
+      <button class="btn-tech" id="nmsRefresh"><i class="bi bi-arrow-repeat"></i><span>Sinkronkan</span></button>
+      <% if(user?.role==='admin'){ %><button class="btn-tech primary" id="nmsAddSecret"><i class="bi bi-person-plus-fill"></i><span>Secret Baru</span></button><% } %>
+    </div>
   </div>
-  <div class="noc-site-grid mb-3">
-    <% sites.forEach((s,index)=>{ const total=Number(s.customers||0); const on=Number(s.online_count||0); const pct=total?Math.round(on/total*100):0; %>
-    <article class="noc-site-card reveal-item" style="--enter-delay:<%= index*55 %>ms"><div class="noc-site-top"><div><span class="module-kicker">SITE <%= s.code %></span><h3><%= s.name %></h3></div><div class="noc-signal <%= Number(s.unreachable_count||0)>0?'danger':'ok' %>"><i></i><%= Number(s.unreachable_count||0)>0?'ATTENTION':'STABLE' %></div></div><div class="noc-ring" style="--p:<%= pct %>"><span><b><%= pct %>%</b><small>online</small></span></div><div class="noc-mini-stats"><span><b><%= on %></b> Online</span><span><b><%= Number(s.offline_count||0) %></b> Offline</span><span><b><%= Number(s.isolated_count||0) %></b> Isolir</span></div></article>
+
+  <div class="nms-status-rail">
+    <div><span class="nms-orbit online"><i></i></span><small>ROUTER ONLINE</small><strong id="nmsRouterCount">0/<%= routers.length %></strong></div>
+    <div><span class="nms-orbit online"><i></i></span><small>PPPoE ONLINE</small><strong id="nmsOnlineCount">0</strong></div>
+    <div><span class="nms-orbit offline"><i></i></span><small>PPPoE OFFLINE</small><strong id="nmsOfflineCount">0</strong></div>
+    <div><span class="nms-orbit isolated"><i></i></span><small>ISOLIR</small><strong id="nmsIsolatedCount">0</strong></div>
+    <div><span class="nms-orbit linked"><i></i></span><small>TERHUBUNG BILLING</small><strong id="nmsLinkedCount">0</strong></div>
+    <div class="nms-sync-state"><i class="bi bi-broadcast-pin"></i><span><small>LAST TELEMETRY</small><strong id="nmsLastSync">Menghubungkan…</strong></span></div>
+  </div>
+
+  <div class="nms-site-tabs" role="tablist">
+    <button class="active" data-site="all"><i class="bi bi-grid-fill"></i> Semua Site</button>
+    <% sites.forEach(site=>{ %><button data-site="<%= site.code %>"><span></span><%= site.code %><small><%= site.name %></small></button><% }) %>
+  </div>
+
+  <div class="nms-site-grid" id="nmsSiteGrid">
+    <% routers.forEach((r,index)=>{ %>
+      <article class="nms-router-card loading" data-router="<%= r.id %>" data-site="<%= r.site_code %>" style="--delay:<%= index*80 %>ms">
+        <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><b class="nms-health">CONNECTING</b></div>
+        <div class="nms-router-core"><div class="nms-radar"><i></i><i></i><span><b>--</b><small>CPU</small></span></div><div class="nms-router-spec"><span><small>RouterOS</small><b>--</b></span><span><small>Uptime</small><b>--</b></span><span><small>Latency</small><b>--</b></span></div></div>
+        <div class="nms-router-counts"><span class="online"><b>0</b><small>Online</small></span><span class="offline"><b>0</b><small>Offline</small></span><span class="isolated"><b>0</b><small>Isolir</small></span><span class="linked"><b>0</b><small>Billing</small></span></div>
+        <div class="nms-interface-bars"><div class="skeleton-line"></div><div class="skeleton-line short"></div></div>
+      </article>
     <% }) %>
   </div>
-  <div class="data-card"><div class="data-card-head"><div><h3>Router Fleet</h3><small>Status terakhir router per site dan distribusi customer.</small></div></div><div class="table-responsive"><table class="app-table"><thead><tr><th>Router</th><th>Site</th><th>Status</th><th>Last Seen</th><th>Customer</th><th>Online</th><th>Isolir</th><th>Endpoint</th></tr></thead><tbody><% routers.forEach(r=>{ %><tr><td><span class="cell-main"><%= r.name %></span><span class="cell-sub"><%= r.username %></span></td><td><span class="status-badge purple"><%= r.site_code %></span></td><td><span class="status-badge <%= r.last_status==='online'?'green':r.last_status==='offline'?'red':'orange' %>"><%= r.last_status %></span></td><td><%= r.last_seen_at?new Date(r.last_seen_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'}):'-' %></td><td><%= r.customers %></td><td class="text-success-soft"><%= r.online_customers %></td><td class="text-danger-soft"><%= r.isolated_customers %></td><td><code class="endpoint"><%= r.base_url %></code></td></tr><% }) %><% if(!routers.length){ %><tr><td colspan="8"><div class="empty-state"><i class="bi bi-router"></i><strong>Belum ada router</strong><small>Tambahkan MikroTik dari menu Router MikroTik.</small></div></td></tr><% } %></tbody></table></div></div>
+
+  <div class="nms-workspace">
+    <div class="nms-workspace-head">
+      <div><span class="module-kicker">PPPoE SECRET REGISTRY</span><h3>Subscriber Operations</h3><small>Data live dari RouterOS; billing dicocokkan melalui username PPPoE.</small></div>
+      <div class="nms-tools"><label><i class="bi bi-search"></i><input id="nmsSearch" type="search" placeholder="Cari username, pelanggan, IP…"></label><select id="nmsStatusFilter"><option value="all">Semua Status</option><option value="online">Online</option><option value="offline">Offline</option><option value="isolated">Isolir</option></select></div>
+    </div>
+    <div class="table-responsive"><table class="app-table nms-table"><thead><tr><th>Status</th><th>PPPoE Secret</th><th>Pelanggan Billing</th><th>Site / Router</th><th>Profile</th><th>Session</th><th>Outstanding</th><th></th></tr></thead><tbody id="nmsSecretRows"><tr><td colspan="8"><div class="nms-loading-state"><i class="bi bi-router"></i><strong>Mengambil telemetry MikroTik</strong><small>Sinkronisasi tiga site sedang berjalan…</small></div></td></tr></tbody></table></div>
+  </div>
+
+  <div class="nms-toast" id="nmsToast" hidden></div>
 </section>
+
+<div class="modal fade" id="nmsSecretModal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content nms-modal">
+  <form id="nmsSecretForm"><div class="modal-header"><div><span class="module-kicker">MIKROTIK PPPoE CONTROL</span><h3 id="nmsModalTitle">Secret Baru</h3><small>Perubahan dikirim langsung ke RouterOS dan dicatat pada audit log.</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body"><input type="hidden" name="secret_id"><div class="nms-form-grid">
+    <label><span>Router / Site *</span><select name="router_id" required><option value="">Pilih router</option><% routers.forEach(r=>{ %><option value="<%= r.id %>"><%= r.site_code %> · <%= r.name %></option><% }) %></select></label>
+    <label><span>Integrasi Pelanggan</span><select name="customer_id"><option value="">Tanpa pelanggan billing</option></select></label>
+    <label><span>Username *</span><input name="name" required maxlength="120" autocomplete="off"></label>
+    <label><span>Password <small>(kosong = tidak diubah)</small></span><div class="nms-password"><input name="password" type="password" maxlength="200" autocomplete="new-password"><button type="button" data-password-toggle><i class="bi bi-eye"></i></button></div></label>
+    <label><span>Service</span><select name="service"><option value="pppoe">PPPoE</option><option value="any">Any</option></select></label>
+    <label><span>Profile</span><select name="profile"><option value="default">default</option></select></label>
+    <label><span>Local Address</span><input name="local-address" placeholder="Opsional"></label>
+    <label><span>Remote Address</span><input name="remote-address" placeholder="Pool atau IP"></label>
+    <label><span>Caller ID</span><input name="caller-id" placeholder="MAC / caller-id"></label>
+    <label class="wide"><span>Comment</span><textarea name="comment" rows="2" placeholder="Catatan instalasi / pelanggan"></textarea></label>
+    <label class="nms-toggle wide"><input type="checkbox" name="disabled"><i></i><span><b>Isolir / Disable Secret</b><small>Sesi pelanggan akan ditandai isolir. Putuskan sesi aktif dari detail pelanggan bila diperlukan.</small></span></label>
+  </div></div>
+  <div class="modal-footer"><span class="nms-form-security"><i class="bi bi-shield-lock-fill"></i>Kredensial diproses server-side</span><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary" type="submit"><i class="bi bi-cloud-arrow-up-fill"></i>Simpan ke MikroTik</button></div></form>
+</div></div></div>
