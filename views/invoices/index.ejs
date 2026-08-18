@@ -60,7 +60,7 @@
             <td>
               <div class="invoice-customer-select">
                 <% if(isAdmin){ %><input class="form-check-input invoice-table-check" type="checkbox" value="<%= i.id %>" data-invoice-table-check <%= canPay?'':'disabled' %> aria-label="Pilih tagihan <%= i.customer_name %>"><% } %>
-                <div><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><a class="invoice-number-link" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></div>
+                <div><span class="cell-main"><%= i.customer_name %></span><% if(i.customer_archived_at){ %><span class="status-badge gray customer-archived-pill" title="Pelanggan ini sudah diarsipkan — riwayat tagihan tetap ditampilkan untuk audit."><i class="bi bi-archive-fill"></i>Diarsipkan</span><% } %><span class="cell-sub"><%= i.customer_code %></span><a class="invoice-number-link" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></div>
               </div>
             </td>
             <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>

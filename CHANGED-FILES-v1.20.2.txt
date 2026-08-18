@@ -1,0 +1,63 @@
+INKAMNET CONTROL CENTER — PATCH v1.20.2
+==========================================
+Tanggal: 2026-08-18
+Patch KECIL, lanjutan dari v1.20.1. Menjawab laporan: "pelanggan sudah
+dihapus tapi di menu Tagihan data pelanggan masih ada". Hanya 5 file.
+
+JAWABAN SINGKAT
+---------------
+Ini BUKAN bug — ini memang cara kerja fitur Arsip yang disengaja:
+  - Kalau saat menghapus Anda memilih "Arsipkan Data (Soft Delete)": pelanggan
+    hilang dari menu Pelanggan > Data Aktif (pindah ke tab Data Diarsip), TAPI
+    seluruh tagihan lama yang sudah terbit untuk pelanggan itu SENGAJA tetap
+    ditampilkan di menu Tagihan — ini justru tujuan utama fitur Arsip: supaya
+    riwayat keuangan tidak pernah hilang untuk keperluan audit/laporan.
+  - Kalau Anda memilih "Hapus Permanen Dari Sistem" pada pelanggan yang SUDAH
+    punya tagihan, sistem akan MENOLAK permintaan itu (muncul pesan "sudah
+    memiliki riwayat tagihan dan tidak dapat dihapus permanen, gunakan
+    Arsipkan Data") — jadi pelanggan itu tidak mungkin hilang total dari
+    sistem selama masih ada tagihan miliknya, kecuali Anda hapus dulu semua
+    tagihannya satu per satu (tidak disarankan).
+
+Cara memastikan yang mana yang terjadi pada pelanggan Anda: buka menu
+Pelanggan > tab "Data Diarsip". Kalau pelanggan itu ada di sana, berarti dia
+diarsipkan (soft delete) dan itu sesuai desain. Kalau tidak ada di sana sama
+sekali (juga tidak ada di Data Aktif), berarti benar-benar terhapus permanen
+— dan tagihan yang Anda lihat seharusnya sudah tidak mungkin ada kalau
+prosesnya lewat aplikasi (karena hapus permanen diblokir saat masih ada
+tagihan). Kalau ternyata kasus Anda persis yang kedua ini (pelanggan hilang
+total TAPI tagihan lama masih nampak), itu baru benar-benar bug — beri tahu
+saya persis nama/ID pelanggannya supaya saya bisa telusuri lebih dalam.
+
+PERBAIKAN YANG DITAMBAHKAN DI PATCH INI
+-----------------------------------------
+Supaya tidak membingungkan lagi ke depannya, menu Tagihan sekarang menampilkan
+label kecil "Diarsipkan" di samping nama pelanggan kalau tagihan itu memang
+milik pelanggan yang sudah diarsipkan — jadi langsung terlihat jelas KENAPA
+data itu masih ada di sana, tanpa perlu bertanya-tanya.
+  File: routes/invoices.js (menambahkan kolom archived_at pelanggan ke query
+  daftar tagihan), views/invoices/index.ejs (badge "Diarsipkan" di kolom
+  Pelanggan, memakai gaya visual yang sama dengan badge di menu Pelanggan).
+
+CATATAN: menu Approval & Transaksi Pembayaran (/payments) punya perilaku
+serupa (JOIN ke tabel pelanggan tanpa menandai status arsip) — belum saya
+ubah di patch ini karena laporan Anda spesifik soal menu Tagihan. Beri tahu
+saya kalau Anda ingin badge yang sama juga ditambahkan di menu Pembayaran.
+
+DAFTAR FILE (5 file, kode utuh)
+---------------------------------
+  routes/invoices.js
+  views/invoices/index.ejs
+  package.json
+  views/partials/layout.ejs
+  scripts/validate-v119.js
+
+TESTING
+-------
+  - node --check routes/invoices.js — OK
+  - node scripts/validate-static.js — OK (38 EJS, 40 modal trigger, 80 form POST)
+  - node scripts/validate-v119.js — OK (versi 1.20.2)
+  - npm run check — OK
+  - Smoke test ejs.renderFile() pada route GET /invoices dengan DB di-mock — OK
+
+VERSI: 1.20.1 → 1.20.2 (package.json, layout.ejs, validate-v119.js).
