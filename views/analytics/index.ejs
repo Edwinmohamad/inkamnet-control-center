@@ -250,8 +250,8 @@ const psbActivated = (funnel.find(f => f.key === 'active') || {}).value || 0;
 
   // ---- Charts ----
   if (typeof Chart !== 'undefined') {
-    const financeSeries = <%- JSON.stringify(financeSeries) %>;
-    const dueDateMatrix = <%- JSON.stringify(dueDateMatrix) %>;
+    const financeSeries = <%- safeJson(financeSeries) %>;
+    const dueDateMatrix = <%- safeJson(dueDateMatrix) %>;
     const baseOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8995aa', boxWidth: 10, usePointStyle: true } }, tooltip: { backgroundColor: '#0b1020', padding: 12, callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { grid: { display: false }, ticks: { color: '#7f8aa0' } }, y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.08)' }, ticks: { color: '#7f8aa0', callback: v => money(v) } } } };
 
     const cashCanvas = document.getElementById('analyticsCashflowChart');
@@ -278,8 +278,8 @@ const psbActivated = (funnel.find(f => f.key === 'active') || {}).value || 0;
   const printBtn = document.getElementById('analyticsReportPrint');
   const waBtn = document.getElementById('analyticsReportWa');
   const printSheet = document.getElementById('analyticsPrintSheet');
-  const initialReport = <%- JSON.stringify(report) %>;
-  const ownerWhatsapp = <%- JSON.stringify(ownerWhatsapp) %>;
+  const initialReport = <%- safeJson(report) %>;
+  const ownerWhatsapp = <%- safeJson(ownerWhatsapp) %>;
   const queryString = new URLSearchParams({ site: '<%= selectedSiteCode %>', month: '<%= month %>', year: '<%= year %>' }).toString();
   let currentReport = null;
 

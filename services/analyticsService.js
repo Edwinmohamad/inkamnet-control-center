@@ -224,8 +224,11 @@ async function fetchAnalytics({ siteCode = '', month, year }) {
   const siapIsolirCount = aging.filter(x => x.siapIsolir).length;
 
   // --- PSB funnel + technician SLA (in hours) --------------------------------
-  const [[funnelRow]] = await db.execute(`SELECT COUNT(*) registered,SUM(c.address IS NOT NULL AND c.address<>'' AND c.cluster_id IS NOT NULL) survey_ready,SUM(c.router_id IS NOT NULL AND c.pppoe_username IS NOT NULL AND c.pppoe_username<>'') provisioned,SUM(c.customer_status='active' AND c.activation_date IS NOT NULL) activated FROM customers c WHERE YEAR(c.created_at)=? AND MONTH(c.created_at)=?${customerScope}`, [year, month, ...customerParams]);
-  const [[slaRow]] = await db.execute(`SELECT ROUND(AVG(TIMESTAMPDIFF(HOUR,c.created_at,c.activation_date)),1) avg_hours,COUNT(*) samples FROM customers c WHERE c.activation_date IS NOT NULL AND YEAR(c.activation_date)=? AND MONTH(c.activation_date)=?${customerScope}`, [year, month, ...customerParams]);
+  // v1.20.1: archived_at exclusion — without it, a registration later archived (duplicate/mistaken
+  // entry) keeps counting in this month's funnel/SLA numbers forever, since archiving never touches
+  // created_at/activation_date.
+  const [[funnelRow]] = await db.execute(`SELECT COUNT(*) registered,SUM(c.address IS NOT NULL AND c.address<>'' AND c.cluster_id IS NOT NULL) survey_ready,SUM(c.router_id IS NOT NULL AND c.pppoe_username IS NOT NULL AND c.pppoe_username<>'') provisioned,SUM(c.customer_status='active' AND c.activation_date IS NOT NULL) activated FROM customers c WHERE c.archived_at IS NULL AND YEAR(c.created_at)=? AND MONTH(c.created_at)=?${customerScope}`, [year, month, ...customerParams]);
+  const [[slaRow]] = await db.execute(`SELECT ROUND(AVG(TIMESTAMPDIFF(HOUR,c.created_at,c.activation_date)),1) avg_hours,COUNT(*) samples FROM customers c WHERE c.archived_at IS NULL AND c.activation_date IS NOT NULL AND YEAR(c.activation_date)=? AND MONTH(c.activation_date)=?${customerScope}`, [year, month, ...customerParams]);
 
   const [[sync]] = await db.execute(`SELECT COUNT(*) pppoe_unlinked FROM customers c WHERE c.customer_status='active' AND (c.router_id IS NULL OR c.pppoe_username IS NULL OR c.pppoe_username='')${customerScope}`, customerParams);
   const [[cashPending]] = await db.execute(`SELECT COUNT(*) pending_cash FROM cash_transactions ct WHERE ct.approval_status='PENDING_APPROVAL'${cashScope}`, cashParams);

@@ -962,4 +962,6 @@ form[data-auto-filter].is-auto-submitting{opacity:.7;pointer-events:none}.cash-c
 .customer-bulk-buttons button{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);color:var(--text);font-size:.53rem;font-weight:750;transition:.16s}
 .customer-bulk-buttons button:hover{border-color:rgba(var(--brand-rgb),.32);background:rgba(var(--brand-rgb),.06)}
 .customer-bulk-buttons button.ghost{color:var(--muted);background:transparent}
+.customer-bulk-buttons button.danger{border-color:rgba(255,102,112,.25);color:#ff7a83;background:rgba(255,102,112,.07)}
+.customer-bulk-buttons button.danger:hover{border-color:rgba(255,102,112,.42);background:rgba(255,102,112,.13)}
 @media(max-width:767.98px){.customer-bulk-bar{position:fixed;left:12px;right:12px;bottom:12px;margin-top:0}.customer-view-tabs{overflow-x:auto}}

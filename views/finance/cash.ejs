@@ -97,7 +97,7 @@
   document.querySelectorAll('[data-cash-proof]').forEach(input=>input.addEventListener('change',()=>{const label=input.closest('.proof-dropzone')?.querySelector('[data-cash-proof-name]');if(label)label.textContent=input.files?.[0]?.name||'Belum ada file dipilih';}));
 
   if(typeof Chart==='undefined')return;
-  const charts=<%- JSON.stringify(cashCharts) %>,money=value=>'Rp '+new Intl.NumberFormat('id-ID',{maximumFractionDigits:0}).format(value||0),grid='rgba(148,163,184,.09)',tick='#77839a';
+  const charts=<%- safeJson(cashCharts) %>,money=value=>'Rp '+new Intl.NumberFormat('id-ID',{maximumFractionDigits:0}).format(value||0),grid='rgba(148,163,184,.09)',tick='#77839a';
   const expense=document.getElementById('cashExpenseChart');
   if(expense&&charts.categories.length)new Chart(expense,{type:'doughnut',data:{labels:charts.categories.map(x=>x.label),datasets:[{data:charts.categories.map(x=>x.amount),backgroundColor:['#ff6969','#ffbd5b','#7656ff','#55a8ff','#2ed6a1','#d946ef','#22d3ee'],borderWidth:3,borderColor:'rgba(8,12,25,.86)',hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,cutout:'64%',plugins:{legend:{position:'right',labels:{color:tick,usePointStyle:true,boxWidth:8,font:{size:10}}},tooltip:{callbacks:{label:c=>`${c.label}: ${money(c.raw)}`}}}}});else document.getElementById('cashExpenseEmpty').hidden=false;
   const daily=document.getElementById('cashDailyChart');

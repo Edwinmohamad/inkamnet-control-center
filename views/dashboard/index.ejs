@@ -152,9 +152,9 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 (()=>{
-  const data=<%- JSON.stringify(monthly) %>;
-  const invoiceKpi=<%- JSON.stringify(invoiceKpi) %>;
-  const siteDistribution=<%- JSON.stringify(siteCustomerRows.map(s=>({code:s.code,name:s.name,total:Number(s.total||0),active:Number(s.active||0),inactive:Number(s.inactive||0),isolated:Number(s.isolated||0),offline:Number(s.offline||0)}))) %>;
+  const data=<%- safeJson(monthly) %>;
+  const invoiceKpi=<%- safeJson(invoiceKpi) %>;
+  const siteDistribution=<%- safeJson(siteCustomerRows.map(s=>({code:s.code,name:s.name,total:Number(s.total||0),active:Number(s.active||0),inactive:Number(s.inactive||0),isolated:Number(s.isolated||0),offline:Number(s.offline||0)}))) %>;
   const money=v=>'Rp '+new Intl.NumberFormat('id-ID',{maximumFractionDigits:0}).format(v||0);
   const popup=document.getElementById('dashboardImportantPopup');
   if(popup){const close=()=>{popup.classList.add('leaving');setTimeout(()=>popup.remove(),280)};popup.querySelector('[data-important-close]')?.addEventListener('click',close);setTimeout(close,9000);}

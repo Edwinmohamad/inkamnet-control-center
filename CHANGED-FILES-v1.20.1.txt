@@ -1,0 +1,181 @@
+INKAMNET CONTROL CENTER — PATCH v1.20.1
+==========================================
+Tanggal: 2026-08-18
+Patch ini adalah lanjutan dari v1.20.0: berisi (A) perbaikan bug hasil audit
+menyeluruh terhadap seluruh repo, dan (B) revisi tambahan pada fitur Hapus di
+menu Pelanggan sesuai instruksi terbaru. Berisi SELURUH file yang berubah
+(kode utuh, bukan potongan) — extract ke root project, timpa file lama.
+
+CARA PAKAI
+----------
+1. Backup dulu folder project & database Anda.
+2. Extract isi zip ini ke root folder project, timpa file yang sudah ada.
+3. Tidak ada dependency baru — npm install tidak wajib, tapi aman dijalankan.
+4. Restart aplikasi (pm2 restart / node app.js).
+5. Hard-refresh browser (Ctrl+Shift+R).
+
+==========================================
+BAGIAN A — PERBAIKAN BUG HASIL AUDIT
+==========================================
+
+1. [PRIORITAS TERTINGGI] Dashboard & Analitik ikut menghitung pelanggan yang
+   sudah diarsipkan.
+   File: routes/dashboard.js, services/analyticsService.js
+   Sebelumnya kolom `archived_at` (fitur Arsip yang baru ditambahkan) tidak
+   dipakai sebagai filter di query statistik dashboard (Total Pelanggan,
+   Nonaktif, breakdown per-site) maupun query PSB/funnel/SLA di Analitik.
+   Akibatnya pelanggan yang sudah diarsipkan (soft delete) tetap membengkakkan
+   angka-angka ini selamanya. Sekarang semua query tersebut mengecualikan
+   `archived_at IS NOT NULL`. Widget "Overdue Customers" (daftar tagihan
+   menunggak untuk ditindaklanjuti) SENGAJA TIDAK diberi filter ini — piutang
+   pelanggan yang diarsipkan tetap perlu ditagih, jadi tetap muncul di daftar
+   itu. Beri tahu saya jika Anda ingin perilaku itu diubah juga.
+
+2. [XSS] Celah keamanan di fitur "Kirim WA Reminder Massal".
+   File: public/js/app.js
+   Nama/kode pelanggan sebelumnya ditempel langsung ke innerHTML tanpa
+   di-escape ulang (data-attribute yang dibaca lewat .dataset otomatis
+   mendecode HTML entity). Kalau ada nama pelanggan berisi kode
+   <img onerror=...>, script itu bisa langsung jalan di browser admin saat
+   modal WA massal dibuka. Sekarang dibangun murni lewat DOM API
+   (textContent), tidak lagi lewat innerHTML dengan data mentah.
+
+3. [XSS, defense-in-depth] Beberapa halaman menyisipkan JSON ke tag <script>
+   tanpa escape "</script>".
+   File: middleware/common.js (helper baru `safeJson`), dipakai di
+   views/analytics/index.ejs, views/finance/cash.ejs, views/dashboard/index.ejs
+   JSON.stringify() tidak pernah meng-escape "</script>", jadi field bebas-teks
+   dari database (nama cluster/kategori kas, dsb) yang kebetulan berisi
+   "</script><script>..." bisa mematahkan halaman dan menjalankan skrip asing.
+   Ditambahkan helper `safeJson()` (escape "<" jadi <) dan semua 7 titik
+   pemakaian `<%- JSON.stringify(...) %>` diganti ke `<%- safeJson(...) %>`.
+
+4. [Data integrity] Cluster/ODP bisa dihapus meski masih ada pelanggan
+   terpasang, dan create/delete individual tidak sekonsisten dengan import
+   (yang sudah admin-only).
+   File: routes/clusters.js
+   Ditambahkan requireAdmin ke POST / (create) dan POST /:id/delete, plus
+   guard baru: hapus ODP diblokir kalau masih ada pelanggan dengan
+   cluster_id tersebut (mencegah referensi yatim/rusak).
+
+5. [Konsistensi hak akses] Isolir/buka-isolir PPPoE pelanggan tidak
+   mewajibkan Admin, padahal aksi sejenis (kelola router secret) di file yang
+   sama mewajibkan.
+   File: routes/network.js
+   requireAdmin ditambahkan ke POST /:customerId/isolate dan /unisolate.
+   Tidak ada tombol UI aktif yang memanggil endpoint ini saat ini (sudah
+   digantikan alur Sync/Secret di MikroTik NMS), jadi perubahan ini aman dan
+   tidak memutus tampilan mana pun. Jika staf NOC non-Admin ternyata perlu
+   mengisolir pelanggan secara rutin tanpa hak Admin penuh, beri tahu saya
+   dan saya bisa buatkan permission khusus alih-alih mewajibkan Admin penuh.
+
+6. [Reliabilitas] Nomor Faktur Custom berpotensi bentrok.
+   File: routes/customInvoices.js
+   Nomor lama dibuat dari 6 digit terakhir Date.now() — berulang setiap
+   ~16,7 menit, tanpa pengecekan keunikan sama sekali. Diganti dengan
+   penomoran berurutan per-bulan (mirip logika Customer ID) plus pengecekan
+   duplikat dan named lock (`GET_LOCK`) agar submit bersamaan tidak saling
+   tabrakan.
+
+7. [Race condition] Tagihan bisa dibatalkan/dihapus tepat saat pembayaran
+   untuk tagihan itu sedang dikonfirmasi di request lain.
+   File: routes/invoices.js
+   POST /:id/cancel dan /:id/delete sebelumnya memeriksa status pembayaran
+   lewat SELECT biasa lalu UPDATE/DELETE terpisah tanpa lock. Sekarang
+   dibungkus transaksi dengan SELECT ... FOR UPDATE pada baris tagihan yang
+   sama, meniru pola yang sudah dipakai di /reset-unpaid dan routes/payments.js
+   — kedua alur kini benar-benar saling menunggu di level baris database.
+
+CATATAN: Saya JUGA memeriksa dugaan celah di edit transaksi kas yang sudah
+APPROVED (routes/finance.js /cash/:id/update) — ternyata SUDAH AMAN by
+design: begitu diedit, statusnya otomatis turun ke PENDING_APPROVAL dan
+laporan cashflow hanya menghitung yang berstatus APPROVED, jadi tidak ada
+kebocoran saldo. Tidak ada perubahan di file itu untuk isu ini.
+
+==========================================
+BAGIAN B — REVISI FITUR HAPUS MENU PELANGGAN (instruksi terbaru)
+==========================================
+
+1. Menu Pelanggan (Data Aktif) — views/customers/index.ejs, routes/customers.js
+   - Tombol "Hapus" tersedia di setiap baris (ikon tempat sampah) DAN di
+     Dropdown Aksi Massal (bar bawah, tombol "Hapus Massal").
+   - Keduanya membuka Modal Konfirmasi yang sama dengan 2 opsi:
+       Arsipkan Data (Soft Delete) — status jadi ARSIP, riwayat tagihan aman.
+       Hapus Permanen Dari Sistem — hapus total dari database (otomatis
+       dikunci/dilewati untuk pelanggan yang sudah memiliki riwayat tagihan,
+       supaya data finansial tidak pernah hilang tanpa sengaja).
+   - Endpoint baru: POST /customers/bulk dengan action=hard_delete (bulk,
+     melewati pelanggan yang terikat tagihan dan melaporkan jumlahnya).
+
+2. Menu Arsip / Tab "Data Diarsip" — views/customers/index.ejs (masih di
+   dalam views/customers/index.ejs yang sama via ?status=archived, BUKAN
+   file archived.ejs terpisah — mengikuti arsitektur tab yang sudah ada sejak
+   v1.20.0 agar konsisten dengan filter/URL yang sudah dipakai, bukan
+   duplikasi routing baru).
+   - Setiap baris data diarsipkan sekarang punya tombol "Hapus Permanen"
+     (selain Restore yang sudah ada), dan tombol massal "Hapus Permanen
+     Massal" muncul di action bar saat berada di tab ini.
+   - Modal Peringatan Bahaya baru (#hardDeleteDangerModal di
+     views/partials/layout.ejs) — tampilan merah/danger, teks persis:
+     "Tindakan ini tidak dapat dibatalkan. Seluruh riwayat tagihan dan data
+     terkait akan dihapus bersih dari sistem." Berbeda dari modal Arsip-vs-
+     Hapus (karena di tab Arsip pilihan Arsipkan sudah tidak relevan lagi).
+   - Tombol 🔄 Restore / Pulihkan tetap ada seperti sebelumnya (tidak diubah).
+
+DAFTAR FILE DALAM PATCH INI (26 file, semua kode utuh)
+-------------------------------------------------------
+  app.js
+  middleware/common.js
+  package.json
+  public/css/app.css
+  public/js/app.js
+  public/js/nms.js
+  routes/analytics.js
+  routes/clusters.js
+  routes/customInvoices.js
+  routes/customers.js
+  routes/dashboard.js
+  routes/finance.js
+  routes/invoices.js
+  routes/network.js
+  routes/payments.js
+  scripts/validate-v119.js
+  services/analyticsService.js
+  services/nmsService.js
+  services/schemaService.js
+  views/analytics/index.ejs
+  views/customers/index.ejs
+  views/dashboard/index.ejs
+  views/finance/cash.ejs
+  views/network/monitor.ejs
+  views/partials/layout.ejs
+  views/payments/index.ejs
+
+TESTING YANG SUDAH DIJALANKAN
+-------------------------------
+  - node --check pada semua file .js yang diubah (syntax OK)
+  - npm run check (syntax seluruh routes/services/middleware/config)
+  - node scripts/validate-static.js (38 EJS, 40 modal trigger, 80 form POST — OK)
+  - node scripts/validate-v119.js (9 grup kontrak, versi 1.20.1 — OK)
+  - node scripts/test-responsive-css.js (OK)
+  - node scripts/test-cash-approval.js (OK)
+  - node scripts/test-infrastructure-proxy.js (OK)
+  - Smoke test ejs.renderFile() langsung memanggil route handler asli dengan
+    DB yang di-mock (dashboard, pelanggan default & arsip, monitor NMS,
+    analitik, kas, tagihan, cluster, faktur custom) — semua render tanpa
+    error runtime.
+  Catatan: tidak ada akses MySQL/MikroTik live di sandbox pengembangan ini —
+  jalur query SQL baru (guard cluster, hard-delete massal, dsb) perlu dicoba
+  sekali lagi di staging sebelum dipakai penuh di production.
+
+YANG BELUM DIKERJAKAN (masih sama seperti v1.20.0, belum diminta ulang)
+-------------------------------------------------------------------------
+  - Invoices/Tagihan, ODP/Cluster (selain guard di atas), dan Paket belum
+    punya alur Arsip/Restore penuh seperti Pelanggan.
+  - Section 5 (audit visual/konsistensi tombol hapus di SEMUA menu) belum
+    dikerjakan sebagai sweep tersendiri.
+
+VERSI
+-----
+  package.json, footer "CONTROL CENTER v..." di views/partials/layout.ejs,
+  dan scripts/validate-v119.js dinaikkan bersama-sama ke v1.20.1.

@@ -198,28 +198,50 @@ router.post('/:id/reset-unpaid',requireAdmin,async(req,res)=>{
   res.redirect(localReturn(req.body.return_to,invoice?`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`:'/invoices'));
 });
 
+// v1.20.1: cancel/delete now lock the invoice row (SELECT ... FOR UPDATE inside a real transaction,
+// mirroring /reset-unpaid above and the confirm/reject flow in routes/payments.js which locks the same
+// invoice row). Previously these did a plain SELECT then a separate UPDATE/DELETE with no lock, so a
+// payment confirmed concurrently between the two statements could slip through — leaving a confirmed
+// payment attached to an invoice that gets cancelled/deleted moments later.
 router.post('/:id/cancel',requireAdmin,async(req,res)=>{
-  const [rows]=await db.execute(`SELECT id,invoice_number,period_year,period_month,status,paid_amount,outstanding FROM invoices WHERE id=? LIMIT 1`,[req.params.id]);
-  if(!rows.length){req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
-  const invoice=rows[0];
-  const [[active]]=await db.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=? AND status IN ('confirmed','pending')`,[invoice.id]);
-  if(Number(active.total)>0 || Number(invoice.paid_amount)>0){
-    req.session.flash={type:'warning',message:'Tagihan masih memiliki pembayaran aktif. Gunakan “Jadikan Belum Lunas” terlebih dahulu agar pembayaran dan pendapatan dikoreksi secara aman.'};
-    return res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
-  }
-  await db.execute(`UPDATE invoices SET status='cancelled',paid_amount=0,outstanding=0 WHERE id=?`,[invoice.id]);
+  const conn=await db.getConnection();
+  let invoice=null;
+  try{
+    await conn.beginTransaction();
+    const [rows]=await conn.execute(`SELECT id,invoice_number,period_year,period_month,status,paid_amount,outstanding FROM invoices WHERE id=? LIMIT 1 FOR UPDATE`,[req.params.id]);
+    if(!rows.length){await conn.rollback();req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
+    invoice=rows[0];
+    const [[active]]=await conn.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=? AND status IN ('confirmed','pending') FOR UPDATE`,[invoice.id]);
+    if(Number(active.total)>0 || Number(invoice.paid_amount)>0){
+      await conn.rollback();
+      req.session.flash={type:'warning',message:'Tagihan masih memiliki pembayaran aktif. Gunakan “Jadikan Belum Lunas” terlebih dahulu agar pembayaran dan pendapatan dikoreksi secara aman.'};
+      return res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
+    }
+    await conn.execute(`UPDATE invoices SET status='cancelled',paid_amount=0,outstanding=0 WHERE id=?`,[invoice.id]);
+    await conn.commit();
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
   await audit({userId:req.session.user.id,action:'cancel',entityType:'invoice',entityId:invoice.id,description:`Tagihan ${invoice.invoice_number} dibatalkan. Histori pembayaran lama dipertahankan untuk audit; tagihan tidak lagi dihitung sebagai outstanding.`,ip:req.ip});
   req.session.flash={type:'success',message:`Tagihan ${invoice.invoice_number} dibatalkan. Histori transaksi tetap disimpan untuk audit.`};
   res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
 });
 
 router.post('/:id/delete',requireAdmin,async(req,res)=>{
-  const [rows]=await db.execute(`SELECT id,period_year,period_month,paid_amount FROM invoices WHERE id=? LIMIT 1`,[req.params.id]);
-  if(!rows.length){req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
-  const invoice=rows[0];
-  const [[pay]]=await db.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=?`,[invoice.id]);
-  if(Number(invoice.paid_amount)>0 || Number(pay.total)>0){req.session.flash={type:'danger',message:'Tagihan yang sudah memiliki pembayaran tidak boleh dihapus.'};return res.redirect(`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`);}
-  await db.execute(`DELETE FROM invoices WHERE id=?`,[invoice.id]);
+  const conn=await db.getConnection();
+  let invoice=null;
+  try{
+    await conn.beginTransaction();
+    const [rows]=await conn.execute(`SELECT id,period_year,period_month,paid_amount FROM invoices WHERE id=? LIMIT 1 FOR UPDATE`,[req.params.id]);
+    if(!rows.length){await conn.rollback();req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
+    invoice=rows[0];
+    const [[pay]]=await conn.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=? FOR UPDATE`,[invoice.id]);
+    if(Number(invoice.paid_amount)>0 || Number(pay.total)>0){
+      await conn.rollback();
+      req.session.flash={type:'danger',message:'Tagihan yang sudah memiliki pembayaran tidak boleh dihapus.'};
+      return res.redirect(`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`);
+    }
+    await conn.execute(`DELETE FROM invoices WHERE id=?`,[invoice.id]);
+    await conn.commit();
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
   await audit({userId:req.session.user.id,action:'delete',entityType:'invoice',entityId:invoice.id,description:`Tagihan tanpa histori pembayaran dihapus permanen. Periode ${invoice.period_month}/${invoice.period_year}.`,ip:req.ip});
   req.session.flash={type:'success',message:'Tagihan yang belum pernah memiliki pembayaran berhasil dihapus permanen.'};
   res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));

@@ -28,6 +28,12 @@ function commonLocals(req,res,next){
   if(req.session?.flash)delete req.session.flash;
   res.locals.formatRupiah=(value)=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(value||0));
   res.locals.formatDate=(value)=>{if(!value)return '-';return new Intl.DateTimeFormat(language==='en'?'en-GB':'id-ID',{dateStyle:'medium',timeZone:'Asia/Jakarta'}).format(new Date(value));};
+  // v1.20.1: use for every `const x = <%- safeJson(data) %>;` inline <script> bootstrap payload.
+  // JSON.stringify() never escapes "</script>", so embedding it raw lets any free-text DB field
+  // (a cluster/category/customer name, etc.) that happens to contain "</script><script>..." break
+  // out of the data literal and execute on every viewer's page. Escaping "<" as < neutralizes
+  // that while remaining valid, byte-identical JSON once parsed by the browser.
+  res.locals.safeJson=(value)=>JSON.stringify(value).replace(/</g,'\\u003c');
   next();
 }
 module.exports=commonLocals;

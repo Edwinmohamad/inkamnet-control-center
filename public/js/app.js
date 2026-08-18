@@ -179,17 +179,22 @@
 
   // v1.20 — shared Arsip vs Hapus Permanen modal. Any element with [data-delete-choice] plus
   // data-archive-url (always) and data-hard-delete-url (only when the row is eligible) opens it.
+  // v1.20.1: also supports a "bulk mode" — when deleteChoiceBulkHandler is set (by the bulk "Hapus
+  // Massal" button below), the Archive/Hard-delete buttons call that handler instead of submitting
+  // the per-row hidden forms, so the same modal UI serves both a single row and a bulk selection.
   const deleteChoiceModalEl=document.getElementById('deleteChoiceModal');
   const deleteChoiceModal=deleteChoiceModalEl&&window.bootstrap?bootstrap.Modal.getOrCreateInstance(deleteChoiceModalEl):null;
   const deleteChoiceArchiveForm=document.getElementById('deleteChoiceArchiveForm');
   const deleteChoiceHardForm=document.getElementById('deleteChoiceHardForm');
   const deleteChoiceArchiveBtn=document.getElementById('deleteChoiceArchiveBtn');
   const deleteChoiceHardBtn=document.getElementById('deleteChoiceHardBtn');
+  let deleteChoiceBulkHandler=null;
   document.addEventListener('click',event=>{
     const trigger=event.target.closest('[data-delete-choice]');
     if(!trigger||!deleteChoiceModal)return;
     event.preventDefault();
     closeActionPopover();
+    deleteChoiceBulkHandler=null;
     const archiveUrl=trigger.dataset.archiveUrl||'',hardUrl=trigger.dataset.hardDeleteUrl||'';
     const label=trigger.dataset.entityLabel||'data ini';
     const targetEl=document.getElementById('deleteChoiceTarget');if(targetEl)targetEl.textContent=label;
@@ -199,8 +204,44 @@
     if(deleteChoiceHardBtn){deleteChoiceHardBtn.disabled=!hardUrl;deleteChoiceHardBtn.title=hardUrl?'':'Data ini masih terikat transaksi finansial / jurnal resmi dan tidak dapat dihapus permanen.';}
     deleteChoiceModal.show();
   });
-  deleteChoiceArchiveBtn?.addEventListener('click',()=>{if(!deleteChoiceArchiveForm?.action||deleteChoiceArchiveForm.action.endsWith('#'))return;if(!confirm('Arsipkan data ini? Riwayat tetap tersimpan dan dapat dipulihkan kapan saja dari tab Data Diarsip.'))return;deleteChoiceArchiveForm.submit();});
-  deleteChoiceHardBtn?.addEventListener('click',()=>{if(!deleteChoiceHardForm?.action||deleteChoiceHardForm.action.endsWith('#'))return;if(!confirm('Hapus PERMANEN data ini? Tindakan ini tidak dapat dibatalkan.'))return;deleteChoiceHardForm.submit();});
+  deleteChoiceArchiveBtn?.addEventListener('click',()=>{
+    if(deleteChoiceBulkHandler){if(!confirm(deleteChoiceBulkHandler.archiveConfirm))return;deleteChoiceBulkHandler.archive();deleteChoiceModal?.hide();return;}
+    if(!deleteChoiceArchiveForm?.action||deleteChoiceArchiveForm.action.endsWith('#'))return;
+    if(!confirm('Arsipkan data ini? Riwayat tetap tersimpan dan dapat dipulihkan kapan saja dari tab Data Diarsip.'))return;
+    deleteChoiceArchiveForm.submit();
+  });
+  deleteChoiceHardBtn?.addEventListener('click',()=>{
+    if(deleteChoiceBulkHandler){if(!confirm(deleteChoiceBulkHandler.hardConfirm))return;deleteChoiceBulkHandler.hard();deleteChoiceModal?.hide();return;}
+    if(!deleteChoiceHardForm?.action||deleteChoiceHardForm.action.endsWith('#'))return;
+    if(!confirm('Hapus PERMANEN data ini? Tindakan ini tidak dapat dibatalkan.'))return;
+    deleteChoiceHardForm.submit();
+  });
+
+  // v1.20.1 — dedicated danger-only modal for the Data Diarsip tab (Section 2): [data-hard-delete-danger]
+  // (per-row) always hard-deletes directly (no Arsipkan option, the row is already archived); a bulk
+  // trigger sets hardDeleteDangerBulkHandler instead of the hidden form's action.
+  const hardDeleteDangerModalEl=document.getElementById('hardDeleteDangerModal');
+  const hardDeleteDangerModal=hardDeleteDangerModalEl&&window.bootstrap?bootstrap.Modal.getOrCreateInstance(hardDeleteDangerModalEl):null;
+  const hardDeleteDangerForm=document.getElementById('hardDeleteDangerForm');
+  const hardDeleteDangerConfirmBtn=document.getElementById('hardDeleteDangerConfirmBtn');
+  let hardDeleteDangerBulkHandler=null;
+  document.addEventListener('click',event=>{
+    const trigger=event.target.closest('[data-hard-delete-danger]');
+    if(!trigger||!hardDeleteDangerModal)return;
+    event.preventDefault();
+    closeActionPopover();
+    hardDeleteDangerBulkHandler=null;
+    const url=trigger.dataset.hardDeleteDanger||'';
+    const label=trigger.dataset.entityLabel||'data ini';
+    const targetEl=document.getElementById('hardDeleteDangerTarget');if(targetEl)targetEl.textContent=label;
+    if(hardDeleteDangerForm)hardDeleteDangerForm.action=url||'#';
+    hardDeleteDangerModal.show();
+  });
+  hardDeleteDangerConfirmBtn?.addEventListener('click',()=>{
+    if(hardDeleteDangerBulkHandler){hardDeleteDangerBulkHandler();hardDeleteDangerModal?.hide();return;}
+    if(!hardDeleteDangerForm?.action||hardDeleteDangerForm.action.endsWith('#'))return;
+    hardDeleteDangerForm.submit();
+  });
 
   // v1.20 — generic checkbox select-all + floating bulk action bar, used by [data-bulk-scope].
   document.querySelectorAll('[data-bulk-scope]').forEach(scope=>{
@@ -221,26 +262,46 @@
     updateBar();
   });
 
-  // v1.20 — Customers bulk actions (Section 3): bulk archive, WA reminder shortcuts, bulk change package.
+  // v1.20 — Customers bulk actions (Section 3): bulk delete/archive, WA reminder shortcuts, bulk change package.
   const customerBulkScope=document.querySelector('[data-bulk-scope="customerBulkBar"]');
   if(customerBulkScope){
     const csrfTokenMeta=document.querySelector('meta[name="csrf-token"]')?.content||'';
+    const customerBulkBarEl=document.getElementById('customerBulkBar');
+    const customerBulkReturnStatus=customerBulkBarEl?.dataset.returnStatus||'';
     const submitCustomerBulk=(action,extra={})=>{
       const ids=customerBulkScope._bulkSelectedIds();
       if(!ids.length)return;
       const form=document.createElement('form');
       form.method='post';form.action='/customers/bulk';form.style.display='none';
       const addField=(name,value)=>{const field=document.createElement('input');field.type='hidden';field.name=name;field.value=value;form.appendChild(field);};
-      addField('_csrf',csrfTokenMeta);addField('action',action);
+      addField('_csrf',csrfTokenMeta);addField('action',action);addField('return_status',customerBulkReturnStatus);
       ids.forEach(id=>addField('customer_ids[]',id));
       Object.entries(extra).forEach(([key,value])=>addField(key,value));
       document.body.appendChild(form);form.submit();
     };
-    document.getElementById('customerBulkArchive')?.addEventListener('click',()=>{
+    // v1.20.1 — Section 1 of the revision: bulk "Hapus" now opens the same Arsipkan vs Hapus
+    // Permanen choice modal as the per-row action, instead of directly archiving.
+    document.getElementById('customerBulkDelete')?.addEventListener('click',()=>{
       const count=customerBulkScope._bulkSelectedIds().length;
-      if(!count)return;
-      if(!confirm(`Arsipkan ${count} pelanggan terpilih? Riwayat tagihan & pembayaran tetap aman dan dapat dipulihkan dari tab Data Diarsip.`))return;
-      submitCustomerBulk('archive');
+      if(!count||!deleteChoiceModal)return;
+      const targetEl=document.getElementById('deleteChoiceTarget');if(targetEl)targetEl.textContent=`${count} pelanggan terpilih`;
+      if(deleteChoiceArchiveBtn)deleteChoiceArchiveBtn.disabled=false;
+      if(deleteChoiceHardBtn){deleteChoiceHardBtn.disabled=false;deleteChoiceHardBtn.title='Pelanggan yang sudah memiliki riwayat tagihan akan otomatis dilewati.';}
+      deleteChoiceBulkHandler={
+        archiveConfirm:`Arsipkan ${count} pelanggan terpilih? Riwayat tagihan & pembayaran tetap aman dan dapat dipulihkan dari tab Data Diarsip.`,
+        archive:()=>submitCustomerBulk('archive'),
+        hardConfirm:`Hapus PERMANEN ${count} pelanggan terpilih? Pelanggan yang sudah memiliki riwayat tagihan akan otomatis dilewati dan tetap perlu diarsipkan. Tindakan ini tidak dapat dibatalkan untuk sisanya.`,
+        hard:()=>submitCustomerBulk('hard_delete'),
+      };
+      deleteChoiceModal.show();
+    });
+    // v1.20.1 — Section 2 of the revision: Data Diarsip tab bulk hard-delete via the dedicated danger modal.
+    document.getElementById('customerBulkHardDelete')?.addEventListener('click',()=>{
+      const count=customerBulkScope._bulkSelectedIds().length;
+      if(!count||!hardDeleteDangerModal)return;
+      const targetEl=document.getElementById('hardDeleteDangerTarget');if(targetEl)targetEl.textContent=`${count} pelanggan terpilih`;
+      hardDeleteDangerBulkHandler=()=>submitCustomerBulk('hard_delete');
+      hardDeleteDangerModal.show();
     });
     document.getElementById('customerBulkPackageSubmit')?.addEventListener('click',()=>{
       const select=document.getElementById('customerBulkPackageSelect');
@@ -256,10 +317,29 @@
       const rows=[...document.querySelectorAll('[data-customer-row]')].filter(row=>ids.has(row.dataset.customerRow));
       const list=document.getElementById('customerBulkWaList');
       const withWa=rows.filter(row=>row.dataset.customerWa);
-      if(list)list.innerHTML=withWa.length?withWa.map(row=>{
-        const message=`Halo ${row.dataset.customerName}, ini pengingat dari INKAMNET mengenai layanan internet Anda. Mohon segera hubungi kami bila ada kendala pembayaran atau layanan. Terima kasih.`;
-        return `<a href="https://wa.me/${row.dataset.customerWa}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer"><span class="psb-avatar">${(row.dataset.customerName||'?').charAt(0).toUpperCase()}</span><div><strong>${row.dataset.customerName}</strong><small>${row.dataset.customerCode}</small></div><i class="bi bi-whatsapp"></i></a>`;
-      }).join(''):'<div class="ink-empty">Pelanggan terpilih tidak memiliki nomor WhatsApp yang tervalidasi.</div>';
+      // v1.20.1: build nodes via DOM APIs (textContent), never innerHTML with row.dataset values —
+      // .dataset decodes HTML entities back to raw text, so a customer name containing markup would
+      // otherwise execute as stored XSS the moment this modal opens. See CHANGED-FILES changelog.
+      if(list){
+        list.innerHTML='';
+        if(!withWa.length){
+          const empty=document.createElement('div');empty.className='ink-empty';empty.textContent='Pelanggan terpilih tidak memiliki nomor WhatsApp yang tervalidasi.';list.appendChild(empty);
+        }else{
+          withWa.forEach(row=>{
+            const name=row.dataset.customerName||'',code=row.dataset.customerCode||'',wa=row.dataset.customerWa;
+            const message=`Halo ${name}, ini pengingat dari INKAMNET mengenai layanan internet Anda. Mohon segera hubungi kami bila ada kendala pembayaran atau layanan. Terima kasih.`;
+            const a=document.createElement('a');a.href=`https://wa.me/${wa}?text=${encodeURIComponent(message)}`;a.target='_blank';a.rel='noopener noreferrer';
+            const avatar=document.createElement('span');avatar.className='psb-avatar';avatar.textContent=(name||'?').charAt(0).toUpperCase();
+            const info=document.createElement('div');
+            const strong=document.createElement('strong');strong.textContent=name;
+            const small=document.createElement('small');small.textContent=code;
+            info.append(strong,small);
+            const icon=document.createElement('i');icon.className='bi bi-whatsapp';
+            a.append(avatar,info,icon);
+            list.appendChild(a);
+          });
+        }
+      }
       const totalEl=document.getElementById('customerBulkWaTotal');if(totalEl)totalEl.textContent=withWa.length;
       const modalEl=document.getElementById('customerBulkWaModal');
       if(modalEl&&window.bootstrap)bootstrap.Modal.getOrCreateInstance(modalEl).show();

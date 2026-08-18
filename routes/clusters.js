@@ -39,6 +39,23 @@ router.post('/import',requireAdmin,async(req,res)=>{
   }catch(e){console.error('ODP import gagal:',e.message);req.session.flash={type:'danger',message:`Import ODP gagal: ${e.message}`};res.redirect('/clusters');}
 });
 
-router.post('/',async(req,res)=>{const b=req.body;const [r]=await db.execute(`INSERT INTO clusters(site_id,name,type,capacity_ports,used_ports,latitude,longitude,address,status) VALUES(?,?,?,?,?,?,?,?,?)`,[b.site_id,b.name,b.type||'FTTH',b.capacity_ports||null,b.used_ports||0,b.latitude||null,b.longitude||null,b.address||null,b.status||'active']);await audit({userId:req.session.user.id,action:'create',entityType:'cluster',entityId:r.insertId,description:`Tambah cluster ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Cluster/ODP berhasil ditambahkan.'};res.redirect('/clusters');});
-router.post('/:id/delete',async(req,res)=>{await db.execute(`DELETE FROM clusters WHERE id=?`,[req.params.id]);req.session.flash={type:'success',message:'Cluster dihapus.'};res.redirect('/clusters');});
+// v1.20.1: requireAdmin added to create/delete for consistency with /import (already admin-only) —
+// individual create/delete of infrastructure records shouldn't need a lower bar than bulk import.
+router.post('/',requireAdmin,async(req,res)=>{const b=req.body;const [r]=await db.execute(`INSERT INTO clusters(site_id,name,type,capacity_ports,used_ports,latitude,longitude,address,status) VALUES(?,?,?,?,?,?,?,?,?)`,[b.site_id,b.name,b.type||'FTTH',b.capacity_ports||null,b.used_ports||0,b.latitude||null,b.longitude||null,b.address||null,b.status||'active']);await audit({userId:req.session.user.id,action:'create',entityType:'cluster',entityId:r.insertId,description:`Tambah cluster ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Cluster/ODP berhasil ditambahkan.'};res.redirect('/clusters');});
+// v1.20.1: guard against deleting a cluster/ODP that still has customers attached — previously this
+// unconditionally ran DELETE FROM clusters, which would silently orphan every customer.cluster_id
+// pointing at the deleted row (broken foreign key reference, cluster_name showing as null everywhere).
+router.post('/:id/delete',requireAdmin,async(req,res)=>{
+  const [[cluster]]=await db.execute(`SELECT id,name FROM clusters WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!cluster){req.session.flash={type:'warning',message:'Cluster/ODP tidak ditemukan.'};return res.redirect('/clusters');}
+  const [[bound]]=await db.execute(`SELECT COUNT(*) n FROM customers WHERE cluster_id=?`,[cluster.id]);
+  if(Number(bound?.n||0)>0){
+    req.session.flash={type:'danger',message:`Cluster/ODP ${cluster.name} masih memiliki ${bound.n} pelanggan terpasang dan tidak dapat dihapus. Pindahkan pelanggan ke cluster lain terlebih dahulu.`};
+    return res.redirect('/clusters');
+  }
+  await db.execute(`DELETE FROM clusters WHERE id=?`,[cluster.id]);
+  await audit({userId:req.session.user.id,action:'delete',entityType:'cluster',entityId:cluster.id,description:`Hapus cluster ${cluster.name}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Cluster/ODP ${cluster.name} dihapus.`};
+  res.redirect('/clusters');
+});
 module.exports=router;

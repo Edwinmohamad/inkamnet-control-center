@@ -119,12 +119,17 @@ router.post('/:customerId/check',async(req,res)=>{
   catch(e){req.session.flash={type:'danger',message:`Cek PPPoE gagal: ${e.message}`};}
   res.redirect(`/customers/${req.params.customerId}`);
 });
-router.post('/:customerId/isolate',async(req,res)=>{
+// v1.20.1: requireAdmin added — isolate/unisolate directly cuts/restores a customer's internet
+// service, and every other mutating route in this file (secrets, smart-sync) already requires
+// full Admin on top of the 'network' permission gate applied at the /network mount in app.js. If this
+// turns out to be too strict for day-to-day NOC staff who only hold 'network' permission, tell me and
+// I'll relax it back (or introduce a narrower permission) instead of leaving the inconsistency in place.
+router.post('/:customerId/isolate',requireAdmin,async(req,res)=>{
   try{await isolateCustomer(req.params.customerId,'manual');await audit({userId:req.session.user.id,action:'isolate',entityType:'customer',entityId:req.params.customerId,description:'Manual isolate PPPoE',ip:req.ip});req.session.flash={type:'success',message:'Pelanggan berhasil diisolir dan sesi aktif diputus.'};}
   catch(e){req.session.flash={type:'danger',message:`Isolir gagal: ${e.message}`};}
   res.redirect(`/customers/${req.params.customerId}`);
 });
-router.post('/:customerId/unisolate',async(req,res)=>{
+router.post('/:customerId/unisolate',requireAdmin,async(req,res)=>{
   try{await unisolateCustomer(req.params.customerId,false);await audit({userId:req.session.user.id,action:'unisolate',entityType:'customer',entityId:req.params.customerId,description:'Manual unisolate PPPoE',ip:req.ip});req.session.flash={type:'success',message:'Isolir dibuka. PPPoE secret sudah aktif.'};}
   catch(e){req.session.flash={type:'danger',message:`Buka isolir gagal: ${e.message}`};}
   res.redirect(`/customers/${req.params.customerId}`);

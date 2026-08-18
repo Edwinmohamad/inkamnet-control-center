@@ -127,7 +127,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.20.0</span>
+        <span class="version-pill">CONTROL CENTER v1.20.1</span>
       </div>
     </aside>
 
@@ -190,6 +190,23 @@
         <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button></div>
         <form method="post" id="deleteChoiceArchiveForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
         <form method="post" id="deleteChoiceHardForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
+      </div>
+    </div>
+  </div>
+
+  <!-- v1.20.1 — dedicated danger-only confirmation for the Data Diarsip tab (Section 2 of the revision).
+       Reused by any [data-hard-delete-danger] trigger, per-row or bulk. Distinct from #deleteChoiceModal
+       above: archived rows are already soft-deleted, so the only remaining action is permanent deletion —
+       this modal is deliberately stricter/scarier, never offers the Arsipkan option. -->
+  <div class="modal fade" id="hardDeleteDangerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content nms-modal">
+        <div class="modal-header"><div><div class="module-kicker text-danger">BAHAYA · HAPUS PERMANEN</div><h5 class="modal-title">Hapus Permanen dari Sistem?</h5><small class="text-secondary" id="hardDeleteDangerTarget">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="alert alert-danger alert-modern mb-0"><i class="bi bi-exclamation-octagon-fill me-2"></i>Tindakan ini tidak dapat dibatalkan. Seluruh riwayat tagihan dan data terkait akan dihapus bersih dari sistem.</div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button type="button" class="btn-tech danger" id="hardDeleteDangerConfirmBtn"><i class="bi bi-trash3-fill"></i>Ya, Hapus Permanen</button></div>
+        <form method="post" id="hardDeleteDangerForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
       </div>
     </div>
   </div>

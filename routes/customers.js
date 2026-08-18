@@ -385,6 +385,29 @@ router.post('/bulk',requireAdmin,async(req,res)=>{
     req.session.flash={type:'success',message:`${rows.length} pelanggan berhasil diarsipkan. Riwayat keuangan tetap aman.`};
     return res.redirect('/customers');
   }
+  // v1.20.1 — Section 1/2 of the revision: bulk "Hapus Permanen" from both the active list (via the
+  // Arsip vs Hapus Permanen choice modal) and the Data Diarsip tab (via the dedicated danger modal).
+  // Customers that already have invoice history are skipped, exactly like the per-row hard-delete route,
+  // so the same financial-safety guarantee holds for bulk actions.
+  if(action==='hard_delete'){
+    const returnTarget=String(req.body.return_status||'').trim()==='archived'?'/customers?status=archived':'/customers';
+    const [rows]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE id IN (${placeholders})`,ids);
+    if(!rows.length){req.session.flash={type:'warning',message:'Pelanggan terpilih tidak ditemukan.'};return res.redirect(returnTarget);}
+    const rowIds=rows.map(r=>r.id);const rowPlaceholders=rowIds.map(()=>'?').join(',');
+    const [invoiceCounts]=await db.execute(`SELECT customer_id,COUNT(*) n FROM invoices WHERE customer_id IN (${rowPlaceholders}) GROUP BY customer_id`,rowIds);
+    const boundIds=new Set(invoiceCounts.filter(r=>Number(r.n)>0).map(r=>r.customer_id));
+    const eligible=rows.filter(r=>!boundIds.has(r.id));
+    const skipped=rows.length-eligible.length;
+    if(!eligible.length){
+      req.session.flash={type:'danger',message:'Semua pelanggan terpilih sudah memiliki riwayat tagihan dan tidak dapat dihapus permanen. Gunakan Arsipkan Data.'};
+      return res.redirect(returnTarget);
+    }
+    const eligibleIds=eligible.map(r=>r.id);const eligiblePlaceholders=eligibleIds.map(()=>'?').join(',');
+    await db.execute(`DELETE FROM customers WHERE id IN (${eligiblePlaceholders})`,eligibleIds);
+    await audit({userId:req.session.user.id,action:'bulk_hard_delete',entityType:'customer',entityId:null,description:`Hapus permanen massal ${eligible.length} pelanggan: ${eligible.map(r=>r.customer_code).slice(0,20).join(', ')}${eligible.length>20?', ...':''}${skipped?` (${skipped} dilewati karena masih memiliki riwayat tagihan)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${eligible.length} pelanggan dihapus permanen.${skipped?` ${skipped} pelanggan dilewati karena masih memiliki riwayat tagihan — gunakan Arsipkan Data untuk itu.`:''}`};
+    return res.redirect(returnTarget);
+  }
   if(action==='package'){
     const packageId=Number(req.body.package_id||0);
     if(!packageId){req.session.flash={type:'danger',message:'Pilih paket tujuan terlebih dahulu.'};return res.redirect('/customers');}

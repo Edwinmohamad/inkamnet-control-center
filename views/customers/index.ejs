@@ -48,8 +48,9 @@
             <% if(user.role==='admin'){ %>
               <% if(archived){ %>
                 <form method="post" action="/customers/<%= c.id %>/restore" onsubmit="return confirm('Pulihkan pelanggan ini ke status Aktif?')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="btn-tech compact success" type="submit" title="Restore / Pulihkan"><i class="bi bi-arrow-counterclockwise"></i></button></form>
+                <% if(!Number(c.has_invoice_count||0)){ %><button class="btn-tech compact danger" type="button" data-hard-delete-danger="/customers/<%= c.id %>/hard-delete" data-entity-label="<%= c.name %> (<%= c.customer_code %>)" title="Hapus Permanen"><i class="bi bi-trash3-fill"></i></button><% } %>
               <% }else{ %>
-                <button class="btn-tech compact danger" type="button" data-delete-choice data-archive-url="/customers/<%= c.id %>/delete" <% if(!Number(c.has_invoice_count||0)){ %>data-hard-delete-url="/customers/<%= c.id %>/hard-delete"<% } %> data-entity-label="<%= c.name %> (<%= c.customer_code %>)" title="Hapus / Arsip"><i class="bi bi-archive"></i></button>
+                <button class="btn-tech compact danger" type="button" data-delete-choice data-archive-url="/customers/<%= c.id %>/delete" <% if(!Number(c.has_invoice_count||0)){ %>data-hard-delete-url="/customers/<%= c.id %>/hard-delete"<% } %> data-entity-label="<%= c.name %> (<%= c.customer_code %>)" title="Hapus"><i class="bi bi-trash3"></i></button>
               <% } %>
             <% } %>
             <button class="action-menu" type="button" data-action-popover-target="customerAction<%= c.id %>" aria-label="Buka tindakan pelanggan <%= c.name %>"><i class="bi bi-three-dots-vertical"></i></button>
@@ -67,7 +68,8 @@
               <div class="ink-action-separator"></div><div class="system-validation-note"><i class="bi bi-cpu-fill"></i><span><b>Validasi WhatsApp otomatis</b><small>Status dihitung sistem setiap nomor disimpan.</small></span></div>
               <% if(user.role==='admin'){ %><div class="ink-action-separator"></div>
                 <% if(archived){ %><form method="post" action="/customers/<%= c.id %>/restore" onsubmit="return confirm('Pulihkan pelanggan ini ke status Aktif?')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="ink-action-item compact success" type="submit"><i class="bi bi-arrow-counterclockwise"></i><span><b>Restore / Pulihkan</b><small>Kembalikan ke status aktif</small></span></button></form>
-                <% }else{ %><button class="ink-action-item compact danger" type="button" data-delete-choice data-archive-url="/customers/<%= c.id %>/delete" <% if(!Number(c.has_invoice_count||0)){ %>data-hard-delete-url="/customers/<%= c.id %>/hard-delete"<% } %> data-entity-label="<%= c.name %> (<%= c.customer_code %>)"><i class="bi bi-archive"></i><span><b>Hapus / Arsip</b><small>Pilih arsip atau hapus permanen</small></span></button><% } %>
+                  <% if(!Number(c.has_invoice_count||0)){ %><button class="ink-action-item compact danger" type="button" data-hard-delete-danger="/customers/<%= c.id %>/hard-delete" data-entity-label="<%= c.name %> (<%= c.customer_code %>)"><i class="bi bi-trash3-fill"></i><span><b>Hapus Permanen</b><small>Tindakan tidak dapat dibatalkan</small></span></button><% } %>
+                <% }else{ %><button class="ink-action-item compact danger" type="button" data-delete-choice data-archive-url="/customers/<%= c.id %>/delete" <% if(!Number(c.has_invoice_count||0)){ %>data-hard-delete-url="/customers/<%= c.id %>/hard-delete"<% } %> data-entity-label="<%= c.name %> (<%= c.customer_code %>)"><i class="bi bi-trash3"></i><span><b>Hapus</b><small>Pilih arsip atau hapus permanen</small></span></button><% } %>
               <% } %>
             </div>
           </div>
@@ -78,14 +80,19 @@
     </div>
   </div>
 
-  <!-- v1.20 — Section 3: floating bulk action bar, shown once ≥1 row is checked (see data-bulk-scope JS in app.js). -->
-  <div class="customer-bulk-bar" id="customerBulkBar" hidden>
+  <!-- v1.20.1 — Section 3/4 revision: floating bulk action bar, shown once ≥1 row is checked
+       (see data-bulk-scope JS in app.js). Data Aktif gets a "Hapus" bulk action that opens the
+       shared Arsip vs Hapus Permanen choice modal; Data Diarsip gets a dedicated "Hapus Permanen
+       Massal" danger action instead, since archived rows only ever get hard-deleted or restored. -->
+  <div class="customer-bulk-bar" id="customerBulkBar" hidden data-return-status="<%= isArchivedView?'archived':'' %>">
     <span><b data-bulk-count>0</b> pelanggan dipilih</span>
     <div class="customer-bulk-buttons">
       <% if(!isArchivedView){ %>
-      <button type="button" id="customerBulkArchive"><i class="bi bi-archive"></i>Hapus / Arsipkan Massal</button>
+      <button type="button" id="customerBulkDelete" class="danger"><i class="bi bi-trash3"></i>Hapus Massal</button>
       <button type="button" id="customerBulkWa"><i class="bi bi-whatsapp"></i>Kirim WA Reminder Massal</button>
       <button type="button" id="customerBulkPackage" data-bs-toggle="modal" data-bs-target="#customerBulkPackageModal"><i class="bi bi-box-seam"></i>Ubah Paket Massal</button>
+      <% }else{ %>
+      <button type="button" id="customerBulkHardDelete" class="danger"><i class="bi bi-trash3-fill"></i>Hapus Permanen Massal</button>
       <% } %>
       <button type="button" class="ghost" data-bulk-clear><i class="bi bi-x-lg"></i>Batal</button>
     </div>
