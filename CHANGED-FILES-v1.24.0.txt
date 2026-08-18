@@ -1,0 +1,82 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.0
+==========================================
+Perubahan besar: TAMPILAN (UI) DISEDERHANAKAN TOTAL, EFEK "3D" DIMATIKAN
+
+RINGKASAN
+---------
+Sesuai permintaan: "RUBAH TOTAL UI NYA MENJADI SEDERHANA SAJA, MATIKAN 3D,
+BUAT SIMPLE SAJA TAMPILANNYA TUJUANNYA AGAR USER FRIENDLY, REFERENSI SEPERTI
+BILLING WIFINETBILL.COM".
+
+Catatan jujur: kami TIDAK berhasil membuka wifinetbill.com secara langsung
+(situs tersebut memblokir akses otomatis, baik lewat pengambil halaman web
+maupun mesin pencari — selalu ditolak/403). Karena itu, desain baru ini
+dibuat mengikuti pola umum dashboard billing yang simpel dan rapi (kartu
+putih/terang, garis tipis, bayangan lembut, warna solid/flat) — BUKAN
+tiruan pixel-per-pixel dari wifinetbill.com. Kalau Bapak/Ibu punya
+screenshot referensinya, kirim saja dan kami sesuaikan lebih lanjut.
+
+APA YANG DIUBAH
+----------------
+Seluruh efek "3D"/dekoratif berikut telah DIMATIKAN di seluruh aplikasi
+(bukan cuma satu halaman — ini stylesheet pusat yang dipakai semua menu):
+
+1. GRADIENT (warna gradasi/berlapis) — semua tombol, kartu (metric-card,
+   ink-kpi, ink-summary-card, dsb.), avatar, progress bar, dan judul
+   "gradient text" sekarang pakai WARNA SOLID/FLAT, bukan gradasi.
+2. BACKDROP-BLUR (efek kaca buram/glassmorphism) — dihapus dari topbar,
+   kartu, dan command palette. Sekarang latar belakang solid biasa.
+3. GLOW (bayangan menyala warna-warni ala neon) pada tombol, kartu, badge —
+   diganti bayangan tipis & lembut standar (mirip dashboard modern biasa).
+4. ELEMEN DEKORATIF MENGAMBANG (ambient grid/orb yang melayang, garis
+   scanning, radar berputar di boot loader) — animasinya dimatikan, jadi
+   diam/flat, tidak lagi "hidup"/bergerak-gerak.
+5. Halaman LOGIN dirombak total: dari desain dua-kolom animasi (logo
+   berputar, garis grid bergerak, kartu kaca buram) menjadi satu kartu putih
+   simpel di tengah layar — cocok dipakai di HP maupun laptop.
+
+Yang TETAP DIPERTAHANKAN (sengaja tidak diubah karena bukan efek "3D",
+melainkan fitur fungsional):
+- Ticker angka berjalan di dashboard (data pelanggan/PSB) — ini bukan
+  hiasan, tapi cara menampilkan data yang terus bertambah.
+- Warna brand INKAMNET (ungu #603aea & merah #ff433e, sesuai logo resmi)
+  tetap dipakai di seluruh aplikasi termasuk halaman login — hanya cara
+  penyajiannya yang diratakan (dari gradasi/glow jadi solid/flat), warna
+  intinya tidak diganti.
+- Halaman cetak faktur (invoice PDF/print) TIDAK diubah — aksen dua-warna
+  ungu/merah di bagian atas kertas itu sudah flat (bukan gradasi
+  sesungguhnya, cuma trik CSS untuk dua blok warna padat), jadi sudah
+  sesuai "sederhana" tanpa perlu disentuh.
+
+TIDAK ADA class CSS atau nama variabel yang dihapus/diubah namanya — semua
+menu di seluruh aplikasi (Dashboard, Pelanggan, Tagihan, Kas, Paket,
+Analytics, Infrastructure Hub, WA Gateway, dll.) tetap berfungsi dan
+tampil, hanya "wajahnya" saja yang jadi lebih rapi/simpel. Sudah diuji
+dengan seluruh skrip validasi otomatis proyek ini (validate-static,
+validate-v119, test-infrastructure-proxy, test-cash-approval,
+test-responsive-css) dan tampilan sudah dicek visual (screenshot) untuk
+halaman login dan beberapa komponen kartu/tombol.
+
+FILE YANG DIUBAH
+-------------------
+- public/css/app.css              (perataan besar-besaran: gradient→flat,
+                                    blur dihapus, glow→bayangan tipis,
+                                    animasi dekoratif dimatikan)
+- views/auth/login.ejs             (desain login baru: kartu tunggal simpel)
+- views/partials/layout.ejs        (versi -> v1.24.0)
+- package.json                     (versi -> 1.24.0)
+- scripts/validate-v119.js         (assertion versi -> 1.24.0)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan database di
+   patch ini, jadi tidak perlu backup database khusus untuk patch ini).
+2. Timpa (overwrite) 5 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install" untuk patch ini (tidak ada dependency baru).
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R) supaya file CSS lama di cache
+   browser tidak nyangkut.
+
+Kalau setelah dipasang ada bagian tampilan yang menurut Bapak/Ibu masih
+terlalu "ramai" atau ada yang kurang pas, kirim saja screenshot bagian
+tersebut — kami sesuaikan lebih lanjut.
