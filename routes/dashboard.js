@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../config/db');
 const { requirePermission } = require('../middleware/auth');
 const { getServerResourceSnapshot } = require('../services/serverMonitorService');
+const { getGatewayStatus, getQueueStats } = require('../services/whatsappGatewayService');
 const router = express.Router();
 
 // v1.21.0 — Dashboard Section 1, item 1: countdown to the next billing "closing" (isolir) date, derived
@@ -183,13 +184,20 @@ router.get('/', async (req, res) => {
   // reports what's genuinely knowable from the database — WhatsApp number validation coverage and how many
   // reminders are due today — rather than fabricating a fake "Connected" status with no real backing
   // service. If/when a real gateway is wired up, `waMode` below is the single place to flip to live status.
+  // v1.23 — now backed by the real WA Gateway (services/whatsappGatewayService.js, Baileys). Mode
+  // reflects the actual live connection state instead of a hardcoded 'manual' placeholder, and
+  // queueToday/sentToday come straight from the wa_messages table once the gateway is connected.
   const [[waStats]]=await db.execute(`SELECT SUM(whatsapp_status='valid') valid_count,SUM(whatsapp_status='invalid') invalid_count,SUM(whatsapp_status='unverified') unverified_count FROM customers c WHERE c.archived_at IS NULL${customerScope}`,customerParams);
+  const waGateway=getGatewayStatus();
+  const waQueueStats=await getQueueStats();
   const waOverview={
-    mode:'manual',
+    mode:waGateway.state==='connected'?'connected':'manual',
+    state:waGateway.state,
     valid:nz(waStats?.valid_count),
     invalid:nz(waStats?.invalid_count),
     unverified:nz(waStats?.unverified_count),
-    queueToday:nz(noc?.due_today),
+    queueToday:waGateway.state==='connected'?waQueueStats.queued:nz(noc?.due_today),
+    sentToday:waQueueStats.sentToday,
   };
 
   // Item 5: Local Billing Server Resource Monitor (CPU/RAM/Disk) — see services/serverMonitorService.js.

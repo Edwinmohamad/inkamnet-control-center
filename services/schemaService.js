@@ -391,4 +391,34 @@ async function ensureV29Schema() {
   await db.query(`UPDATE customers SET archived_at=COALESCE(status_changed_at,NOW()) WHERE customer_status='terminated' AND archived_at IS NULL`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema };
+async function ensureV30Schema() {
+  // v1.23 — WA Gateway (Baileys self-hosted). wa_messages is the outbound queue + audit log for every
+  // message the gateway sends (manual / bulk blast / scheduled auto-reminder). Session credentials
+  // themselves live on disk (storage/wa-session), never in the database.
+  await db.query(`CREATE TABLE IF NOT EXISTS wa_messages (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_id BIGINT UNSIGNED NULL,
+    invoice_id BIGINT UNSIGNED NULL,
+    phone VARCHAR(32) NOT NULL,
+    message TEXT NOT NULL,
+    message_type ENUM('manual','blast','auto_reminder') NOT NULL DEFAULT 'manual',
+    status ENUM('queued','sent','failed') NOT NULL DEFAULT 'queued',
+    error_message VARCHAR(500) NULL,
+    created_by BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sent_at DATETIME NULL,
+    INDEX idx_wa_messages_status (status),
+    INDEX idx_wa_messages_created (created_at),
+    INDEX idx_wa_messages_invoice_type (invoice_id,message_type,created_at)
+  )`);
+
+  // Single-row settings extension: auto-reminder scheduling config. Offsets are comma-separated days
+  // relative to invoices.due_date (negative = before, 0 = on due date), e.g. '-3,-1,0'.
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS wa_auto_reminder_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER default_grace_days`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS wa_auto_reminder_hour TINYINT UNSIGNED NOT NULL DEFAULT 9 AFTER wa_auto_reminder_enabled`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS wa_auto_reminder_offsets VARCHAR(50) NOT NULL DEFAULT '-3,-1,0' AFTER wa_auto_reminder_hour`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS wa_auto_reminder_last_run_date DATE NULL AFTER wa_auto_reminder_offsets`);
+  await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS wa_auto_reminder_template TEXT NULL AFTER wa_auto_reminder_last_run_date`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema, ensureV30Schema };

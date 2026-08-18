@@ -1019,3 +1019,16 @@ form[data-auto-filter].is-auto-submitting{opacity:.7;pointer-events:none}.cash-c
 .server-monitor-track{height:7px;border-radius:99px;background:var(--panel-3);overflow:hidden}
 .server-monitor-track i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#2ed6a1,#f4b64d,#ff6670);background-size:200% 100%}
 @media(max-width:767.98px){.package-distribution-list{max-height:none}}
+
+/* v1.23 — WA Gateway management page (/wa-gateway). Distinct class names from the pre-existing
+   dashboard widget's .wa-gateway-body/.wa-gateway-status/.wa-gateway-figures/.wa-gateway-note. */
+.wa-gateway-connect-body{display:flex;flex-direction:column;gap:14px;padding:16px}
+.wa-gateway-qr-box{display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px;border-radius:14px;background:var(--panel-2);border:1px solid var(--line);max-width:340px}
+.wa-gateway-qr-box img{width:220px;height:220px;border-radius:10px;background:#fff;padding:8px}
+.wa-gateway-qr-box p{margin:0;font-size:.58rem;color:var(--muted-2);text-align:center;line-height:1.5}
+.wa-gateway-actions{display:flex;gap:10px;flex-wrap:wrap}
+.wa-reminder-settings-form{display:flex;flex-direction:column;gap:14px;padding:16px}
+.wa-reminder-settings-form label{display:flex;flex-direction:column;gap:6px;font-size:.6rem;font-weight:700;color:var(--muted)}
+.wa-reminder-settings-form .form-check.form-switch{flex-direction:row;align-items:center;gap:8px}
+.wa-reminder-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+@media(max-width:767.98px){.wa-reminder-grid{grid-template-columns:1fr}.wa-gateway-qr-box img{width:180px;height:180px}}

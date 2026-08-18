@@ -24,7 +24,8 @@ const { requireAuth, loadPermissions, requirePermission } = require('./middlewar
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
 const { purgeOldLogs } = require('./services/logRetentionService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema, ensureV30Schema } = require('./services/schemaService');
+const { startGateway, hasSavedSession, processQueue, runAutoReminderSweep } = require('./services/whatsappGatewayService');
 
 const app = express();
 const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
@@ -205,6 +206,7 @@ app.use('/sites', requireAuth, requirePermission('network'), require('./routes/s
 app.use('/custom-invoices', requireAuth, requirePermission('billing'), require('./routes/customInvoices'));
 app.use('/logs', requireAuth, requirePermission('logs'), require('./routes/logs'));
 app.use('/', requireAuth, require('./routes/finance'));
+app.use('/wa-gateway', requireAuth, require('./routes/whatsappGateway'));
 
 app.use((err, req, res, next) => {
   console.error(err);
@@ -238,6 +240,7 @@ async function bootstrap() {
   await ensureV26Schema();
   await ensureV27Schema();
   await ensureV29Schema();
+  await ensureV30Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
@@ -259,6 +262,25 @@ async function bootstrap() {
     try { console.log('Cron retensi log:',await purgeOldLogs(7)); }
     catch (err) { console.error('Cron retensi log gagal:',err.message); }
   }, { timezone: 'Asia/Jakarta' });
+
+  // WA Gateway watchdog — every 5 minutes: (1) resume the send queue in case it stalled while the
+  // gateway was briefly disconnected, and (2) check whether it's time to run the once-daily
+  // auto-reminder sweep (runAutoReminderSweep itself no-ops unless enabled, past the configured hour,
+  // and not already run today, so this can safely fire every 5 minutes without double-sending).
+  cron.schedule('*/5 * * * *', async () => {
+    try { await processQueue(); } catch (err) { console.error('WA Gateway queue watchdog gagal:', err.message); }
+    try {
+      const result = await runAutoReminderSweep();
+      if (result.ran) console.log('WA Gateway auto-reminder sweep:', result);
+    } catch (err) { console.error('WA Gateway auto-reminder sweep gagal:', err.message); }
+  }, { timezone: 'Asia/Jakarta' });
+
+  // If a WA Gateway session was already linked before this restart, reconnect silently (no QR needed —
+  // Baileys reuses the saved credentials). If nothing was ever linked, stay disconnected until an admin
+  // explicitly clicks Connect from the /wa-gateway page.
+  if (hasSavedSession()) {
+    startGateway().catch(err => console.error('WA Gateway: gagal reconnect otomatis saat startup:', err.message));
+  }
 
   const port = Number(process.env.PORT || 3000);
   app.listen(port, '0.0.0.0', () => console.log(`INKAMNET Billing berjalan di port ${port}`));

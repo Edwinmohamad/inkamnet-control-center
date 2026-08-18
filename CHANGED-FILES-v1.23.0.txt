@@ -1,0 +1,123 @@
+INKAMNET CONTROL CENTER — PATCH v1.23.0
+==========================================
+Fitur baru: WA GATEWAY (kirim WhatsApp otomatis dari server)
+
+RINGKASAN
+---------
+Sebelumnya, aplikasi ini TIDAK punya koneksi WhatsApp otomatis sama sekali —
+tombol "Kirim Pengingat" hanya membuka link wa.me yang harus di-klik "Kirim"
+secara manual di HP. Fitur ini menambahkan WA Gateway sungguhan yang berjalan
+di server, menggunakan Baileys (koneksi WhatsApp Web multi-device, GRATIS,
+tanpa perlu API key pihak ketiga) — sesuai pilihan yang Anda tentukan.
+
+Mencakup ketiga hal yang diminta:
+1. Kirim manual per-pelanggan (otomatis, bukan wa.me lagi kalau gateway hidup)
+2. WA Blast massal (banyak pelanggan sekaligus)
+3. Auto-reminder terjadwal (tanpa perlu klik apapun setiap hari)
+
+CARA MENGHUBUNGKAN
+-------------------
+1. Login sebagai Master Admin.
+2. Buka menu baru "WA Gateway" di sidebar (grup Tagihan).
+3. Klik "Hubungkan WA Gateway" — QR code akan muncul di halaman.
+4. Di HP yang WhatsApp-nya mau dipakai untuk mengirim: buka WhatsApp →
+   Perangkat Tertaut → Tautkan Perangkat → scan QR tersebut.
+5. Setelah ter-scan, status berubah jadi "Terhubung" secara otomatis
+   (halaman polling sendiri, tidak perlu refresh manual).
+6. Koneksi ini tersimpan di server (folder storage/wa-session) — kalau
+   server di-restart, gateway akan otomatis re-connect sendiri TANPA perlu
+   scan ulang QR, selama sesi belum di-logout / nomor tidak di-unlink dari
+   HP.
+
+PENTING SOAL RISIKO
+-------------------
+Ini BUKAN WhatsApp Business API resmi dari Meta — ini menghubungkan nomor
+WhatsApp pribadi/bisnis Anda seolah-olah membuka WhatsApp Web. Karena itu:
+- Gunakan nomor yang memang didedikasikan untuk pengiriman otomatis ini
+  (jangan nomor pribadi utama), untuk berjaga-jaga.
+- Sistem SENGAJA mengirim satu-per-satu dengan jeda acak 4-9 detik antar
+  pesan (bukan instan/borongan sekaligus) untuk menekan risiko nomor kena
+  limit/banned oleh WhatsApp.
+- Hanya Master Admin yang bisa Hubungkan/Putuskan koneksi ini (sama seperti
+  level akses fitur Hapus Paksa), karena tindakan ini menautkan nomor WA
+  pribadi ke sistem.
+- Kirim pesan (manual/blast) tetap bisa dilakukan Admin biasa, sama seperti
+  sebelumnya mereka bisa klik link wa.me.
+
+FITUR 1 — KIRIM MANUAL OTOMATIS
+---------------------------------
+Tombol "Kirim Pengingat" di menu Tagihan sekarang: kalau WA Gateway
+terhubung, klik tombol tersebut langsung mengirim pesan dari server (tidak
+perlu buka WhatsApp/klik Kirim lagi di HP). Kalau gateway TIDAK terhubung,
+tombol tetap berfungsi seperti biasa (buka wa.me, kirim manual) — tidak ada
+yang rusak/regresi.
+
+FITUR 2 — WA BLAST MASSAL
+---------------------------
+Di menu Pelanggan, tombol "Kirim WA Reminder Massal" yang sudah ada
+sekarang: kalau gateway terhubung, langsung mengirim blast otomatis (satu
+pesan per pelanggan terpilih, ke tagihan terbukanya) alih-alih membuka
+daftar link yang harus diklik satu-satu. Pelanggan tanpa nomor WA valid atau
+tanpa tagihan terbuka otomatis dilewati dan dilaporkan jumlahnya.
+
+FITUR 3 — AUTO-REMINDER TERJADWAL
+-------------------------------------
+Di halaman WA Gateway (Master Admin), ada pengaturan:
+- Aktifkan/nonaktifkan auto-reminder harian.
+- Jam pengiriman (misal jam 09:00 setiap hari).
+- Offset hari relatif jatuh tempo, dipisah koma (default "-3,-1,0" = H-3,
+  H-1, dan tepat di hari jatuh tempo).
+- Template pesan bebas diedit, dengan placeholder: {nama} {kode} {periode}
+  {nominal} {no_faktur} {jatuh_tempo}.
+
+Sistem otomatis mengecek setiap 5 menit apakah sudah waktunya kirim (dan
+memastikan HANYA berjalan sekali per hari, tidak dobel), lalu mengirim
+pengingat ke semua pelanggan aktif yang tagihannya jatuh tempo sesuai offset
+yang diatur — tanpa perlu ada yang klik apapun.
+
+HALAMAN WA GATEWAY (menu baru)
+---------------------------------
+- Status koneksi real-time (Terhubung / Menunggu Scan QR / Terputus).
+- Statistik: antrean, terkirim hari ini, gagal hari ini, total terkirim.
+- Log 50 pesan terakhir (manual/blast/auto-reminder) lengkap dengan status
+  dan pesan error bila gagal.
+- Dashboard utama juga diperbarui: widget "WA Gateway & Automation Queue
+  Status" sekarang menampilkan status REAL (bukan lagi selalu "MODE
+  MANUAL" seperti sebelumnya).
+
+WAJIB DILAKUKAN SAAT PASANG PATCH INI
+-----------------------------------------
+Patch ini menambah dependency Node.js BARU (@whiskeysockets/baileys,
+qrcode, dan beberapa dependency turunannya seperti pino). SETELAH menimpa
+file-file di bawah, WAJIB jalankan:
+
+    npm install
+
+di folder aplikasi SEBELUM restart server, atau aplikasi akan gagal start
+(module not found). Setelah itu baru restart Node.js seperti biasa.
+
+FILE YANG DIUBAH / DITAMBAHKAN
+---------------------------------
+- package.json                          (dependency baru + version -> 1.23.0)
+- app.js                                 (mount route, cron watchdog, auto-reconnect saat startup)
+- services/schemaService.js              (tabel wa_messages + kolom pengaturan auto-reminder)
+- services/whatsappGatewayService.js     (BARU — inti WA Gateway: koneksi, antrean, auto-reminder)
+- routes/whatsappGateway.js              (BARU — halaman & API WA Gateway)
+- routes/dashboard.js                    (widget WA Gateway pakai status real)
+- middleware/common.js                   (flag global koneksi WA Gateway untuk semua halaman)
+- views/whatsapp-gateway/index.ejs       (BARU — halaman kelola WA Gateway)
+- views/dashboard/index.ejs              (widget WA Gateway diperbarui)
+- views/partials/layout.ejs              (menu sidebar baru + versi bumped ke v1.23.0)
+- views/invoices/index.ejs               (tombol Kirim Pengingat terhubung ke gateway)
+- public/js/app.js                       (JS pengiriman AJAX + blast massal + polling status)
+- public/css/app.css                     (styling halaman WA Gateway)
+- scripts/validate-v119.js               (version assertion -> 1.23.0)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi & database seperti biasa.
+2. Timpa (overwrite) semua file di atas sesuai struktur folder pada patch ini.
+3. Jalankan "npm install" (WAJIB — lihat bagian di atas).
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Login Master Admin → buka menu "WA Gateway" → Hubungkan → scan QR.

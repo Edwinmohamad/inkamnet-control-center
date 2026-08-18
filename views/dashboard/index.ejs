@@ -89,11 +89,12 @@
       <div class="wa-gateway-body">
         <div class="wa-gateway-status <%= waOverview.mode==='manual'?'manual':'connected' %>"><i class="bi bi-<%= waOverview.mode==='manual'?'hand-index-thumb-fill':'check-circle-fill' %>"></i><span><%= waOverview.mode==='manual'?'MODE MANUAL':'CONNECTED' %></span></div>
         <div class="wa-gateway-figures">
-          <div><small>Antrean Pengingat Hari Ini</small><strong><%= waOverview.queueToday %></strong></div>
+          <div><small><%= waOverview.mode==='connected'?'Antrean Pesan':'Antrean Pengingat Hari Ini' %></small><strong><%= waOverview.queueToday %></strong></div>
           <div><small>Nomor Valid</small><strong class="text-success-soft"><%= waOverview.valid %></strong></div>
           <div><small>Nomor Invalid</small><strong class="text-danger-soft"><%= waOverview.invalid %></strong></div>
         </div>
-        <p class="wa-gateway-note">Pengingat dikirim manual lewat tombol WA di menu Tagihan — belum ada koneksi gateway/API WhatsApp otomatis di sistem ini.</p>
+        <% if(waOverview.mode==='connected'){ %><p class="wa-gateway-note">Terkirim otomatis hari ini: <strong><%= waOverview.sentToday %></strong> pesan. <a href="/wa-gateway">Kelola WA Gateway &rarr;</a></p>
+        <% } else { %><p class="wa-gateway-note">Pengingat masih dikirim manual lewat tombol WA di menu Tagihan. <a href="/wa-gateway">Hubungkan WA Gateway &rarr;</a> untuk kirim otomatis.</p><% } %>
       </div>
     </article>
 

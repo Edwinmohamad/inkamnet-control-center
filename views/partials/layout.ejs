@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#090d1a">
   <meta name="csrf-token" content="<%= csrfToken %>">
+  <meta name="wa-gateway-connected" content="<%= waGatewayConnected?'1':'0' %>">
   <title><%= translateTitle(title) %> · <%= appName %></title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -69,6 +70,7 @@
           <a class="sidebar-link <%= currentPath.startsWith('/custom-invoices') ? 'active' : '' %>" href="/custom-invoices"><i class="bi bi-file-earmark-text-fill"></i><span><%= t('customInvoices') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/discounts') ? 'active' : '' %>" href="/discounts"><i class="bi bi-percent"></i><span><%= t('discounts') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/charges') ? 'active' : '' %>" href="/charges"><i class="bi bi-plus-square-fill"></i><span><%= t('charges') %></span></a>
+          <% if(can('settings')){ %><a class="sidebar-link <%= currentPath.startsWith('/wa-gateway') ? 'active' : '' %>" href="/wa-gateway"><i class="bi bi-whatsapp"></i><span>WA Gateway</span></a><% } %>
         </nav>
         <% } %>
 
@@ -127,7 +129,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.22.0</span>
+        <span class="version-pill">CONTROL CENTER v1.23.0</span>
       </div>
     </aside>
 

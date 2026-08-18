@@ -1,6 +1,9 @@
 (() => {
   const html = document.documentElement;
   const body = document.body;
+  // v1.23 — WA Gateway connection flag, read once from the layout's <meta> tag (see middleware/common.js
+  // res.locals.waGatewayConnected). Declared at the top of this IIFE so every block below can use it.
+  const waGatewayConnectedGlobal = document.querySelector('meta[name="wa-gateway-connected"]')?.content === '1';
   const loader = document.getElementById('appLoader');
   const progress = document.getElementById('pageProgress');
 
@@ -372,6 +375,40 @@
     });
   });
 
+  // v1.23 — WA Gateway integration: [data-wa-send] links (the "Kirim Pengingat" WA buttons on
+  // Tagihan) send a real message through the gateway when it's connected, instead of just opening a
+  // wa.me deep-link. If the gateway isn't connected, we deliberately do nothing extra here and let the
+  // element's normal href="https://wa.me/..." navigation proceed — same manual fallback as before.
+  document.addEventListener('click', event => {
+    const trigger = event.target.closest('[data-wa-send]');
+    if (!trigger || !waGatewayConnectedGlobal) return;
+    if (trigger.dataset.waSending === '1') return;
+    event.preventDefault();
+    trigger.dataset.waSending = '1';
+    const originalHtml = trigger.innerHTML;
+    const phone = trigger.dataset.waPhone || '';
+    const message = decodeURIComponent(trigger.dataset.waMessage || '');
+    const customerId = trigger.dataset.waCustomerId || null;
+    const invoiceId = trigger.dataset.waInvoiceId || null;
+    fetch('/wa-gateway/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify({ phone, message, customer_id: customerId, invoice_id: invoiceId }),
+    })
+      .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(data.message || 'Gagal mengirim pesan.');
+        trigger.innerHTML = '<i class="bi bi-check2-circle"></i><span>Masuk antrean</span>';
+      })
+      .catch(err => {
+        trigger.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i><span>Gagal — klik lagi untuk manual</span>';
+        console.error('WA Gateway: gagal mengirim pesan:', err.message);
+        trigger.dataset.waSending = '';
+        return;
+      })
+      .then(() => { setTimeout(() => { trigger.innerHTML = originalHtml; trigger.dataset.waSending = ''; }, 3000); });
+  });
+
   // v1.20 — generic checkbox select-all + floating bulk action bar, used by [data-bulk-scope].
   document.querySelectorAll('[data-bulk-scope]').forEach(scope=>{
     const selectAll=scope.querySelector('[data-select-all]');
@@ -395,6 +432,7 @@
   const customerBulkScope=document.querySelector('[data-bulk-scope="customerBulkBar"]');
   if(customerBulkScope){
     const csrfTokenMeta=document.querySelector('meta[name="csrf-token"]')?.content||'';
+    const waGatewayConnected=document.querySelector('meta[name="wa-gateway-connected"]')?.content==='1';
     const customerBulkBarEl=document.getElementById('customerBulkBar');
     const customerBulkReturnStatus=customerBulkBarEl?.dataset.returnStatus||'';
     const submitCustomerBulk=(action,extra={})=>{
@@ -441,7 +479,25 @@
       submitCustomerBulk('package',{package_id:select.value});
       bootstrap.Modal.getOrCreateInstance(document.getElementById('customerBulkPackageModal'))?.hide();
     });
-    document.getElementById('customerBulkWa')?.addEventListener('click',()=>{
+    // v1.23 — when WA Gateway is connected, "Kirim WA Reminder Massal" now sends a real automated blast
+    // (one message per selected customer's open invoice, queued+rate-limited server-side) instead of
+    // opening the manual click-each-link modal below. That modal is kept as the fallback when the
+    // gateway isn't connected, so nothing regresses for setups that never link a gateway.
+    document.getElementById('customerBulkWa')?.addEventListener('click',async(event)=>{
+      if(waGatewayConnected){
+        const ids=customerBulkScope._bulkSelectedIds();
+        if(!ids.length)return;
+        if(!confirm(`Kirim WA Blast pengingat tagihan ke ${ids.length} pelanggan terpilih via WA Gateway?`))return;
+        const btn=event.currentTarget;btn.disabled=true;
+        try{
+          const r=await fetch('/wa-gateway/blast',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfTokenMeta},body:JSON.stringify({customer_ids:ids})});
+          const data=await r.json().catch(()=>({}));
+          if(!r.ok||!data.ok)throw new Error(data.message||'Blast gagal.');
+          alert(`${data.enqueued} pesan dimasukkan ke antrean pengiriman.${data.skippedNoWa?` ${data.skippedNoWa} dilewati (nomor WA tidak valid).`:''}${data.skippedNoInvoice?` ${data.skippedNoInvoice} dilewati (tidak ada tagihan terbuka).`:''}`);
+        }catch(err){ alert(`Gagal mengirim blast: ${err.message}`); }
+        finally{ btn.disabled=false; }
+        return;
+      }
       const ids=new Set(customerBulkScope._bulkSelectedIds());
       const rows=[...document.querySelectorAll('[data-customer-row]')].filter(row=>ids.has(row.dataset.customerRow));
       const list=document.getElementById('customerBulkWaList');
