@@ -2,6 +2,7 @@ const express=require('express');
 const path=require('path');
 const db=require('../config/db');
 const { audit }=require('../services/auditService');
+const { requireAdmin }=require('../middleware/auth');
 const { savePhoto,removePhoto,sendPhoto }=require('../services/photoAttachmentService');
 const router=express.Router();
 const TICKET_DIR=path.join(__dirname,'..','storage','ticket-attachments');
@@ -36,6 +37,44 @@ router.post('/:id/updates',async(req,res)=>{
   }catch(e){if(saved)await removePhoto(TICKET_DIR,saved.filename);throw e;}
 });
 router.get('/:id/attachment',async(req,res)=>{const [rows]=await db.execute(`SELECT attachment_path,attachment_original_name,attachment_mime FROM tickets WHERE id=? LIMIT 1`,[req.params.id]);return sendPhoto(res,TICKET_DIR,rows[0]);});
+
+// v1.21.0 — Section 4 (global delete-button audit): Tiket Gangguan previously had NO delete route at all.
+// `ticket_updates` has an ON DELETE CASCADE FK to tickets.id (see services/schemaService.js), so the DB
+// rows clean themselves up automatically — but the attachment FILES on disk do not, so every attachment
+// (the ticket's own + every progress update's) must be removed via removePhoto() before/around the SQL
+// delete, otherwise storage/ticket-attachments accumulates orphaned files forever.
+async function deleteTicketWithAttachments(ticketId){
+  const [[ticket]]=await db.execute(`SELECT id,ticket_code,attachment_path FROM tickets WHERE id=? LIMIT 1`,[ticketId]);
+  if(!ticket)return null;
+  const [updates]=await db.execute(`SELECT attachment_path FROM ticket_updates WHERE ticket_id=? AND attachment_path IS NOT NULL`,[ticketId]);
+  if(ticket.attachment_path)await removePhoto(TICKET_DIR,ticket.attachment_path).catch(()=>{});
+  for(const u of updates){if(u.attachment_path)await removePhoto(TICKET_DIR,u.attachment_path).catch(()=>{});}
+  await db.execute(`DELETE FROM tickets WHERE id=?`,[ticket.id]);
+  return ticket;
+}
+router.post('/:id/delete',requireAdmin,async(req,res)=>{
+  const ticket=await deleteTicketWithAttachments(req.params.id);
+  if(!ticket){req.session.flash={type:'warning',message:'Tiket tidak ditemukan.'};return res.redirect('/tickets');}
+  await audit({userId:req.session.user.id,action:'delete',entityType:'ticket',entityId:ticket.id,description:`Hapus tiket ${ticket.ticket_code}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Tiket ${ticket.ticket_code} dihapus permanen beserta seluruh lampirannya.`};
+  res.redirect('/tickets');
+});
+router.post('/bulk',requireAdmin,async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.ticket_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu tiket terlebih dahulu.'};return res.redirect('/tickets');}
+  if(ids.length>500){req.session.flash={type:'danger',message:'Maksimal 500 tiket per aksi massal.'};return res.redirect('/tickets');}
+  if(action==='delete'){
+    const deleted=[];
+    for(const id of ids){const ticket=await deleteTicketWithAttachments(id);if(ticket)deleted.push(ticket);}
+    if(!deleted.length){req.session.flash={type:'warning',message:'Tiket terpilih tidak ditemukan.'};return res.redirect('/tickets');}
+    await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'ticket',entityId:null,description:`Hapus massal ${deleted.length} tiket: ${deleted.map(r=>r.ticket_code).slice(0,20).join(', ')}${deleted.length>20?', ...':''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${deleted.length} tiket dihapus permanen beserta seluruh lampirannya.`};
+    return res.redirect('/tickets');
+  }
+  req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
+  res.redirect('/tickets');
+});
 router.get('/:id/updates/:updateId/attachment',async(req,res)=>{const [rows]=await db.execute(`SELECT attachment_path,attachment_original_name,attachment_mime FROM ticket_updates WHERE id=? AND ticket_id=? LIMIT 1`,[req.params.updateId,req.params.id]);return sendPhoto(res,TICKET_DIR,rows[0]);});
 router.get('/:id',async(req,res)=>{const [rows]=await db.execute(`SELECT t.*,c.customer_code,c.name customer_name,c.phone,c.address,s.code site_code,cl.name cluster_name,COALESCE(e.name,u.name) assigned_name,e.employee_code assigned_code,p.name assigned_position,op.name opened_by_name FROM tickets t LEFT JOIN customers c ON c.id=t.customer_id LEFT JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees e ON e.id=t.assigned_employee_id LEFT JOIN positions p ON p.id=e.position_id LEFT JOIN users u ON u.id=t.assigned_to LEFT JOIN users op ON op.id=t.opened_by WHERE t.id=? LIMIT 1`,[req.params.id]);if(!rows.length)return res.status(404).send('Ticket tidak ditemukan.');const [updates]=await db.execute(`SELECT tu.*,u.name updated_by_name FROM ticket_updates tu LEFT JOIN users u ON u.id=tu.updated_by WHERE tu.ticket_id=? ORDER BY tu.progress_date DESC,tu.id DESC`,[req.params.id]);const employees=await technicalEmployees();res.render('tickets/detail',{title:rows[0].ticket_code,ticket:rows[0],updates,employees});});
 module.exports=router;

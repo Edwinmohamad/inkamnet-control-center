@@ -1,6 +1,7 @@
 const express=require('express');
 const db=require('../config/db');
 const { audit }=require('../services/auditService');
+const { requireAdmin }=require('../middleware/auth');
 const router=express.Router();
 
 function normalizeSiteId(value){
@@ -79,6 +80,56 @@ router.post('/:id/edit', async(req,res)=>{
 
 router.post('/:id/toggle', async(req,res)=>{
   await db.execute(`UPDATE packages SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);
+  res.redirect('/packages');
+});
+
+// v1.21.0 — Section 3: individual + bulk delete for Paket Internet.
+// Safety Validation: a package that's still referenced by ANY customer (not only 'active' ones — every
+// customer list/detail query INNER JOINs packages on c.package_id, so leaving even one inactive/suspended
+// customer pointed at a deleted package would silently break that customer's row everywhere) is blocked
+// from hard delete. The existing `is_active` toggle above already IS this app's package "Arsip" mechanism
+// (NONAKTIF badge, hidden from the active-package pickers used at customer create/edit), so the warning
+// below offers it explicitly instead of duplicating a second archive flag.
+router.post('/:id/delete', requireAdmin, async(req,res)=>{
+  const id=Number(req.params.id);
+  const [[pkg]]=await db.execute(`SELECT id,name,site_id FROM packages WHERE id=? LIMIT 1`,[id]);
+  if(!pkg){req.session.flash={type:'warning',message:'Paket tidak ditemukan.'};return res.redirect('/packages');}
+  const [[usage]]=await db.execute(`SELECT COUNT(*) n FROM customers WHERE package_id=?`,[id]);
+  if(Number(usage?.n||0)>0){
+    req.session.flash={type:'danger',message:`Paket ${pkg.name} masih dipakai ${usage.n} pelanggan dan tidak dapat dihapus permanen. Gunakan tombol Aktif/Nonaktif (Arsipkan Paket) agar paket berhenti ditawarkan tanpa memutus data pelanggan yang sudah memakainya.`};
+    return res.redirect('/packages');
+  }
+  await db.execute(`DELETE FROM packages WHERE id=?`,[id]);
+  await audit({userId:req.session.user.id,action:'delete',entityType:'package',entityId:id,description:`Hapus paket ${pkg.name}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Paket ${pkg.name} dihapus permanen.`};
+  res.redirect('/packages');
+});
+
+router.post('/bulk', requireAdmin, async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.package_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu paket terlebih dahulu.'};return res.redirect('/packages');}
+  if(ids.length>500){req.session.flash={type:'danger',message:'Maksimal 500 paket per aksi massal.'};return res.redirect('/packages');}
+  const placeholders=ids.map(()=>'?').join(',');
+  if(action==='delete'){
+    const [rows]=await db.execute(`SELECT id,name FROM packages WHERE id IN (${placeholders})`,ids);
+    if(!rows.length){req.session.flash={type:'warning',message:'Paket terpilih tidak ditemukan.'};return res.redirect('/packages');}
+    const rowIds=rows.map(r=>r.id);const rowPlaceholders=rowIds.map(()=>'?').join(',');
+    const [usageCounts]=await db.execute(`SELECT package_id,COUNT(*) n FROM customers WHERE package_id IN (${rowPlaceholders}) GROUP BY package_id`,rowIds);
+    const boundIds=new Set(usageCounts.filter(r=>Number(r.n)>0).map(r=>r.package_id));
+    const eligible=rows.filter(r=>!boundIds.has(r.id));
+    const skipped=rows.length-eligible.length;
+    if(!eligible.length){
+      req.session.flash={type:'danger',message:'Semua paket terpilih masih dipakai pelanggan dan tidak dapat dihapus permanen. Gunakan Aktif/Nonaktif untuk menghentikan penawarannya.'};
+      return res.redirect('/packages');
+    }
+    const eligibleIds=eligible.map(r=>r.id);const eligiblePlaceholders=eligibleIds.map(()=>'?').join(',');
+    await db.execute(`DELETE FROM packages WHERE id IN (${eligiblePlaceholders})`,eligibleIds);
+    await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'package',entityId:null,description:`Hapus massal ${eligible.length} paket: ${eligible.map(r=>r.name).slice(0,20).join(', ')}${eligible.length>20?', ...':''}${skipped?` (${skipped} dilewati karena masih dipakai pelanggan)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${eligible.length} paket dihapus permanen.${skipped?` ${skipped} paket dilewati karena masih dipakai pelanggan — gunakan Aktif/Nonaktif untuk itu.`:''}`};
+    return res.redirect('/packages');
+  }
+  req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
   res.redirect('/packages');
 });
 module.exports=router;

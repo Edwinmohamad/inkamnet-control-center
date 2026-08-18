@@ -107,9 +107,40 @@ router.get('/', async (req, res) => {
   const [sites]=await db.query(`SELECT code,name FROM sites ORDER BY code`);
   const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const [sales]=await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales' ORDER BY e.name`);
-  const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated,SUM(customer_status='active' AND pppoe_username IS NOT NULL AND router_id IS NOT NULL) pppoe_linked,SUM(customer_status='active' AND (pppoe_username IS NULL OR router_id IS NULL)) pppoe_unlinked,SUM(archived_at IS NOT NULL) archived FROM customers`);
+  // v1.21.0 [BUG FIX - CRITICAL]: this widget-stats query previously had NO WHERE clause at all, so it
+  // kept counting ARCHIVED (soft-deleted) customers into "Total Pelanggan"/"Pelanggan Aktif"/etc. even
+  // though the list right below it (customerSql()) already hides archived rows by default. That mismatch
+  // is exactly the "counter masih menampilkan angka lama padahal data sudah dihapus" symptom reported —
+  // after archiving/hard-deleting every customer, these header widgets kept showing the old totals because
+  // they silently included the now-hidden rows. Every SUM(...) below is now gated on `archived_at IS NULL`
+  // (except the dedicated `archived` counter, which must count archived rows on purpose — it feeds the
+  // "Data Diarsip" tab badge). SUM(boolean_expr) still returns a real 0 (not NULL) whenever there ARE rows
+  // in the table but none satisfy the condition, so this fix is correct even when only SOME customers were
+  // removed; it only returns NULL if the `customers` table has literally zero rows at all, which is why
+  // every field is still read downstream via an explicit `!=null` check instead of the old `stats.x||0`
+  // shorthand (see views/customers/index.ejs) — `0` must never fall back to a stale/dummy value.
+  const [[stats]]=await db.query(`SELECT
+    SUM(archived_at IS NULL) total,
+    SUM(archived_at IS NULL AND customer_status='active') active,
+    SUM(archived_at IS NULL AND customer_status='suspended') suspended,
+    SUM(archived_at IS NULL AND network_status='isolated') isolated,
+    SUM(archived_at IS NULL AND customer_status='active' AND pppoe_username IS NOT NULL AND router_id IS NOT NULL) pppoe_linked,
+    SUM(archived_at IS NULL AND customer_status='active' AND (pppoe_username IS NULL OR router_id IS NULL)) pppoe_unlinked,
+    SUM(archived_at IS NOT NULL) archived
+    FROM customers`);
+  // Explicit-null-check normalization (per the CRITICAL bug-fix instruction: never use `x||dummy`, because
+  // a genuine 0 is falsy and would incorrectly fall back). Only `undefined`/`null` fall back to 0 here.
+  const statsSafe={
+    total:stats?.total!=null?Number(stats.total):0,
+    active:stats?.active!=null?Number(stats.active):0,
+    suspended:stats?.suspended!=null?Number(stats.suspended):0,
+    isolated:stats?.isolated!=null?Number(stats.isolated):0,
+    pppoe_linked:stats?.pppoe_linked!=null?Number(stats.pppoe_linked):0,
+    pppoe_unlinked:stats?.pppoe_unlinked!=null?Number(stats.pppoe_unlinked):0,
+    archived:stats?.archived!=null?Number(stats.archived):0,
+  };
   const [packages]=await db.query(`SELECT p.id,p.name,p.speed_label,p.price,p.site_id,s.code site_code FROM packages p LEFT JOIN sites s ON s.id=p.site_id WHERE p.is_active=1 ORDER BY COALESCE(s.code,'ZZZ'),p.price,p.name`);
-  res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,sales,packages,stats:stats||{},filters});
+  res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,sales,packages,stats:statsSafe,filters});
 });
 
 const IMPORT_ALIASES={

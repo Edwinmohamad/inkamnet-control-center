@@ -1,7 +1,24 @@
 const express = require('express');
 const db = require('../config/db');
 const { requirePermission } = require('../middleware/auth');
+const { getServerResourceSnapshot } = require('../services/serverMonitorService');
 const router = express.Router();
+
+// v1.21.0 — Dashboard Section 1, item 1: countdown to the next billing "closing" (isolir) date, derived
+// from company defaults (settings.default_due_day + default_grace_days — the same fields already used by
+// the billing/isolir engine, see services/invoiceService.js and the isolir scheduler). This is a company-
+// wide approximation shown on the executive dashboard; per-site due days can differ slightly (see
+// sites.default_due_day), which is out of scope for a single summary countdown widget.
+function nextClosingCountdown(now, dueDay, graceDays) {
+  const due = Math.max(1, Math.min(28, Number(dueDay) || 15));
+  const grace = Math.max(0, Number(graceDays) || 0);
+  const closingDayOfMonth = Math.min(28, due + grace);
+  let closing = new Date(now.getFullYear(), now.getMonth(), closingDayOfMonth);
+  closing.setHours(23, 59, 59, 999);
+  if (closing < now) closing = new Date(now.getFullYear(), now.getMonth() + 1, closingDayOfMonth, 23, 59, 59, 999);
+  const daysLeft = Math.max(0, Math.ceil((closing.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+  return { closingDate: closing, daysLeft, dueDay: due, graceDays: grace };
+}
 
 function safeInt(value, fallback, min, max) {
   const n = Number.parseInt(value, 10);
@@ -85,7 +102,10 @@ router.get('/', async (req, res) => {
     SUM(c.network_status='isolated') isolated,
     SUM(c.customer_status='active' AND c.network_status IN ('offline','router_unreachable')) offline
     FROM customers c WHERE c.archived_at IS NULL${customerScope}`, customerParams);
-  const customer={total:Number(customerStats.total||0),active:Number(customerStats.active||0),inactive:Number(customerStats.inactive||0),isolated:Number(customerStats.isolated||0),offline:Number(customerStats.offline||0)};
+  // v1.21.0: explicit null/undefined check (never `x||0`) — SUM(...) legitimately returns a real 0 when
+  // every customer row fails the condition, and that 0 must be shown as-is, not confused with "no data".
+  const nz=(v)=>v!=null?Number(v):0;
+  const customer={total:nz(customerStats.total),active:nz(customerStats.active),inactive:nz(customerStats.inactive),isolated:nz(customerStats.isolated),offline:nz(customerStats.offline)};
 
   const [[revenue]] = await db.execute(`SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.status='confirmed' AND YEAR(p.paid_at)=? AND MONTH(p.paid_at)=?${customerScope}`,[selectedYear,selectedMonth,...customerParams]);
   const [[billed]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) total,COALESCE(SUM(i.paid_amount),0) collected,COALESCE(SUM(i.status='paid'),0) paid_count,COALESCE(SUM(i.status='unpaid'),0) unpaid_count,COALESCE(SUM(i.status='partial'),0) partial_count,COALESCE(SUM(i.status='overdue'),0) overdue_count FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_year=? AND i.period_month=? AND i.status NOT IN ('cancelled','refunded')${kpiScope}`,[kpiYear,kpiMonth,...kpiParams]);
@@ -140,6 +160,46 @@ router.get('/', async (req, res) => {
   const [recentLogins]=await db.query(`SELECT u.id,u.name,u.username,le.logged_in_at FROM user_login_events le JOIN users u ON u.id=le.user_id ORDER BY le.logged_in_at DESC LIMIT 8`);
   const loginTicker=[...frequentLogins.map(x=>({kind:'frequent',name:x.name,detail:`${Number(x.login_count||0)} login / 30 hari`,time:x.last_login})),...recentLogins.map(x=>({kind:'recent',name:x.name,detail:'Last Login',time:x.logged_in_at}))];
 
+  // v1.21.0 — Dashboard Section 1: five new widgets. Each query is scoped by the same `customerScope`
+  // (site filter) already used everywhere else on this page, for consistency with the rest of the KPIs.
+  const [[appSettings]]=await db.query(`SELECT default_due_day,default_grace_days FROM settings WHERE id=1 LIMIT 1`);
+  const closing=nextClosingCountdown(now,appSettings?.default_due_day,appSettings?.default_grace_days);
+
+  // Item 2: Breakdown Distribusi Paket Internet — active-customer count per package, percentage of the
+  // scoped active-customer total (`customer.active`, computed above).
+  const [packageDistributionRows]=await db.execute(`SELECT p.id,p.name,p.speed_label,s.code site_code,
+      COUNT(c.id) customer_count
+    FROM packages p
+    LEFT JOIN customers c ON c.package_id=p.id AND c.customer_status='active' AND c.archived_at IS NULL${siteId?' AND c.site_id=?':''}
+    LEFT JOIN sites s ON s.id=p.site_id
+    WHERE p.is_active=1
+    GROUP BY p.id,p.name,p.speed_label,s.code
+    HAVING customer_count>0
+    ORDER BY customer_count DESC LIMIT 8`,siteId?[siteId]:[]);
+
+  // Item 3: WA Gateway & Automation Queue Status. IMPORTANT — this app does not (yet) integrate a real
+  // WhatsApp Business API/gateway (no Baileys/Fonnte/Wablas connector exists in services/); reminders are
+  // sent by staff manually clicking a wa.me deep link (see views/invoices/index.ejs). So this widget
+  // reports what's genuinely knowable from the database — WhatsApp number validation coverage and how many
+  // reminders are due today — rather than fabricating a fake "Connected" status with no real backing
+  // service. If/when a real gateway is wired up, `waMode` below is the single place to flip to live status.
+  const [[waStats]]=await db.execute(`SELECT SUM(whatsapp_status='valid') valid_count,SUM(whatsapp_status='invalid') invalid_count,SUM(whatsapp_status='unverified') unverified_count FROM customers c WHERE c.archived_at IS NULL${customerScope}`,customerParams);
+  const waOverview={
+    mode:'manual',
+    valid:nz(waStats?.valid_count),
+    invalid:nz(waStats?.invalid_count),
+    unverified:nz(waStats?.unverified_count),
+    queueToday:nz(noc?.due_today),
+  };
+
+  // Item 5: Local Billing Server Resource Monitor (CPU/RAM/Disk) — see services/serverMonitorService.js.
+  const serverResource=getServerResourceSnapshot();
+
+  // Item 4: Quick Action Launchpad — "Cek ODP Kosong" badge count, using the capacity_ports/used_ports
+  // columns that already power the "X port tersedia" column on the Cluster/ODP page (views/clusters/index.ejs).
+  const [[odpAvailability]]=await db.query(`SELECT COUNT(*) n FROM clusters WHERE status='active' AND capacity_ports IS NOT NULL AND capacity_ports>used_ports${siteId?' AND site_id=?':''}`,siteId?[siteId]:[]);
+  const odpAvailableCount=nz(odpAvailability?.n);
+
   const week=currentWeekRange();
   const [weekDuty]=await db.execute(`SELECT d.id,d.duty_date,DATE_FORMAT(d.duty_date,'%Y-%m-%d') duty_date_key,d.staff_name,d.shift_name,d.status,d.proof_path,s.code site_code
     FROM server_duty_schedules d LEFT JOIN sites s ON s.id=d.site_id
@@ -164,7 +224,9 @@ router.get('/', async (req, res) => {
     title:'Dashboard',customer,revenue,billed,unpaid,newCustomers,psbToday,psbCustomers,network,noc,recent,loginTicker,siteOptions,siteCustomerRows,weekDuty,todayDuty,week,invoiceKpi,hardOverdueCustomers,inactiveCustomers,isolatedCustomers,
     selectedSiteCode:selectedSite?.code||'',selectedSiteName:selectedSite?.name||'Semua Site',collectionRate,routerRate,
     selectedMonth,selectedYear,years,kpiMonth,kpiYear,kpiSiteCode:kpiSite?.code||'',psbMonth,psbYear,psbSiteCode:psbSite?.code||'',offMonth,offYear,offSiteCode:offSite?.code||'',
-    greeting,monthly:{labels:monthLabels,invoices:monthlyInvoices,payments:monthlyPayments,psbLabels,psb:dailyPsb}
+    greeting,monthly:{labels:monthLabels,invoices:monthlyInvoices,payments:monthlyPayments,psbLabels,psb:dailyPsb},
+    closing,packageDistribution:packageDistributionRows,waOverview,serverResource,odpAvailableCount,
+    collectionBilled:nz(collectionBilling.total),collectionCollected:nz(collectionBilling.collected)
   });
 });
 module.exports=router;

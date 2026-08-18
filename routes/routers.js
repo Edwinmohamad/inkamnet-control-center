@@ -77,6 +77,37 @@ router.post('/:id/delete',requireAdmin,async(req,res)=>{
   res.redirect('/routers');
 });
 
+// v1.21.0 — Section 4 (global delete-button audit): per-row delete already existed and was already
+// correctly guarded (blocked while any customer still has router_id=this router). Router Config was
+// simply missing the checkbox/bulk-selection UI the other menus have, so this adds bulk delete reusing
+// the exact same per-row guard, looped one router at a time (skipped ones are reported, not silently lost).
+router.post('/bulk',requireAdmin,async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.router_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu router terlebih dahulu.'};return res.redirect('/routers');}
+  if(ids.length>500){req.session.flash={type:'danger',message:'Maksimal 500 router per aksi massal.'};return res.redirect('/routers');}
+  if(action==='delete'){
+    const deleted=[];const skipped=[];
+    for(const id of ids){
+      const [[current]]=await db.execute(`SELECT id,name FROM routers WHERE id=? LIMIT 1`,[id]);
+      if(!current)continue;
+      const [[usage]]=await db.execute(`SELECT COUNT(*) total FROM customers WHERE router_id=?`,[id]);
+      if(Number(usage.total)>0){skipped.push(current);continue;}
+      await db.execute(`DELETE FROM routers WHERE id=?`,[id]);
+      deleted.push(current);
+    }
+    if(!deleted.length){
+      req.session.flash={type:'danger',message:'Semua router terpilih masih digunakan pelanggan dan tidak dapat dihapus. Pindahkan/unlink pelanggan terlebih dahulu.'};
+      return res.redirect('/routers');
+    }
+    await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'router',entityId:null,description:`Hapus massal ${deleted.length} router: ${deleted.map(r=>r.name).slice(0,20).join(', ')}${deleted.length>20?', ...':''}${skipped.length?` (${skipped.length} dilewati karena masih dipakai pelanggan)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${deleted.length} router dihapus permanen.${skipped.length?` ${skipped.length} router dilewati karena masih digunakan pelanggan.`:''}`};
+    return res.redirect('/routers');
+  }
+  req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
+  res.redirect('/routers');
+});
+
 router.post('/:id/test',async(req,res)=>{
   const [rows]=await db.execute(`SELECT * FROM routers WHERE id=?`,[req.params.id]);
   if(!rows.length)return res.status(404).send('Router tidak ditemukan');

@@ -250,4 +250,61 @@ router.post('/:id/delete',requireAdmin,async(req,res)=>{
   res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
 });
 
+// v1.21.0 — Section 4 (global delete-button audit): Tagihan already had fully transaction-safe individual
+// cancel/delete (see above). This adds the bulk counterpart the checkbox column (data-invoice-table-check)
+// was still missing — reusing the EXACT same per-row guard/locking pattern in a loop (one `SELECT ... FOR
+// UPDATE` transaction per invoice) rather than a single bulk UPDATE/DELETE, so a batch never bypasses the
+// same financial-safety checks (active payments / paid_amount) that protect the single-row routes.
+router.post('/bulk',requireAdmin,async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.invoice_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  const returnTo=localReturn(req.body.return_to,'/invoices');
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu tagihan terlebih dahulu.'};return res.redirect(returnTo);}
+  if(ids.length>500){req.session.flash={type:'danger',message:'Maksimal 500 tagihan per aksi massal.'};return res.redirect(returnTo);}
+  if(action==='cancel'){
+    const done=[];const skipped=[];
+    for(const id of ids){
+      const conn=await db.getConnection();
+      try{
+        await conn.beginTransaction();
+        const [rows]=await conn.execute(`SELECT id,invoice_number,status,paid_amount,outstanding FROM invoices WHERE id=? LIMIT 1 FOR UPDATE`,[id]);
+        if(!rows.length){await conn.rollback();continue;}
+        const invoice=rows[0];
+        const [[active]]=await conn.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=? AND status IN ('confirmed','pending') FOR UPDATE`,[invoice.id]);
+        if(Number(active.total)>0 || Number(invoice.paid_amount)>0 || invoice.status==='cancelled'){await conn.rollback();skipped.push(invoice);continue;}
+        await conn.execute(`UPDATE invoices SET status='cancelled',paid_amount=0,outstanding=0 WHERE id=?`,[invoice.id]);
+        await conn.commit();
+        done.push(invoice);
+      }catch(e){await conn.rollback();skipped.push({invoice_number:`#${id}`});}finally{conn.release();}
+    }
+    if(!done.length){req.session.flash={type:'danger',message:'Semua tagihan terpilih masih memiliki pembayaran aktif dan tidak dapat dibatalkan. Gunakan "Jadikan Belum Lunas" terlebih dahulu.'};return res.redirect(returnTo);}
+    await audit({userId:req.session.user.id,action:'bulk_cancel',entityType:'invoice',entityId:null,description:`Batalkan massal ${done.length} tagihan: ${done.map(r=>r.invoice_number).slice(0,20).join(', ')}${done.length>20?', ...':''}${skipped.length?` (${skipped.length} dilewati karena masih memiliki pembayaran aktif)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${done.length} tagihan dibatalkan. Histori transaksi tetap disimpan untuk audit.${skipped.length?` ${skipped.length} tagihan dilewati karena masih memiliki pembayaran aktif.`:''}`};
+    return res.redirect(returnTo);
+  }
+  if(action==='delete'){
+    const done=[];const skipped=[];
+    for(const id of ids){
+      const conn=await db.getConnection();
+      try{
+        await conn.beginTransaction();
+        const [rows]=await conn.execute(`SELECT id,invoice_number,paid_amount FROM invoices WHERE id=? LIMIT 1 FOR UPDATE`,[id]);
+        if(!rows.length){await conn.rollback();continue;}
+        const invoice=rows[0];
+        const [[pay]]=await conn.execute(`SELECT COUNT(*) total FROM payments WHERE invoice_id=? FOR UPDATE`,[invoice.id]);
+        if(Number(invoice.paid_amount)>0 || Number(pay.total)>0){await conn.rollback();skipped.push(invoice);continue;}
+        await conn.execute(`DELETE FROM invoices WHERE id=?`,[invoice.id]);
+        await conn.commit();
+        done.push(invoice);
+      }catch(e){await conn.rollback();skipped.push({invoice_number:`#${id}`});}finally{conn.release();}
+    }
+    if(!done.length){req.session.flash={type:'danger',message:'Semua tagihan terpilih sudah memiliki pembayaran dan tidak boleh dihapus permanen.'};return res.redirect(returnTo);}
+    await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'invoice',entityId:null,description:`Hapus massal ${done.length} tagihan tanpa histori pembayaran: ${done.map(r=>r.invoice_number).slice(0,20).join(', ')}${done.length>20?', ...':''}${skipped.length?` (${skipped.length} dilewati karena sudah memiliki pembayaran)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${done.length} tagihan dihapus permanen.${skipped.length?` ${skipped.length} tagihan dilewati karena sudah memiliki pembayaran.`:''}`};
+    return res.redirect(returnTo);
+  }
+  req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
+  res.redirect(returnTo);
+});
+
 module.exports=router;

@@ -60,6 +60,63 @@
     <a href="<%= networkTarget %>" class="command-pulse <%= routerRate<100?'warn':'ok' %>"><div><span>ROUTER HEALTH</span><strong><%= Number(noc.routers_online||0) %>/<%= Number(noc.routers_total||0) %></strong><em>Buka monitor →</em></div><i class="bi bi-router-fill"></i></a>
   </div>
 
+  <!-- v1.21.0 — Section 1: 5 new data-dense widgets (Target Penagihan, Distribusi Paket, WA Gateway,
+       Quick Action Launchpad, Server Resource Monitor), placed right under the existing pulse row so the
+       whole "operational glance" area of the dashboard stays together before the deeper KPI panels below. -->
+  <div class="dashboard-widgets-v121">
+    <article class="command-panel widget-collection-target">
+      <div class="command-panel-head"><div><span>TARGET PENAGIHAN</span><h3>Collection Rate Bulan Ini</h3></div><i class="bi bi-bullseye"></i></div>
+      <div class="collection-target-body">
+        <div class="collection-target-bar"><i style="--rate:<%= collectionRate %>%"></i></div>
+        <div class="collection-target-figures"><strong><%= collectionRate %>%</strong><span><%= formatRupiah(collectionCollected) %> / <%= formatRupiah(collectionBilled) %></span></div>
+        <div class="collection-target-countdown"><i class="bi bi-hourglass-split"></i><span>Closing kas/isolir dalam</span><b><%= closing.daysLeft %> hari</b><small><%= formatDate(closing.closingDate) %></small></div>
+      </div>
+    </article>
+
+    <article class="command-panel widget-package-distribution">
+      <div class="command-panel-head"><div><span>DISTRIBUSI PAKET</span><h3>Breakdown Paket Internet</h3></div><i class="bi bi-speedometer2"></i></div>
+      <div class="package-distribution-list">
+        <% const totalActiveForPct=Number(customer.active||0); %>
+        <% packageDistribution.forEach(p=>{ const pct=totalActiveForPct?Math.round(Number(p.customer_count||0)/totalActiveForPct*100):0; %>
+        <a href="/customers?<%= customerSiteQuery %>" class="package-distribution-row"><span class="package-distribution-name"><%= p.name %><small><%= p.site_code||'GLOBAL' %><%= p.speed_label?` · ${p.speed_label}`:'' %></small></span><span class="package-distribution-bar"><i style="width:<%= pct %>%"></i></span><b><%= pct %>%</b><em><%= p.customer_count %></em></a>
+        <% }) %>
+        <% if(!packageDistribution.length){ %><div class="ink-empty">Belum ada pelanggan aktif pada paket manapun.</div><% } %>
+      </div>
+    </article>
+
+    <article class="command-panel widget-wa-gateway">
+      <div class="command-panel-head"><div><span>WA GATEWAY</span><h3>Automation Queue Status</h3></div><i class="bi bi-whatsapp"></i></div>
+      <div class="wa-gateway-body">
+        <div class="wa-gateway-status <%= waOverview.mode==='manual'?'manual':'connected' %>"><i class="bi bi-<%= waOverview.mode==='manual'?'hand-index-thumb-fill':'check-circle-fill' %>"></i><span><%= waOverview.mode==='manual'?'MODE MANUAL':'CONNECTED' %></span></div>
+        <div class="wa-gateway-figures">
+          <div><small>Antrean Pengingat Hari Ini</small><strong><%= waOverview.queueToday %></strong></div>
+          <div><small>Nomor Valid</small><strong class="text-success-soft"><%= waOverview.valid %></strong></div>
+          <div><small>Nomor Invalid</small><strong class="text-danger-soft"><%= waOverview.invalid %></strong></div>
+        </div>
+        <p class="wa-gateway-note">Pengingat dikirim manual lewat tombol WA di menu Tagihan — belum ada koneksi gateway/API WhatsApp otomatis di sistem ini.</p>
+      </div>
+    </article>
+
+    <article class="command-panel widget-quick-launch">
+      <div class="command-panel-head"><div><span>QUICK ACTION</span><h3>Launchpad</h3></div><i class="bi bi-lightning-charge-fill"></i></div>
+      <div class="quick-launch-row">
+        <a href="/customers/new"><i class="bi bi-person-plus-fill"></i><span>Pelanggan Baru</span></a>
+        <% if(can('finance')){ %><a href="/cash"><i class="bi bi-cash-coin"></i><span>Input Kas/Transaksi</span></a><% } %>
+        <a href="/invoices?month=<%= selectedMonth %>&year=<%= selectedYear %>&status=open<%= siteQuery %>"><i class="bi bi-whatsapp"></i><span>WA Blast Pengingat</span></a>
+        <a href="/clusters<%= selectedSiteCode?`?site=${encodeURIComponent(selectedSiteCode)}`:'' %>"><i class="bi bi-diagram-3-fill"></i><span>Cek ODP Kosong</span><% if(odpAvailableCount>0){ %><b><%= odpAvailableCount %></b><% } %></a>
+      </div>
+    </article>
+
+    <article class="command-panel widget-server-monitor">
+      <div class="command-panel-head"><div><span>SERVER MONITOR</span><h3>Local Billing Server</h3></div><i class="bi bi-cpu-fill"></i></div>
+      <div class="server-monitor-body">
+        <div class="server-monitor-gauge"><span>CPU</span><div class="server-monitor-track"><i style="width:<%= serverResource.cpuPercent %>%"></i></div><b><%= serverResource.cpuPercent %>%</b><small><%= serverResource.cpuCores %> core · load <%= serverResource.loadavg1 %></small></div>
+        <div class="server-monitor-gauge"><span>RAM</span><div class="server-monitor-track"><i style="width:<%= serverResource.ramPercent %>%"></i></div><b><%= serverResource.ramPercent %>%</b><small><%= serverResource.ramUsedGb %> / <%= serverResource.ramTotalGb %> GB</small></div>
+        <div class="server-monitor-gauge"><span>DISK</span><div class="server-monitor-track"><i style="width:<%= serverResource.diskAvailable?serverResource.diskPercent:0 %>%"></i></div><b><%= serverResource.diskAvailable?`${serverResource.diskPercent}%`:'-' %></b><small><%= serverResource.diskAvailable?`${serverResource.diskUsedGb} / ${serverResource.diskTotalGb} GB`:'Tidak tersedia di lingkungan ini' %></small></div>
+      </div>
+    </article>
+  </div>
+
   <div class="dashboard-dense-core">
   <article class="command-panel invoice-kpi-panel">
     <div class="command-panel-head dashboard-filter-head"><div><span>KPI TAGIHAN PELANGGAN</span><h3>Status Billing <%= monthNames[kpiMonth-1] %> <%= kpiYear %> · <%= kpiSiteCode||'Semua Site' %></h3></div><form method="get" class="dashboard-section-filter" data-auto-filter><input type="hidden" name="site" value="<%= selectedSiteCode %>"><input type="hidden" name="month" value="<%= selectedMonth %>"><input type="hidden" name="year" value="<%= selectedYear %>"><input type="hidden" name="psb_month" value="<%= psbMonth %>"><input type="hidden" name="psb_year" value="<%= psbYear %>"><input type="hidden" name="psb_site" value="<%= psbSiteCode %>"><select name="kpi_site" aria-label="Filter site KPI"><option value="">Semua Site</option><% siteOptions.forEach(s=>{ %><option value="<%= s.code %>" <%= kpiSiteCode===s.code?'selected':'' %>><%= s.code %></option><% }) %></select><select name="kpi_month" aria-label="Filter bulan KPI"><% monthNames.forEach((m,i)=>{ %><option value="<%= i+1 %>" <%= kpiMonth===i+1?'selected':'' %>><%= m %></option><% }) %></select><select name="kpi_year" aria-label="Filter tahun KPI"><% years.forEach(y=>{ %><option value="<%= y %>" <%= kpiYear===y?'selected':'' %>><%= y %></option><% }) %></select><span class="auto-filter-hint"><i class="bi bi-lightning-charge-fill"></i>Auto</span></form><a href="/invoices?month=<%= kpiMonth %>&year=<%= kpiYear %><%= kpiSiteQuery %>" class="ink-text-link">Buka Semua <i class="bi bi-arrow-right"></i></a></div>

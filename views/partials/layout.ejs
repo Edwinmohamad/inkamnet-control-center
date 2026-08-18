@@ -127,7 +127,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.20.2</span>
+        <span class="version-pill">CONTROL CENTER v1.21.0</span>
       </div>
     </aside>
 
@@ -207,6 +207,26 @@
         </div>
         <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button type="button" class="btn-tech danger" id="hardDeleteDangerConfirmBtn"><i class="bi bi-trash3-fill"></i>Ya, Hapus Permanen</button></div>
         <form method="post" id="hardDeleteDangerForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
+      </div>
+    </div>
+  </div>
+
+  <!-- v1.21.0 — Section 4 (global delete-button audit): ONE generic, uniform, mobile-responsive delete
+       confirmation modal reused by any [data-simple-delete] trigger (Paket Internet, Site/POP, Router,
+       Tiket Gangguan, bulk Tagihan) that only ever needs a single "Hapus" action — i.e. menus that are
+       NOT customers (which keep the dedicated Arsip-vs-Hapus / danger modals above, since only customers
+       currently has a true soft-delete/Arsip lifecycle). Any server-side "can't delete, still in use"
+       guard is reported back via the normal flash-alert banner after redirect, exactly like the existing
+       clusters/routers guards — this modal only asks "are you sure", it never overrides a backend guard. -->
+  <div class="modal fade" id="simpleDeleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content nms-modal">
+        <div class="modal-header"><div><div class="module-kicker text-danger">HAPUS DATA</div><h5 class="modal-title" id="simpleDeleteTitle">Hapus data ini?</h5><small class="text-secondary" id="simpleDeleteTarget">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="alert alert-danger alert-modern mb-0" id="simpleDeleteWarning"><i class="bi bi-exclamation-triangle-fill me-2"></i>Tindakan ini tidak dapat dibatalkan.</div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button type="button" class="btn-tech danger" id="simpleDeleteConfirmBtn"><i class="bi bi-trash3-fill"></i>Ya, Hapus</button></div>
+        <form method="post" id="simpleDeleteForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
       </div>
     </div>
   </div>

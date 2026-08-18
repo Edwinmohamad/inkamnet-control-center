@@ -243,6 +243,70 @@
     hardDeleteDangerForm.submit();
   });
 
+  // v1.21.0 — Section 4 (global delete-button audit): generic single-choice delete modal, reused by any
+  // [data-simple-delete="/url"] trigger (per-row) plus [data-simple-delete-bulk] buttons (bulk mode, same
+  // pattern as deleteChoiceBulkHandler above — sets simpleDeleteBulkHandler instead of the form action).
+  const simpleDeleteModalEl=document.getElementById('simpleDeleteModal');
+  const simpleDeleteModal=simpleDeleteModalEl&&window.bootstrap?bootstrap.Modal.getOrCreateInstance(simpleDeleteModalEl):null;
+  const simpleDeleteForm=document.getElementById('simpleDeleteForm');
+  const simpleDeleteConfirmBtn=document.getElementById('simpleDeleteConfirmBtn');
+  const simpleDeleteTitleEl=document.getElementById('simpleDeleteTitle');
+  const simpleDeleteWarningEl=document.getElementById('simpleDeleteWarning');
+  let simpleDeleteBulkHandler=null;
+  document.addEventListener('click',event=>{
+    const trigger=event.target.closest('[data-simple-delete]');
+    if(!trigger||!simpleDeleteModal)return;
+    event.preventDefault();
+    closeActionPopover();
+    simpleDeleteBulkHandler=null;
+    const url=trigger.dataset.simpleDelete||'';
+    const label=trigger.dataset.entityLabel||'data ini';
+    const title=trigger.dataset.simpleDeleteTitle||'Hapus data ini?';
+    const warning=trigger.dataset.simpleDeleteWarning||'Tindakan ini tidak dapat dibatalkan.';
+    const targetEl=document.getElementById('simpleDeleteTarget');if(targetEl)targetEl.textContent=label;
+    if(simpleDeleteTitleEl)simpleDeleteTitleEl.textContent=title;
+    if(simpleDeleteWarningEl)simpleDeleteWarningEl.innerHTML=`<i class="bi bi-exclamation-triangle-fill me-2"></i>${escapeHtml(warning)}`;
+    if(simpleDeleteForm)simpleDeleteForm.action=url||'#';
+    simpleDeleteModal.show();
+  });
+  simpleDeleteConfirmBtn?.addEventListener('click',()=>{
+    if(simpleDeleteBulkHandler){simpleDeleteBulkHandler();simpleDeleteModal?.hide();return;}
+    if(!simpleDeleteForm?.action||simpleDeleteForm.action.endsWith('#'))return;
+    simpleDeleteForm.submit();
+  });
+  // Small helper other bulk-action wiring blocks below reuse: builds+submits a hidden POST form.
+  const submitBulkForm=(actionUrl,fields)=>{
+    const csrfTokenMeta=document.querySelector('meta[name="csrf-token"]')?.content||'';
+    const form=document.createElement('form');
+    form.method='post';form.action=actionUrl;form.style.display='none';
+    const addField=(name,value)=>{const field=document.createElement('input');field.type='hidden';field.name=name;field.value=value;form.appendChild(field);};
+    addField('_csrf',csrfTokenMeta);
+    Object.entries(fields).forEach(([key,value])=>{
+      if(Array.isArray(value))value.forEach(v=>addField(key,v));
+      else addField(key,value);
+    });
+    document.body.appendChild(form);form.submit();
+  };
+  // Generic opener for [data-simple-delete-bulk] bulk buttons: reads its data-bulk-scope-id target's
+  // selected ids, then posts them to data-bulk-url with data-bulk-action-field=data-bulk-action-value.
+  document.querySelectorAll('[data-simple-delete-bulk]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const scopeEl=document.querySelector(`[data-bulk-scope="${btn.dataset.bulkScopeId}"]`);
+      const ids=scopeEl?._bulkSelectedIds?.()||[];
+      if(!ids.length||!simpleDeleteModal)return;
+      const idField=btn.dataset.bulkIdField||'ids[]';
+      const actionField=btn.dataset.bulkActionField||'action';
+      const actionValue=btn.dataset.bulkActionValue||'delete';
+      const url=btn.dataset.bulkUrl;
+      const label=btn.dataset.entityLabelPlural?`${ids.length} ${btn.dataset.entityLabelPlural} terpilih`:`${ids.length} data terpilih`;
+      const targetEl=document.getElementById('simpleDeleteTarget');if(targetEl)targetEl.textContent=label;
+      if(simpleDeleteTitleEl)simpleDeleteTitleEl.textContent=btn.dataset.simpleDeleteTitle||'Hapus data terpilih?';
+      if(simpleDeleteWarningEl)simpleDeleteWarningEl.innerHTML=`<i class="bi bi-exclamation-triangle-fill me-2"></i>${escapeHtml(btn.dataset.simpleDeleteWarning||'Tindakan ini tidak dapat dibatalkan. Data yang masih terikat/dipakai akan otomatis dilewati oleh sistem.')}`;
+      simpleDeleteBulkHandler=()=>submitBulkForm(url,{[actionField]:actionValue,[idField]:ids});
+      simpleDeleteModal.show();
+    });
+  });
+
   // v1.20 — generic checkbox select-all + floating bulk action bar, used by [data-bulk-scope].
   document.querySelectorAll('[data-bulk-scope]').forEach(scope=>{
     const selectAll=scope.querySelector('[data-select-all]');

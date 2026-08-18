@@ -51,11 +51,12 @@
       </div>
     </div>
     <div class="table-responsive action-safe-table">
-      <table class="app-table invoice-table">
-        <thead><tr><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th>Kirim Pengingat</th><th class="invoice-action-head">Tindakan</th></tr></thead>
+      <table class="app-table invoice-table" data-bulk-scope="invoiceDeleteBulkBar">
+        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua tagihan untuk batalkan/hapus massal"></th><% } %><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th>Kirim Pengingat</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
           <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); const waValid=/^628[1-9]\d{7,11}$/.test(wa); const hardOverdue=Number(i.days_overdue)>2&&Number(i.outstanding)>0&&!['paid','cancelled','refunded'].includes(i.status); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const hasPending=Number(i.active_payment_count||0)>0&&Number(i.paid_amount||0)===0; const canPay=Number(i.outstanding)>0 && !hasPending && !['paid','cancelled','refunded'].includes(i.status); %>
           <tr class="<%= hardOverdue?'invoice-hard-overdue':'' %>">
+            <% if(isAdmin){ %><td><input type="checkbox" data-row-check value="<%= i.id %>" aria-label="Pilih tagihan <%= i.invoice_number %> untuk batalkan/hapus massal"></td><% } %>
             <td><span class="cell-main"><%= index+1 %></span></td>
             <td>
               <div class="invoice-customer-select">
@@ -92,11 +93,16 @@
             </td>
           </tr>
           <% }) %>
-          <% if(!invoices.length){ %><tr><td colspan="10"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Refresh / Generate Tagihan.</small></div></td></tr><% } %>
+          <% if(!invoices.length){ %><tr><td colspan="<%= isAdmin?11:10 %>"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Refresh / Generate Tagihan.</small></div></td></tr><% } %>
         </tbody>
       </table>
     </div>
   </div>
+  <!-- v1.21.0 — Section 4: bulk Batalkan/Hapus, independent from the bulk-payment checkbox column above.
+       Both post to the same /invoices/bulk endpoint (differing only by data-bulk-action-value); the server
+       re-checks the same per-invoice financial guard as the single-row actions and skips/report anything
+       ineligible, so it's always safe regardless of which rows happen to be checked. -->
+  <% if(isAdmin){ %><div class="customer-bulk-bar" id="invoiceDeleteBulkBar" hidden><span><b data-bulk-count>0</b> tagihan terpilih</span><div class="customer-bulk-buttons"><button type="button" data-bulk-clear class="ghost"><i class="bi bi-x-lg"></i>Batal</button><button type="button" data-simple-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="cancel" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-simple-delete-title="Batalkan tagihan terpilih?" data-simple-delete-warning="Tagihan yang masih memiliki pembayaran aktif akan otomatis dilewati. Histori transaksi tetap disimpan untuk audit."><i class="bi bi-x-octagon"></i>Batalkan Massal</button><button type="button" class="danger" data-simple-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="delete" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-simple-delete-title="Hapus permanen tagihan terpilih?" data-simple-delete-warning="Hanya tagihan yang belum pernah memiliki pembayaran yang akan dihapus permanen — sisanya otomatis dilewati."><i class="bi bi-trash3-fill"></i>Hapus Massal</button></div></div><% } %>
 </section>
 
 <div class="modal fade" id="generateInvoiceModal" tabindex="-1">

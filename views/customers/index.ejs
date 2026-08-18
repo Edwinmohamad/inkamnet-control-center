@@ -1,4 +1,5 @@
 <% const customerFilterQuery=new URLSearchParams({q:filters.q||'',site:filters.site||'',cluster:filters.cluster||'',sales:filters.sales||'',status:filters.status||'',network:filters.network||''}).toString(); const isArchivedView=filters.status==='archived'; %>
+<% /* v1.21.0: explicit null/undefined check, never `||0` — a genuine 0 count must render as 0, not silently fall through to a stale value. */ const n=(v)=>v!=null?Number(v):0; %>
 <section>
   <div class="module-head">
     <div><div class="module-kicker">CUSTOMER EXPERIENCE</div><h1>Manajemen Pelanggan</h1><p>Kelola pelanggan, paket, site, status billing, dan kondisi jaringan dari satu layar.</p></div>
@@ -8,14 +9,14 @@
   <!-- v1.20 — Section 4: Data Diarsip sub-menu. A pure tab toggle on top of the existing filters. -->
   <div class="customer-view-tabs" role="tablist" aria-label="Tampilan data pelanggan">
     <a class="<%= !isArchivedView?'active':'' %>" href="/customers"><i class="bi bi-people-fill"></i>Data Aktif</a>
-    <a class="<%= isArchivedView?'active':'' %>" href="/customers?status=archived"><i class="bi bi-archive-fill"></i>Data Diarsip<span class="customer-view-tab-count"><%= Number(stats.archived||0) %></span></a>
+    <a class="<%= isArchivedView?'active':'' %>" href="/customers?status=archived"><i class="bi bi-archive-fill"></i>Data Diarsip<span class="customer-view-tab-count"><%= n(stats.archived) %></span></a>
   </div>
 
   <div class="metric-grid">
-    <article class="metric-card"><div class="metric-top"><span class="metric-label">Total Pelanggan</span><span class="metric-icon"><i class="bi bi-people-fill"></i></span></div><strong><%= Number(stats.total||0) %></strong><small>Seluruh data pelanggan</small></article>
-    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pelanggan Aktif</span><span class="metric-icon"><i class="bi bi-person-check-fill"></i></span></div><strong><%= Number(stats.active||0) %></strong><small>Service aktif</small></article>
-    <article class="metric-card orange"><div class="metric-top"><span class="metric-label"><%= language==='en'?'Suspended':'Ditangguhkan' %></span><span class="metric-icon"><i class="bi bi-pause-circle-fill"></i></span></div><strong><%= Number(stats.suspended||0) %></strong><small>Nonaktif sementara</small></article>
-    <article class="metric-card red"><div class="metric-top"><span class="metric-label">Terisolir</span><span class="metric-icon"><i class="bi bi-wifi-off"></i></span></div><strong><%= Number(stats.isolated||0) %></strong><small>Status isolasi jaringan</small></article>
+    <article class="metric-card"><div class="metric-top"><span class="metric-label">Total Pelanggan</span><span class="metric-icon"><i class="bi bi-people-fill"></i></span></div><strong><%= n(stats.total) %></strong><small>Seluruh data pelanggan</small></article>
+    <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pelanggan Aktif</span><span class="metric-icon"><i class="bi bi-person-check-fill"></i></span></div><strong><%= n(stats.active) %></strong><small>Service aktif</small></article>
+    <article class="metric-card orange"><div class="metric-top"><span class="metric-label"><%= language==='en'?'Suspended':'Ditangguhkan' %></span><span class="metric-icon"><i class="bi bi-pause-circle-fill"></i></span></div><strong><%= n(stats.suspended) %></strong><small>Nonaktif sementara</small></article>
+    <article class="metric-card red"><div class="metric-top"><span class="metric-label">Terisolir</span><span class="metric-icon"><i class="bi bi-wifi-off"></i></span></div><strong><%= n(stats.isolated) %></strong><small>Status isolasi jaringan</small></article>
   </div>
 
   <form class="filter-card" method="get">

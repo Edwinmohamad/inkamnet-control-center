@@ -1,0 +1,204 @@
+INKAMNET CONTROL CENTER — PATCH v1.21.0
+==========================================
+Tanggal: 2026-08-18
+Patch ini menjawab instruksi terbaru: perbaikan bug counter widget saat data
+kosong, 5 widget baru di Dashboard, fitur Hapus (individual & massal) di
+Menu Pelanggan dan Paket Internet, audit tombol hapus di seluruh menu, dan
+perapihan UI. 20 file berubah (kode utuh, bukan potongan) — extract ke root
+project, timpa file lama.
+
+CARA PAKAI
+----------
+1. Backup dulu folder project & database Anda.
+2. Extract isi zip ini ke root folder project, timpa file yang sudah ada.
+3. Tidak ada dependency npm baru — npm install tidak wajib, tapi aman dijalankan.
+4. Restart aplikasi (pm2 restart / node app.js).
+5. Hard-refresh browser (Ctrl+Shift+R).
+
+CATATAN STACK: Anda menyebut "Tailwind CSS" di instruksi, tapi setelah saya
+cek ulang repo, project ini sejak awal memakai Bootstrap 5.3.8 + CSS custom
+(bukan Tailwind sama sekali — tidak ada file config/CDN Tailwind di mana pun).
+Semua widget/fitur baru di patch ini saya buat konsisten dengan Bootstrap +
+gaya CSS yang sudah ada, BUKAN Tailwind, supaya tidak mencampur dua framework
+CSS berbeda dalam satu aplikasi (itu akan menimbulkan konflik style dan bikin
+maintenance lebih sulit ke depannya). Beri tahu saya kalau ternyata Anda
+memang berencana migrasi total ke Tailwind — itu pekerjaan besar tersendiri.
+
+==========================================
+1. BUG FIX WIDGET COUNTER (CRITICAL) — routes/customers.js, views/customers/index.ejs
+==========================================
+PENYEBAB ASLI (ditemukan setelah menelusuri kode, bukan dugaan): query
+statistik header menu Pelanggan ("Total Pelanggan", "Pelanggan Aktif", dst di
+routes/customers.js baris ~110) TIDAK PERNAH memfilter `archived_at IS NULL`
+sama sekali — sementara daftar pelanggan di bawahnya sudah menyembunyikan
+pelanggan yang diarsipkan sejak v1.20. Akibatnya: begitu semua/sebagian
+pelanggan diarsipkan atau dihapus, widget statistik tetap menghitung mereka
+dan angkanya terasa "nyangkut" / tidak berubah — persis gejala yang Anda
+laporkan. Sekarang setiap SUM(...) di query itu diberi syarat archived_at IS
+NULL (kecuali counter "archived" itu sendiri, yang memang harus menghitung
+data arsip untuk badge tab Data Diarsip).
+
+Sekaligus, sesuai instruksi Anda, seluruh pembacaan angka ini (dan di
+routes/dashboard.js) diubah dari pola `count||0` menjadi pengecekan eksplisit
+`count!=null?Number(count):0` — supaya cara berpikirnya benar secara prinsip,
+bukan cuma kebetulan tidak bug: angka 0 yang asli TIDAK BOLEH pernah jatuh ke
+nilai fallback, hanya undefined/null yang boleh.
+
+==========================================
+2. DASHBOARD — 5 WIDGET BARU (routes/dashboard.js, views/dashboard/index.ejs,
+   services/serverMonitorService.js BARU)
+==========================================
+Ditempatkan dalam satu grid padat-informasi (3 kolom desktop, otomatis turun
+ke 1 kolom di HP) tepat di bawah baris status NOC yang sudah ada:
+
+  1. Target Penagihan & Collection Rate — progress bar realisasi penagihan
+     bulan berjalan + countdown hari menuju tanggal "closing" kas/isolir.
+     Tanggal closing dihitung dari Setting perusahaan (Jatuh Tempo + Grace
+     Days yang sudah ada di menu Pengaturan) — ini estimasi tingkat
+     perusahaan, bukan per-site (site berbeda bisa punya due day berbeda).
+
+  2. Distribusi Paket Internet — daftar mini progress-bar persentase
+     pelanggan AKTIF per paket (dari data packages+customers yang sudah ada,
+     tidak perlu tabel baru).
+
+  3. WA Gateway & Automation Queue Status — PENTING, mohon dibaca: sistem ini
+     BELUM memiliki koneksi gateway/API WhatsApp otomatis (tidak ada
+     integrasi semacam Baileys/Fonnte/Wablas di manapun pada kode). Reminder
+     WA yang ada saat ini dikirim MANUAL oleh staff lewat tombol wa.me di
+     menu Tagihan. Karena itu saya tidak mau memalsukan status "Connected"
+     yang tidak benar-benar terhubung ke apa pun — widget ini jujur
+     menampilkan "MODE MANUAL" beserta data real yang memang bisa diukur dari
+     database: jumlah nomor WA valid/invalid pelanggan, dan jumlah tagihan
+     yang jatuh tempo hari ini (antrean reminder yang perlu dikirim manual).
+     Kalau ke depannya Anda ingin pasang gateway WA sungguhan (Fonnte/Wablas/
+     dsb), beri tahu saya — widget ini tinggal disambungkan ke status live
+     yang sebenarnya begitu integrasinya ada.
+
+  4. Quick Action Launchpad — 4 tombol pintas: "+ Pelanggan Baru", "+ Input
+     Kas/Transaksi" (menu Arus Kas, hanya tampil untuk yang punya akses
+     finance), "WA Blast Pengingat" (ke daftar Tagihan bulan berjalan yang
+     masih terbuka, tempat tombol kirim WA per-pelanggan berada), dan
+     "Cek ODP Kosong" (ke menu Cluster/ODP, dengan angka badge jumlah ODP
+     yang masih ada slot kosong — dihitung dari kolom capacity_ports/
+     used_ports yang sudah ada di Cluster/ODP).
+
+  5. Local Billing Server Resource Monitor — meteran CPU, RAM, dan Disk
+     server Node.js lokal. Dibuat TANPA dependency npm baru, memakai modul
+     bawaan Node.js `os` (CPU dari load average, RAM dari total/free memory)
+     dan `fs.statfsSync` (disk usage pada partisi tempat aplikasi berjalan).
+     CPU% adalah estimasi (load average dibagi jumlah core, teknik umum yang
+     sama dipakai tool seperti `top`/`uptime`) — bukan pengukuran presisi
+     seperti APM/monitoring tool sungguhan, tapi cukup untuk gambaran cepat.
+     Kalau server dijalankan di Windows atau lingkungan yang membatasi akses
+     filesystem stats, widget akan menampilkan "-" untuk Disk alih-alih error.
+
+==========================================
+3. MENU PELANGGAN — DELETE SUDAH ADA DARI PATCH SEBELUMNYA (tidak diubah
+   struktur besarnya, hanya bug fix statistik di atas)
+==========================================
+Individual + bulk delete (Arsipkan vs Hapus Permanen) untuk Pelanggan sudah
+dikirim di patch v1.20.1 sebelumnya dan tetap dipakai. TENTANG "Safe
+Unlinking" yang Anda minta di instruksi (set customer_id = NULL di tagihan
+saat hapus permanen): setelah saya telusuri, tagihan/pembayaran DI SELURUH
+APLIKASI (menu Tagihan, Approval Pembayaran, Dashboard, Analitik, Laporan —
+lebih dari 20 query berbeda) memakai INNER JOIN ke tabel pelanggan, bukan
+LEFT JOIN. Kalau customer_id benar-benar di-NULL-kan, baris tagihan itu akan
+LANGSUNG HILANG dari semua laporan tsb (bukan cuma nama pelanggannya kosong)
+— termasuk diam-diam mengurangi angka pendapatan/omzet bulan itu di Dashboard
+tanpa ada yang sadar. Itu risikonya lebih besar daripada masalah yang mau
+diselesaikan. Karena itu saya PERTAHANKAN desain yang sudah ada dan sudah
+teruji: Hapus Permanen otomatis DIBLOKIR selama pelanggan masih punya
+riwayat tagihan (disarankan pakai Arsipkan Data, yang memang 100% menjaga
+riwayat keuangan tanpa risiko di atas). Kalau Anda tetap ingin versi
+"customer_id = NULL" yang sesungguhnya, itu perlu perubahan skema (kolom jadi
+nullable) + migrasi SEMUA query terkait ke LEFT JOIN + tampilan "Pelanggan
+Terhapus" di setiap tempat — pekerjaan besar tersendiri yang lebih aman
+dikerjakan terpisah dan diuji khusus. Beri tahu saya kalau ingin saya
+lanjutkan itu di patch berikutnya.
+
+==========================================
+4. MENU PAKET INTERNET — routes/packages.js, views/packages/index.ejs
+==========================================
+- Checkbox + tombol Hapus di setiap kartu paket, dan tombol "Hapus Massal"
+  di action bar saat ada paket terpilih.
+- Safety Validation: sebelum hapus, sistem cek apakah paket masih dipakai
+  pelanggan (SEMUA status, bukan cuma aktif — supaya tidak ada pelanggan yang
+  tabelnya jadi rusak/hilang karena referensi paket yatim). Kalau masih
+  dipakai, permintaan hapus ditolak dengan pesan yang menyarankan tombol
+  Aktif/Nonaktif (mekanisme "Arsip Paket" yang sudah ada sejak awal — paket
+  jadi NONAKTIF/tidak ditawarkan lagi tanpa memutus data pelanggan lama).
+
+==========================================
+5. AUDIT GLOBAL TOMBOL HAPUS (SEMUA MENU)
+==========================================
+Dibuat SATU modal konfirmasi hapus yang seragam (#simpleDeleteModal di
+views/partials/layout.ejs, dipakai lewat atribut data-simple-delete / data-
+simple-delete-bulk) sehingga semua menu di bawah ini punya pengalaman hapus
+yang konsisten dan responsive di HP:
+
+  - Site / POP (routes/sites.js, views/sites/index.ejs): SEBELUMNYA menu ini
+    TIDAK PUNYA fitur hapus maupun nonaktifkan sama sekali. Sekarang ada
+    toggle Aktif/Nonaktif + hapus individual/massal, dengan guard: site yang
+    masih punya pelanggan/router/cluster/paket tidak bisa dihapus permanen.
+  - Router Config (routes/routers.js, views/routers/index.ejs): hapus
+    individual sudah ada dan sudah benar (diblokir kalau masih dipakai
+    pelanggan) — ditambah checkbox + Hapus Massal yang sebelumnya belum ada.
+  - Tiket Gangguan (routes/tickets.js, views/tickets/index.ejs): SEBELUMNYA
+    TIDAK ADA fitur hapus sama sekali. Sekarang ada hapus individual + massal
+    (Admin only), termasuk membersihkan file lampiran foto tiket & lampiran
+    setiap update progress dari disk, bukan cuma baris databasenya.
+  - Tagihan/Invoice (routes/invoices.js, views/invoices/index.ejs): batalkan
+    & hapus individual sudah ada dan aman (terkunci transaksi database).
+    Ditambah Batalkan Massal & Hapus Massal — memakai proses kunci transaksi
+    yang SAMA PERSIS dengan versi individual (baris demi baris), jadi jaminan
+    keamanan finansialnya tidak berkurang sama sekali untuk aksi massal.
+  - Kas / Arus Kas (routes/finance.js): SUDAH DIPERIKSA dan TIDAK diubah —
+    menu ini sudah punya hapus individual + "Hapus Semua" per periode, dengan
+    guard yang benar (transaksi yang sudah APPROVED tidak bisa dihapus).
+    Sudah sesuai standar, tidak perlu perubahan.
+  - Cluster/ODP: sudah dikerjakan di patch v1.20.1 sebelumnya (guard delete
+    saat masih ada pelanggan terpasang), tidak diubah lagi di patch ini.
+
+DAFTAR FILE (20 file, semua kode utuh)
+-----------------------------------------
+  package.json
+  public/css/app.css
+  public/js/app.js
+  routes/customers.js
+  routes/dashboard.js
+  routes/invoices.js
+  routes/packages.js
+  routes/routers.js
+  routes/sites.js
+  routes/tickets.js
+  scripts/validate-v119.js
+  services/serverMonitorService.js (BARU)
+  views/customers/index.ejs
+  views/dashboard/index.ejs
+  views/invoices/index.ejs
+  views/packages/index.ejs
+  views/partials/layout.ejs
+  views/routers/index.ejs
+  views/sites/index.ejs
+  views/tickets/index.ejs
+
+TESTING YANG SUDAH DIJALANKAN
+-------------------------------
+  - node --check pada semua file .js yang diubah (syntax OK)
+  - npm run check (syntax seluruh routes/services/middleware/config) — OK
+  - node scripts/validate-static.js (38 EJS, 40 modal trigger, 82 form POST) — OK
+  - node scripts/validate-v119.js (9 grup kontrak, versi 1.21.0) — OK
+  - node scripts/test-infrastructure-proxy.js, test-cash-approval.js,
+    test-responsive-css.js — semua tetap OK (tidak ada regresi)
+  - Smoke test ejs.renderFile() terhadap 7 route handler asli (dashboard,
+    pelanggan, paket, site, tiket, router, tagihan) dengan DB di-mock —
+    semua render tanpa error runtime.
+  Catatan: tidak ada akses MySQL live di sandbox pengembangan ini — jalur
+  query SQL baru (guard site/paket/tiket, bulk delete, dsb) tetap perlu
+  dicoba sekali lagi di staging dengan data asli sebelum dipakai penuh di
+  production, terutama untuk skenario Hapus Massal dengan jumlah data besar.
+
+VERSI
+-----
+  package.json, footer "CONTROL CENTER v..." di views/partials/layout.ejs,
+  dan scripts/validate-v119.js dinaikkan bersama-sama ke v1.21.0.
