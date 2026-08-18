@@ -65,7 +65,9 @@ async function syncCustomerStatuses(secretRows) {
 async function routerSnapshot(router) {
   const started=Date.now();
   try {
-    const [resource,secrets,active,profiles,interfaces,customers]=await Promise.all([mt.testConnection(router),mt.listSecrets(router),mt.listActive(router),mt.listProfiles(router),mt.listInterfaces(router),customersForSite(router)]);
+    // v1.20: dropped mt.listInterfaces() — it only fed the removed "Live Traffic Interface"
+    // widget and added an extra RouterOS API round-trip per router on every 15s poll.
+    const [resource,secrets,active,profiles,customers]=await Promise.all([mt.testConnection(router),mt.listSecrets(router),mt.listActive(router),mt.listProfiles(router),customersForSite(router)]);
     const eligibleCustomers=customers.filter(x=>!x.router_id||Number(x.router_id)===Number(router.id));
     const activeMap=new Map(active.map(x=>[normalize(x.name),x])),linkedMap=new Map(eligibleCustomers.filter(x=>x.pppoe_username&&Number(x.router_id)===Number(router.id)).map(x=>[normalize(x.pppoe_username),x]));
     const baseSecretRows=secrets.map(secret=>{
@@ -84,10 +86,10 @@ async function routerSnapshot(router) {
     });
     const counts=secretRows.reduce((a,x)=>{a.total++;a[x.status]++;if(x.customer)a.linked++;else if(x.exempt)a.exempt++;else if(x.suggestions.length)a.suggested++;else a.unlinked++;return a;},{total:0,online:0,offline:0,isolated:0,linked:0,exempt:0,suggested:0,unlinked:0});
     await db.execute(`UPDATE routers SET last_status='online',last_error=NULL,last_seen_at=NOW() WHERE id=?`,[router.id]);
-    return {ok:true,id:router.id,name:router.name,siteCode:router.site_code,siteName:router.site_name,latencyMs:Date.now()-started,resource,counts,secrets:secretRows,profiles,unmatchedCustomers,interfaces:interfaces.map(x=>({...x,rxByte:Number(x['rx-byte']||0),txByte:Number(x['tx-byte']||0)}))};
+    return {ok:true,id:router.id,name:router.name,siteCode:router.site_code,siteName:router.site_name,latencyMs:Date.now()-started,resource,counts,secrets:secretRows,profiles,unmatchedCustomers};
   } catch(error) {
     await db.execute(`UPDATE routers SET last_status='offline',last_error=? WHERE id=?`,[error.message.slice(0,500),router.id]);
-    return {ok:false,id:router.id,name:router.name,siteCode:router.site_code,siteName:router.site_name,error:error.message,latencyMs:Date.now()-started,counts:{total:0,online:0,offline:0,isolated:0,linked:0,exempt:0,suggested:0,unlinked:0},secrets:[],profiles:[],interfaces:[],unmatchedCustomers:[]};
+    return {ok:false,id:router.id,name:router.name,siteCode:router.site_code,siteName:router.site_name,error:error.message,latencyMs:Date.now()-started,counts:{total:0,online:0,offline:0,isolated:0,linked:0,exempt:0,suggested:0,unlinked:0},secrets:[],profiles:[],unmatchedCustomers:[]};
   }
 }
 

@@ -19,13 +19,20 @@ function customerFilter(req) {
   return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', sales:req.query.sales||'', status:req.query.status||'', network:req.query.network||'' };
 }
 function customerSql(filters) {
-  let sql=`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,p.speed_label,r.name router_name,cl.name cluster_name,se.name sales_name,se.employee_code sales_code,(SELECT i.id FROM invoices i WHERE i.customer_id=c.id AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY i.period_year DESC,i.period_month DESC,i.id DESC LIMIT 1) open_invoice_id FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE 1=1`;
+  let sql=`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,p.speed_label,r.name router_name,cl.name cluster_name,se.name sales_name,se.employee_code sales_code,(SELECT i.id FROM invoices i WHERE i.customer_id=c.id AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY i.period_year DESC,i.period_month DESC,i.id DESC LIMIT 1) open_invoice_id,(SELECT COUNT(*) FROM invoices i2 WHERE i2.customer_id=c.id) has_invoice_count FROM customers c JOIN sites s ON s.id=c.site_id JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE 1=1`;
   const params=[];
   if(filters.q){sql+=` AND (c.customer_code LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ? OR c.pppoe_username LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;params.push(...Array(7).fill(`%${filters.q}%`));}
   if(filters.site){sql+=` AND s.code=?`;params.push(filters.site);}
   if(filters.cluster){sql+=` AND c.cluster_id=?`;params.push(Number(filters.cluster));}
   if(filters.sales){sql+=` AND c.sales_id=?`;params.push(Number(filters.sales));}
-  if(filters.status==='inactive'){sql+=` AND c.customer_status<>'active'`;}else if(filters.status){sql+=` AND c.customer_status=?`;params.push(filters.status);}
+  // v1.20: 'archived' is a pure visibility filter on archived_at (Data Diarsip tab), independent of
+  // customer_status. Any OTHER explicit status filter is respected exactly as before (archived rows
+  // included) so existing links/behaviour don't change. Only the truly-default "no filter" view hides
+  // archived rows, keeping the main list free of archived clutter per the Section 4 archive workflow.
+  if(filters.status==='archived'){sql+=` AND c.archived_at IS NOT NULL`;}
+  else if(filters.status==='inactive'){sql+=` AND c.customer_status<>'active'`;}
+  else if(filters.status){sql+=` AND c.customer_status=?`;params.push(filters.status);}
+  else {sql+=` AND c.archived_at IS NULL`;}
   if(filters.network==='unlinked'){sql+=` AND (c.pppoe_username IS NULL OR c.router_id IS NULL)`;}else if(filters.network==='problem'){sql+=` AND c.network_status IN ('offline','router_unreachable')`;}else if(['online','offline','isolated','router_unreachable'].includes(filters.network)){sql+=` AND c.network_status=?`;params.push(filters.network);}
   sql+=` ORDER BY c.id DESC`;
   return {sql,params};
@@ -100,8 +107,9 @@ router.get('/', async (req, res) => {
   const [sites]=await db.query(`SELECT code,name FROM sites ORDER BY code`);
   const [clusters]=await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const [sales]=await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales' ORDER BY e.name`);
-  const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated,SUM(customer_status='active' AND pppoe_username IS NOT NULL AND router_id IS NOT NULL) pppoe_linked,SUM(customer_status='active' AND (pppoe_username IS NULL OR router_id IS NULL)) pppoe_unlinked FROM customers`);
-  res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,sales,stats:stats||{},filters});
+  const [[stats]]=await db.query(`SELECT COUNT(*) total,SUM(customer_status='active') active,SUM(customer_status='suspended') suspended,SUM(network_status='isolated') isolated,SUM(customer_status='active' AND pppoe_username IS NOT NULL AND router_id IS NOT NULL) pppoe_linked,SUM(customer_status='active' AND (pppoe_username IS NULL OR router_id IS NULL)) pppoe_unlinked,SUM(archived_at IS NOT NULL) archived FROM customers`);
+  const [packages]=await db.query(`SELECT p.id,p.name,p.speed_label,p.price,p.site_id,s.code site_code FROM packages p LEFT JOIN sites s ON s.id=p.site_id WHERE p.is_active=1 ORDER BY COALESCE(s.code,'ZZZ'),p.price,p.name`);
+  res.render('customers/index',{title:'Pelanggan',customers,sites,clusters,sales,packages,stats:stats||{},filters});
 });
 
 const IMPORT_ALIASES={
@@ -359,6 +367,45 @@ router.post('/', async (req, res) => {
   await audit({userId:req.session.user.id,action:'create',entityType:'customer',entityId:result.insertId,description:`Tambah ${customerCode} - ${b.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan berhasil ditambahkan dengan Customer ID ${customerCode}.`};res.redirect('/customers');
 });
+// v1.20 — Section 3/4 bulk + archive routes. IMPORTANT: '/bulk' must be registered here, BEFORE the
+// generic 'router.post(\'/:id\', ...)' update route further down — otherwise Express would match
+// POST /customers/bulk as an update to a customer whose id is literally the string "bulk".
+router.post('/bulk',requireAdmin,async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.customer_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu pelanggan terlebih dahulu.'};return res.redirect('/customers');}
+  if(ids.length>500){req.session.flash={type:'danger',message:'Maksimal 500 pelanggan per aksi massal.'};return res.redirect('/customers');}
+  const placeholders=ids.map(()=>'?').join(',');
+  if(action==='archive'){
+    const [rows]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE id IN (${placeholders}) AND archived_at IS NULL`,ids);
+    if(!rows.length){req.session.flash={type:'warning',message:'Tidak ada pelanggan terpilih yang bisa diarsipkan (mungkin sudah diarsipkan).'};return res.redirect('/customers');}
+    const rowIds=rows.map(r=>r.id);const rowPlaceholders=rowIds.map(()=>'?').join(',');
+    await db.execute(`UPDATE customers SET status_changed_at=NOW(),customer_status='terminated',network_status='offline',archived_at=NOW() WHERE id IN (${rowPlaceholders})`,rowIds);
+    await audit({userId:req.session.user.id,action:'bulk_archive',entityType:'customer',entityId:null,description:`Arsip massal ${rows.length} pelanggan: ${rows.map(r=>r.customer_code).slice(0,20).join(', ')}${rows.length>20?', ...':''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${rows.length} pelanggan berhasil diarsipkan. Riwayat keuangan tetap aman.`};
+    return res.redirect('/customers');
+  }
+  if(action==='package'){
+    const packageId=Number(req.body.package_id||0);
+    if(!packageId){req.session.flash={type:'danger',message:'Pilih paket tujuan terlebih dahulu.'};return res.redirect('/customers');}
+    const [[pkg]]=await db.execute(`SELECT id,site_id,name FROM packages WHERE id=? AND is_active=1 LIMIT 1`,[packageId]);
+    if(!pkg){req.session.flash={type:'danger',message:'Paket tujuan tidak ditemukan / tidak aktif.'};return res.redirect('/customers');}
+    // Packages that are site-specific may only be applied to customers on that same site; global
+    // packages (site_id NULL) apply to any site. Mismatched customers are skipped, not silently forced.
+    const matchSql=pkg.site_id===null?`id IN (${placeholders})`:`id IN (${placeholders}) AND site_id=?`;
+    const matchParams=pkg.site_id===null?[...ids]:[...ids,pkg.site_id];
+    const [eligible]=await db.execute(`SELECT id,customer_code FROM customers WHERE ${matchSql}`,matchParams);
+    if(!eligible.length){req.session.flash={type:'warning',message:'Tidak ada pelanggan terpilih yang cocok dengan site paket tujuan.'};return res.redirect('/customers');}
+    const eligibleIds=eligible.map(r=>r.id);const eligiblePlaceholders=eligibleIds.map(()=>'?').join(',');
+    await db.execute(`UPDATE customers SET package_id=? WHERE id IN (${eligiblePlaceholders})`,[packageId,...eligibleIds]);
+    const skipped=ids.length-eligible.length;
+    await audit({userId:req.session.user.id,action:'bulk_change_package',entityType:'customer',entityId:null,description:`Ubah paket massal ${eligible.length} pelanggan ke ${pkg.name}${skipped?` (${skipped} dilewati karena site tidak cocok)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`Paket ${pkg.name} diterapkan ke ${eligible.length} pelanggan.${skipped?` ${skipped} pelanggan dilewati karena site tidak cocok dengan paket.`:''}`};
+    return res.redirect('/customers');
+  }
+  req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
+  res.redirect('/customers');
+});
 router.get('/:id/edit', async(req,res)=>{const [rows]=await db.execute(`SELECT * FROM customers WHERE id=?`,[req.params.id]);if(!rows.length)return res.status(404).send('Pelanggan tidak ditemukan');res.render('customers/form',{title:'Edit Pelanggan',customer:rows[0],...(await options())});});
 router.post('/:id',async(req,res)=>{
   const b=req.body; const customerCode=String(b.customer_code||'').trim().toUpperCase();
@@ -378,9 +425,34 @@ router.post('/:id/delete',requireAdmin,async(req,res)=>{
   const [rows]=await db.execute(`SELECT id,customer_code,name,customer_status FROM customers WHERE id=? LIMIT 1`,[req.params.id]);
   if(!rows.length){req.session.flash={type:'warning',message:'Pelanggan tidak ditemukan.'};return res.redirect('/customers');}
   const c=rows[0];
-  await db.execute(`UPDATE customers SET status_changed_at=NOW(),customer_status='terminated',network_status='offline' WHERE id=?`,[c.id]);
+  // v1.20: Archive is a pure visibility toggle (archived_at) on top of the pre-existing terminate
+  // lifecycle — financial/journal history is never touched, satisfying the Arsip vs Hapus Permanen rule.
+  await db.execute(`UPDATE customers SET status_changed_at=NOW(),customer_status='terminated',network_status='offline',archived_at=NOW() WHERE id=?`,[c.id]);
   await audit({userId:req.session.user.id,action:'archive',entityType:'customer',entityId:c.id,description:`Arsip pelanggan ${c.customer_code} - ${c.name}`,ip:req.ip});
-  req.session.flash={type:'success',message:`Pelanggan ${c.name} diarsipkan. Riwayat tagihan dan pembayaran tetap aman.`};
+  req.session.flash={type:'success',message:`Pelanggan ${c.name} diarsipkan. Riwayat tagihan dan pembayaran tetap aman, dan dapat dipulihkan dari tab Data Diarsip.`};
+  res.redirect('/customers');
+});
+router.post('/:id/restore',requireAdmin,async(req,res)=>{
+  const [rows]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE id=? AND archived_at IS NOT NULL LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'warning',message:'Pelanggan tidak ditemukan atau tidak sedang diarsipkan.'};return res.redirect('/customers?status=archived');}
+  const c=rows[0];
+  await db.execute(`UPDATE customers SET archived_at=NULL,customer_status='active',status_changed_at=NOW() WHERE id=?`,[c.id]);
+  await audit({userId:req.session.user.id,action:'restore',entityType:'customer',entityId:c.id,description:`Restore pelanggan ${c.customer_code} - ${c.name}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Pelanggan ${c.name} dipulihkan ke status Aktif.`};
+  res.redirect('/customers?status=archived');
+});
+router.post('/:id/hard-delete',requireAdmin,async(req,res)=>{
+  const [rows]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'warning',message:'Pelanggan tidak ditemukan.'};return res.redirect('/customers');}
+  const c=rows[0];
+  const [[bound]]=await db.execute(`SELECT COUNT(*) n FROM invoices WHERE customer_id=?`,[c.id]);
+  if(Number(bound?.n||0)>0){
+    req.session.flash={type:'danger',message:`Pelanggan ${c.name} sudah memiliki riwayat tagihan dan tidak dapat dihapus permanen. Gunakan Arsipkan Data.`};
+    return res.redirect('/customers');
+  }
+  await db.execute(`DELETE FROM customers WHERE id=?`,[c.id]);
+  await audit({userId:req.session.user.id,action:'hard_delete',entityType:'customer',entityId:c.id,description:`Hapus permanen pelanggan ${c.customer_code} - ${c.name}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Pelanggan ${c.name} dihapus permanen.`};
   res.redirect('/customers');
 });
 router.post('/:id/whatsapp-status',requireAdmin,async(req,res)=>{

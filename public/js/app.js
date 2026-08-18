@@ -177,6 +177,95 @@
   window.addEventListener('resize',closeActionPopover);
   document.addEventListener('scroll',closeActionPopover,true);
 
+  // v1.20 — shared Arsip vs Hapus Permanen modal. Any element with [data-delete-choice] plus
+  // data-archive-url (always) and data-hard-delete-url (only when the row is eligible) opens it.
+  const deleteChoiceModalEl=document.getElementById('deleteChoiceModal');
+  const deleteChoiceModal=deleteChoiceModalEl&&window.bootstrap?bootstrap.Modal.getOrCreateInstance(deleteChoiceModalEl):null;
+  const deleteChoiceArchiveForm=document.getElementById('deleteChoiceArchiveForm');
+  const deleteChoiceHardForm=document.getElementById('deleteChoiceHardForm');
+  const deleteChoiceArchiveBtn=document.getElementById('deleteChoiceArchiveBtn');
+  const deleteChoiceHardBtn=document.getElementById('deleteChoiceHardBtn');
+  document.addEventListener('click',event=>{
+    const trigger=event.target.closest('[data-delete-choice]');
+    if(!trigger||!deleteChoiceModal)return;
+    event.preventDefault();
+    closeActionPopover();
+    const archiveUrl=trigger.dataset.archiveUrl||'',hardUrl=trigger.dataset.hardDeleteUrl||'';
+    const label=trigger.dataset.entityLabel||'data ini';
+    const targetEl=document.getElementById('deleteChoiceTarget');if(targetEl)targetEl.textContent=label;
+    if(deleteChoiceArchiveForm)deleteChoiceArchiveForm.action=archiveUrl||'#';
+    if(deleteChoiceArchiveBtn)deleteChoiceArchiveBtn.disabled=!archiveUrl;
+    if(deleteChoiceHardForm)deleteChoiceHardForm.action=hardUrl||'#';
+    if(deleteChoiceHardBtn){deleteChoiceHardBtn.disabled=!hardUrl;deleteChoiceHardBtn.title=hardUrl?'':'Data ini masih terikat transaksi finansial / jurnal resmi dan tidak dapat dihapus permanen.';}
+    deleteChoiceModal.show();
+  });
+  deleteChoiceArchiveBtn?.addEventListener('click',()=>{if(!deleteChoiceArchiveForm?.action||deleteChoiceArchiveForm.action.endsWith('#'))return;if(!confirm('Arsipkan data ini? Riwayat tetap tersimpan dan dapat dipulihkan kapan saja dari tab Data Diarsip.'))return;deleteChoiceArchiveForm.submit();});
+  deleteChoiceHardBtn?.addEventListener('click',()=>{if(!deleteChoiceHardForm?.action||deleteChoiceHardForm.action.endsWith('#'))return;if(!confirm('Hapus PERMANEN data ini? Tindakan ini tidak dapat dibatalkan.'))return;deleteChoiceHardForm.submit();});
+
+  // v1.20 — generic checkbox select-all + floating bulk action bar, used by [data-bulk-scope].
+  document.querySelectorAll('[data-bulk-scope]').forEach(scope=>{
+    const selectAll=scope.querySelector('[data-select-all]');
+    const rowChecks=()=>[...scope.querySelectorAll('[data-row-check]')];
+    const bar=document.getElementById(scope.dataset.bulkScope);
+    const countEl=bar?.querySelector('[data-bulk-count]');
+    const updateBar=()=>{
+      const checked=rowChecks().filter(c=>c.checked);
+      if(bar)bar.hidden=!checked.length;
+      if(countEl)countEl.textContent=checked.length;
+      if(selectAll){const all=rowChecks();selectAll.checked=all.length>0&&checked.length===all.length;selectAll.indeterminate=checked.length>0&&checked.length<all.length;}
+    };
+    selectAll?.addEventListener('change',()=>{rowChecks().forEach(c=>c.checked=selectAll.checked);updateBar();});
+    scope.addEventListener('change',event=>{if(event.target.matches('[data-row-check]'))updateBar();});
+    bar?.querySelector('[data-bulk-clear]')?.addEventListener('click',()=>{rowChecks().forEach(c=>c.checked=false);updateBar();});
+    scope._bulkSelectedIds=()=>rowChecks().filter(c=>c.checked).map(c=>c.value);
+    updateBar();
+  });
+
+  // v1.20 — Customers bulk actions (Section 3): bulk archive, WA reminder shortcuts, bulk change package.
+  const customerBulkScope=document.querySelector('[data-bulk-scope="customerBulkBar"]');
+  if(customerBulkScope){
+    const csrfTokenMeta=document.querySelector('meta[name="csrf-token"]')?.content||'';
+    const submitCustomerBulk=(action,extra={})=>{
+      const ids=customerBulkScope._bulkSelectedIds();
+      if(!ids.length)return;
+      const form=document.createElement('form');
+      form.method='post';form.action='/customers/bulk';form.style.display='none';
+      const addField=(name,value)=>{const field=document.createElement('input');field.type='hidden';field.name=name;field.value=value;form.appendChild(field);};
+      addField('_csrf',csrfTokenMeta);addField('action',action);
+      ids.forEach(id=>addField('customer_ids[]',id));
+      Object.entries(extra).forEach(([key,value])=>addField(key,value));
+      document.body.appendChild(form);form.submit();
+    };
+    document.getElementById('customerBulkArchive')?.addEventListener('click',()=>{
+      const count=customerBulkScope._bulkSelectedIds().length;
+      if(!count)return;
+      if(!confirm(`Arsipkan ${count} pelanggan terpilih? Riwayat tagihan & pembayaran tetap aman dan dapat dipulihkan dari tab Data Diarsip.`))return;
+      submitCustomerBulk('archive');
+    });
+    document.getElementById('customerBulkPackageSubmit')?.addEventListener('click',()=>{
+      const select=document.getElementById('customerBulkPackageSelect');
+      if(!select?.value){alert('Pilih paket tujuan terlebih dahulu.');return;}
+      const count=customerBulkScope._bulkSelectedIds().length;
+      if(!count)return;
+      if(!confirm(`Ubah paket ${count} pelanggan terpilih ke paket yang dipilih? Pelanggan pada site yang tidak cocok akan dilewati.`))return;
+      submitCustomerBulk('package',{package_id:select.value});
+      bootstrap.Modal.getOrCreateInstance(document.getElementById('customerBulkPackageModal'))?.hide();
+    });
+    document.getElementById('customerBulkWa')?.addEventListener('click',()=>{
+      const ids=new Set(customerBulkScope._bulkSelectedIds());
+      const rows=[...document.querySelectorAll('[data-customer-row]')].filter(row=>ids.has(row.dataset.customerRow));
+      const list=document.getElementById('customerBulkWaList');
+      const withWa=rows.filter(row=>row.dataset.customerWa);
+      if(list)list.innerHTML=withWa.length?withWa.map(row=>{
+        const message=`Halo ${row.dataset.customerName}, ini pengingat dari INKAMNET mengenai layanan internet Anda. Mohon segera hubungi kami bila ada kendala pembayaran atau layanan. Terima kasih.`;
+        return `<a href="https://wa.me/${row.dataset.customerWa}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer"><span class="psb-avatar">${(row.dataset.customerName||'?').charAt(0).toUpperCase()}</span><div><strong>${row.dataset.customerName}</strong><small>${row.dataset.customerCode}</small></div><i class="bi bi-whatsapp"></i></a>`;
+      }).join(''):'<div class="ink-empty">Pelanggan terpilih tidak memiliki nomor WhatsApp yang tervalidasi.</div>';
+      const totalEl=document.getElementById('customerBulkWaTotal');if(totalEl)totalEl.textContent=withWa.length;
+      const modalEl=document.getElementById('customerBulkWaModal');
+      if(modalEl&&window.bootstrap)bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    });
+  }
+
   // Header command center: approval/operational notifications and internal user messages.
   const notificationList=document.getElementById('headerNotificationList');
   const messageList=document.getElementById('headerMessageList');

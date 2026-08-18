@@ -374,17 +374,21 @@ async function ensureV27Schema() {
   )`);
 }
 
-async function ensureV28Schema() {
-  // Hourly aggregate samples power the MikroTik PPPoE Analytics 24h active-users trend chart.
-  await db.query(`CREATE TABLE IF NOT EXISTS pppoe_hourly_samples (
-    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    sampled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    online_count INT UNSIGNED NOT NULL DEFAULT 0,
-    offline_count INT UNSIGNED NOT NULL DEFAULT 0,
-    isolated_count INT UNSIGNED NOT NULL DEFAULT 0,
-    total_count INT UNSIGNED NOT NULL DEFAULT 0,
-    INDEX idx_pppoe_hourly_samples_time (sampled_at)
-  )`);
+async function ensureV29Schema() {
+  // v1.20 — Archive (soft-delete) columns for the Arsip vs Hapus Permanen workflow.
+  // Archiving only sets archived_at (financial/history data is never touched); Restore
+  // clears it. Hard delete stays a completely separate, guarded action per entity route.
+  await db.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL AFTER status_changed_at`);
+  await db.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL`);
+  await db.query(`ALTER TABLE clusters ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL`);
+  await db.query(`ALTER TABLE packages ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL`);
+  await db.query(`ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL`);
+  await db.query(`ALTER TABLE customers ADD INDEX IF NOT EXISTS idx_customers_archived (archived_at)`);
+  await db.query(`ALTER TABLE invoices ADD INDEX IF NOT EXISTS idx_invoices_archived (archived_at)`);
+  await db.query(`ALTER TABLE clusters ADD INDEX IF NOT EXISTS idx_clusters_archived (archived_at)`);
+  // Backfill: customers already archived under the old "terminated + no undo" flow become
+  // visible in the new "Data Diarsip" tab immediately, instead of silently disappearing.
+  await db.query(`UPDATE customers SET archived_at=COALESCE(status_changed_at,NOW()) WHERE customer_status='terminated' AND archived_at IS NULL`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV28Schema };
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema };

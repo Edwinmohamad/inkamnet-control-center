@@ -48,7 +48,6 @@
   </div>
 
   <article class="psb-hero-v119">
-    <div class="psb-hero-glow" aria-hidden="true"></div>
     <div class="psb-hero-copy"><span class="psb-hero-icon"><i class="bi bi-person-plus-fill"></i></span><div><small>TRAFFIC PSB · PEMASANGAN BARU</small><h2>Pertumbuhan pelanggan hari ini dan bulan berjalan</h2><p><%= psbSiteCode||'Semua Site' %> · <%= monthNames[psbMonth-1] %> <%= psbYear %></p></div></div>
     <div class="psb-hero-metrics"><button type="button" data-bs-toggle="modal" data-bs-target="#psbCustomerModal"><span>Traffic PSB Hari Ini</span><strong><%= Number(psbToday.total||0) %></strong><small>aktivasi / registrasi hari ini</small></button><button type="button" data-bs-toggle="modal" data-bs-target="#psbCustomerModal"><span>Total PSB Bulan Ini</span><strong><%= Number(newCustomers.total||0) %></strong><small><%= monthNames[psbMonth-1] %> <%= psbYear %></small></button></div>
     <div class="psb-hero-chart"><canvas id="commandPsbChart"></canvas></div>

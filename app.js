@@ -24,7 +24,7 @@ const { requireAuth, loadPermissions, requirePermission } = require('./middlewar
 const { generateMonthlyInvoices } = require('./services/invoiceService');
 const { runAutoIsolation } = require('./services/networkService');
 const { purgeOldLogs } = require('./services/logRetentionService');
-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV28Schema } = require('./services/schemaService');
+const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema } = require('./services/schemaService');
 
 const app = express();
 const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
@@ -192,7 +192,6 @@ app.use('/payments', requireAuth, requirePermission('billing'), require('./route
 app.use('/reports', requireAuth, requirePermission('reports'), require('./routes/reports'));
 app.use('/routers', requireAuth, requirePermission('network'), require('./routes/routers'));
 app.use('/network', requireAuth, requirePermission('network'), require('./routes/network'));
-app.use('/mikrotik', requireAuth, requirePermission('network'), require('./routes/mikrotik'));
 app.use('/settings', requireAuth, requirePermission('settings'), require('./routes/settings'));
 app.use('/profile', requireAuth, require('./routes/profile'));
 app.use('/communication', requireAuth, require('./routes/communication'));
@@ -238,7 +237,7 @@ async function bootstrap() {
   await ensureV25Schema();
   await ensureV26Schema();
   await ensureV27Schema();
-  await ensureV28Schema();
+  await ensureV29Schema();
   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
   if (Number(rows[0].total) === 0) {
     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';

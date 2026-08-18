@@ -1,0 +1,167 @@
+INKAMNET CONTROL CENTER — PATCH v1.20.0
+==========================================
+Tanggal: 2026-08-18
+Paket ini berisi SELURUH file yang berubah (kode utuh, bukan potongan) untuk
+di-copy-paste langsung ke root repository lokal Anda, menimpa file lama.
+
+CARA PAKAI
+----------
+1. Backup dulu folder project & database Anda.
+2. Extract isi zip ini ke root folder project (struktur folder sama persis:
+   routes/, services/, views/, public/, scripts/, app.js, package.json).
+   Timpa (overwrite) file yang sudah ada.
+3. Jalankan `npm install` bila diperlukan (tidak ada dependency baru yang
+   ditambahkan pada patch ini).
+4. Restart aplikasi (pm2 restart / node app.js).
+5. Hard-refresh browser (Ctrl+Shift+R) agar app.css & app.js versi baru ter-load.
+
+RINGKASAN PER-SECTION (sesuai brief revisi)
+--------------------------------------------
+
+SECTION 1 — MikroTik NMS Consolidation & Refactor  [SELESAI]
+  Menu "MikroTik PPPoE" terpisah sudah dihapus total dari sidebar — hanya ada
+  satu menu "MikroTik NMS" (Router, PPPoE & Sync Audit terpusat) di
+  views/partials/layout.ejs, mengarah ke /network/monitor.
+  Widget "Live Traffic Interface" (chart RX/TX per-interface) DIHAPUS 100%
+  dari public/js/nms.js dan public/css/app.css — ini yang paling banyak makan
+  CPU/berat di browser. Semua fungsi terkait (processTraffic, selectedRate,
+  drawChart) dan CSS-nya (.nms-traffic-*, .nms-router-row, .nms-live-capture,
+  dll) sudah dibuang.
+  Halaman /network/monitor sekarang pakai Tab Navigation (Vanilla JS, tanpa
+  framework tambahan) dengan 3 tab:
+    - Router System Monitoring (CPU/Memory/Disk/Uptime/RouterOS per unit)
+    - PPPoE Configuration & Active Monitoring
+    - PPPoE Synchronization Center — audit Billing vs Router dengan 3 badge:
+        Synced (hijau), Missing in Router (kuning), Rogue/Ilegal (merah)
+  File terkait: public/js/nms.js, public/css/app.css, views/network/monitor.ejs,
+  services/nmsService.js, views/partials/layout.ejs.
+
+SECTION 2 — Dashboard Compact Re-layout & Widget PSB Subtil  [SELESAI]
+  Widget "Piket Minggu Ini" sudah tidak ada (sudah dihapus di iterasi
+  sebelumnya, dikonfirmasi ulang tidak muncul lagi).
+  Widget Traffic PSB (psb-hero) di-redesign total agar TIDAK flashy: gradient
+  biru-ungu terang + efek glow neon + glassmorphism dihapus, diganti warna
+  netral slate/indigo lembut mengikuti palet tema aplikasi (variabel CSS
+  --panel/--panel-2/--line/--text yang sudah theme-aware light/dark), ukuran
+  font & elemen sedikit diperkecil supaya tidak menonjol dibanding widget lain.
+  Running Ticker (info user login) TIDAK diubah sama sekali sesuai instruksi.
+  File terkait: public/css/app.css, views/dashboard/index.ejs.
+
+SECTION 3 — Menu Pelanggan: Checkbox & Bulk Actions  [SELESAI]
+  Tabel Pelanggan sekarang punya checkbox "select all" di header + checkbox
+  per baris. Begitu >=1 baris dicentang, muncul Action Bar mengambang di
+  bawah layar dengan 3 aksi massal:
+    - Arsipkan Massal (soft delete, lihat Section 4)
+    - Kirim WA Reminder Massal (modal daftar link wa.me per pelanggan yang
+      punya no. WA — jujur: aplikasi ini tidak punya gateway WA server-side,
+      jadi ini generate deep-link wa.me per kontak, bukan pura-pura kirim
+      otomatis)
+    - Ubah Paket Massal (dropdown paket, otomatis skip pelanggan yang paketnya
+      tidak cocok dengan site mereka, jumlah yang di-skip dilaporkan di flash
+      message + audit log)
+  Setiap baris tetap punya tombol individual Edit dan Arsip/Hapus (mengikuti
+  pola modal pilihan di Section 4).
+  File terkait: views/customers/index.ejs, routes/customers.js
+  (POST /customers/bulk), public/js/app.js, public/css/app.css.
+
+SECTION 4 — Sistem Arsip vs Hapus Permanen & Restore  [PELANGGAN: SELESAI,
+                                                        LAINNYA: BELUM]
+  Sudah diimplementasikan PENUH untuk PELANGGAN:
+    - Kolom baru `archived_at` (timestamp) dipakai sebagai status arsip murni,
+      terpisah dari status bisnis pelanggan (active/suspended/terminated) —
+      supaya riwayat tagihan/kas tidak pernah berubah hanya karena diarsipkan.
+    - Modal pilihan hapus (shared, dipakai lewat atribut data-delete-choice di
+      views/partials/layout.ejs + logic di public/js/app.js) menampilkan 2
+      opsi: "Arsipkan Data (Soft Delete)" [Rekomendasi Utama] vs "Hapus
+      Permanen (Hard Delete)" — opsi Hard Delete otomatis DIKUNCI/disabled
+      kalau pelanggan tsb sudah punya riwayat tagihan (invoice), untuk
+      mencegah data finansial hilang.
+    - Tab "Data Diarsip" di halaman Pelanggan (?status=archived) menampilkan
+      pelanggan yang diarsipkan, lengkap dengan tombol Restore.
+    - Endpoint baru: POST /customers/:id/restore, POST /customers/:id/hard-delete.
+  BELUM diimplementasikan pada patch ini (lihat "BELUM SELESAI" di bawah):
+  Tagihan/Kas, ODP/Cluster, Paket — masih pakai mekanisme delete lama.
+
+  BONUS FIX (di luar brief, ditemukan saat mengaudit Section 4): dua bug
+  keamanan data di routes/finance.js — sebelumnya transaksi kas yang statusnya
+  sudah APPROVED (bagian resmi jurnal kas) BISA dihapus permanen tanpa guard,
+  baik lewat hapus satuan (/cash/:id/delete) maupun hapus massal per-periode
+  (/cash/delete-all). Sekarang keduanya memblokir penghapusan transaksi
+  APPROVED dan melaporkan jumlah yang di-skip.
+
+SECTION 5 — Audit Tombol Hapus & Kerapihan Global  [BELUM DIKERJAKAN SEBAGAI
+                                                     SWEEP TERPISAH]
+  Belum dilakukan audit menyeluruh dedicated untuk semua menu (Dashboard,
+  Approval Kas-Tagihan, Analitik, Infrastructure Hub, ODP/Site, MikroTik NMS).
+  Konsistensi yang didapat sejauh ini murni efek samping dari Section 1-4.
+
+CATATAN JUJUR — YANG BELUM SELESAI DARI 5 SECTION BRIEF
+--------------------------------------------------------
+Supaya tidak menyesatkan, berikut yang MASIH PERLU dikerjakan di iterasi
+berikutnya (belum ada di patch v1.20.0 ini):
+  1. Invoices/Tagihan: belum ada tab "Data Diarsip" + restore di
+     views/invoices/index.ejs (masih pakai delete lama).
+  2. ODP/Cluster: routes/clusters.js belum punya guarded delete/arsip/restore,
+     views/clusters/index.ejs belum punya kolom aksi & tab arsip.
+  3. Paket: routes/packages.js SAAT INI TIDAK PUNYA route delete sama sekali
+     — perlu ditambahkan guarded delete/arsip + views/packages/index.ejs.
+  4. Kas (Cash): guard hard-delete transaksi APPROVED sudah diperbaiki
+     (lihat Section 4 bonus fix), tapi UI arsip/restore untuk transaksi kas
+     belum dibuat.
+  5. Section 5 (audit visual/konsistensi tombol hapus di SEMUA menu) belum
+     dikerjakan sebagai sweep tersendiri.
+Rekomendasi: jadikan ini prioritas iterasi berikutnya (v1.21.0), memakai pola
+yang sama persis dengan Pelanggan (kolom archived_at + modal pilihan
+data-delete-choice + tab Data Diarsip) supaya konsisten.
+
+DAFTAR FILE DALAM PATCH INI (19 file, semua kode utuh)
+-------------------------------------------------------
+  app.js
+  package.json
+  public/css/app.css
+  public/js/app.js
+  public/js/nms.js
+  routes/analytics.js
+  routes/customers.js
+  routes/finance.js
+  routes/payments.js
+  scripts/validate-v119.js
+  services/analyticsService.js
+  services/nmsService.js
+  services/schemaService.js
+  views/analytics/index.ejs
+  views/customers/index.ejs
+  views/dashboard/index.ejs
+  views/network/monitor.ejs
+  views/partials/layout.ejs
+  views/payments/index.ejs
+
+CATATAN TAMBAHAN (di luar 5 section, perubahan yang sudah ada sebelum sesi
+revisi ini dimulai dan ikut terbawa dalam file yang sama):
+  - routes/analytics.js / services/analyticsService.js / views/analytics/index.ejs:
+    penambahan endpoint "Generate Laporan Analitik" (GET /analytics/export-report)
+    untuk modal unduh/print laporan.
+  - routes/payments.js / views/payments/index.ejs: banner peringatan baru untuk
+    pembayaran transfer/QRIS yang sudah disetujui tapi belum ada bukti upload.
+
+TESTING YANG SUDAH DIJALANKAN
+-------------------------------
+  - node --check pada semua file .js yang diubah (syntax OK)
+  - npm run check (syntax seluruh routes/services/middleware/config)
+  - node scripts/validate-static.js (38 EJS file, 40 modal trigger, 79 form
+    POST, action popover — semua OK)
+  - node scripts/validate-v119.js (9 grup kontrak, termasuk versi 1.20.0 — OK)
+  - node scripts/test-responsive-css.js (breakpoint desktop/tablet/mobile — OK)
+  - node scripts/test-cash-approval.js (approve/reject/duplicate-guard — OK)
+  - node scripts/test-infrastructure-proxy.js (proxy header/path — OK)
+  - Smoke test ejs.renderFile() langsung memanggil route handler asli
+    (dashboard, customers default & ?status=archived, network/monitor,
+    analytics) dengan DB yang di-mock — semua render tanpa error runtime.
+  Catatan: tidak ada akses MySQL/MikroTik live di sandbox pengembangan ini,
+  jadi pengujian query SQL & koneksi router nyata tetap perlu dicoba di
+  environment staging/production Anda sebelum dipakai penuh.
+
+VERSI
+-----
+  package.json dan footer "CONTROL CENTER v..." di views/partials/layout.ejs
+  sudah dinaikkan bersama-sama ke v1.20.0.

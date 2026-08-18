@@ -99,8 +99,7 @@
           <a class="sidebar-link <%= currentPath.startsWith('/sites') ? 'active' : '' %>" href="/sites"><i class="bi bi-hdd-rack-fill"></i><span><%= t('sites') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/routers') ? 'active' : '' %>" href="/routers"><i class="bi bi-router-fill"></i><span><%= t('routers') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/clusters') ? 'active' : '' %>" href="/clusters"><i class="bi bi-diagram-3-fill"></i><span><%= t('clusters') %></span></a>
-          <a class="sidebar-link <%= currentPath.startsWith('/network/monitor') ? 'active' : '' %>" href="/network/monitor"><i class="bi bi-activity"></i><span><%= t('monitor') %></span></a>
-          <a class="sidebar-link <%= currentPath.startsWith('/mikrotik') ? 'active' : '' %>" href="/mikrotik"><i class="bi bi-broadcast-pin"></i><span>MikroTik PPPoE</span></a>
+          <a class="sidebar-link <%= currentPath.startsWith('/network/monitor') ? 'active' : '' %>" href="/network/monitor"><i class="bi bi-broadcast-pin"></i><span><%= t('monitor') %></span></a>
           <details class="sidebar-nav-group infra-sidebar-group" <%= currentPath.startsWith('/network/tools') ? 'open' : '' %>>
             <summary class="sidebar-link <%= currentPath.startsWith('/network/tools') ? 'active' : '' %>"><i class="bi bi-grid-1x2-fill"></i><span>Infrastructure Hub</span><em><i class="bi bi-chevron-down"></i></em></summary>
             <div class="sidebar-subnav infra-sidebar-subnav"><a href="/network/tools"><i class="bi bi-grid"></i>Workspace Overview</a><a href="/network/tools?group=server"><i class="bi bi-server"></i>Server & OS</a><a href="/network/tools?group=management"><i class="bi bi-router-fill"></i>TR-069 & Management</a><a href="/network/tools?group=containers"><i class="bi bi-box-seam-fill"></i>Container Services</a></div>
@@ -128,7 +127,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.19.0</span>
+        <span class="version-pill">CONTROL CENTER v1.20.0</span>
       </div>
     </aside>
 
@@ -177,6 +176,24 @@
 
   <div class="modal fade" id="headerMessageViewModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><div><div class="module-kicker" id="headerMessageSender">PESAN TIM</div><h5 class="modal-title" id="headerMessageSubject">Pesan</h5><small class="text-secondary" id="headerMessageTime">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="header-message-body" id="headerMessageBody"></div></div><div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Tutup</button><button type="button" class="btn-tech primary" id="headerMessageReply"><i class="bi bi-reply-fill"></i>Balas</button></div></div></div></div>
 
+  <!-- v1.20 — shared Arsip vs Hapus Permanen confirmation, reused by any [data-delete-choice] trigger. -->
+  <div class="modal fade" id="deleteChoiceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content nms-modal">
+        <div class="modal-header"><div><div class="module-kicker">HAPUS DATA</div><h5 class="modal-title">Arsipkan atau Hapus Permanen?</h5><small class="text-secondary" id="deleteChoiceTarget">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="nms-action-choice">
+            <button type="button" id="deleteChoiceArchiveBtn"><i class="bi bi-archive-fill"></i><span><b>Arsipkan Data (Soft Delete)</b><small>Rekomendasi utama. Status berubah menjadi ARSIP — riwayat keuangan &amp; jurnal kas tetap terjaga untuk audit.</small></span></button>
+            <button type="button" class="danger" id="deleteChoiceHardBtn"><i class="bi bi-trash3-fill"></i><span><b>Hapus Permanen (Hard Delete)</b><small>Hanya diizinkan jika data belum terikat transaksi finansial / jurnal resmi.</small></span></button>
+          </div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button></div>
+        <form method="post" id="deleteChoiceArchiveForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
+        <form method="post" id="deleteChoiceHardForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
+      </div>
+    </div>
+  </div>
+
   <div class="command-palette" id="commandPalette" aria-hidden="true">
     <div class="command-backdrop" data-command-close></div>
     <div class="command-dialog">
@@ -189,7 +206,7 @@
         <% if(can('support')){ %><a href="/server-duty" data-keywords="piket server jadwal shift"><i class="bi bi-shield-check"></i><div><strong>Piket Server</strong><small>Jadwal piket mingguan</small></div><span>→</span></a>
         <a href="/tickets" data-keywords="tiket gangguan teknisi"><i class="bi bi-life-preserver"></i><div><strong>Ticketing</strong><small>Keluhan & pekerjaan teknisi</small></div><span>→</span></a>
         <a href="/team-kpi" data-keywords="kpi tim teknisi staff performance"><i class="bi bi-bar-chart-steps"></i><div><strong>KPI Tim</strong><small>Performa teknisi & staff</small></div><span>→</span></a><% } %>
-        <% if(can('network')){ %><a href="/network/tools" data-keywords="infrastructure proxmox casaos genieacs portainer server"><i class="bi bi-grid-1x2-fill"></i><div><strong>Infrastructure Hub</strong><small>Server, TR-069 & container services</small></div><span>→</span></a><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><a href="/mikrotik" data-keywords="mikrotik pppoe analytics sesi kick rogue sync audit"><i class="bi bi-broadcast-pin"></i><div><strong>MikroTik PPPoE</strong><small>Analytics, sesi aktif & sync audit</small></div><span>→</span></a><% } %>
+        <% if(can('network')){ %><a href="/network/tools" data-keywords="infrastructure proxmox casaos genieacs portainer server"><i class="bi bi-grid-1x2-fill"></i><div><strong>Infrastructure Hub</strong><small>Server, TR-069 & container services</small></div><span>→</span></a><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router pppoe sync audit rogue"><i class="bi bi-broadcast-pin"></i><div><strong>MikroTik NMS</strong><small>Router, PPPoE & Sync Audit terpusat</small></div><span>→</span></a><% } %>
         <% if(can('warehouse')){ %><a href="/inventory" data-keywords="gudang stock barang"><i class="bi bi-box-seam-fill"></i><div><strong>Stock Gudang</strong><small>Warehouse control</small></div><span>→</span></a><% } %>
         <% if(can('finance')){ %><a href="/analytics" data-keywords="analitik finance psb mrr cashflow odp"><i class="bi bi-graph-up-arrow"></i><div><strong>Analitik Keuangan & PSB</strong><small>Executive, finance, PSB & infrastruktur</small></div><span>→</span></a><a href="/cash" data-keywords="kas uang pendapatan pengeluaran"><i class="bi bi-cash-stack"></i><div><strong>Arus Kas</strong><small>Income & expense</small></div><span>→</span></a><% } %>
         <% if(can('reports')){ %><a href="/reports" data-keywords="laporan report site"><i class="bi bi-bar-chart-line-fill"></i><div><strong>Laporan</strong><small>Billing, finance & site</small></div><span>→</span></a><% } %>

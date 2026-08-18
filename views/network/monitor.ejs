@@ -5,9 +5,9 @@
 
   <div class="module-head nms-hero nms-hero-v118">
     <div>
-      <div class="module-kicker"><span class="nms-live-dot"></span> CUSTOMER NETWORK OPERATIONS</div>
-      <h1>MikroTik NMS <em>// PPPoE CONTROL</em></h1>
-      <p>Fokus monitoring pelanggan, rekonsiliasi billing ↔ MikroTik, dan tindakan PPPoE dari satu dashboard.</p>
+      <div class="module-kicker"><span class="nms-live-dot"></span> MIKROTIK NMS · JARINGAN TERPUSAT</div>
+      <h1>MikroTik NMS <em>// ROUTER · PPPoE · SYNC AUDIT</em></h1>
+      <p>Satu menu untuk monitoring router, konfigurasi &amp; sesi aktif PPPoE, dan audit sinkronisasi billing ↔ MikroTik.</p>
     </div>
     <div class="module-actions nms-main-actions">
       <button class="btn-tech" id="nmsRefresh"><i class="bi bi-arrow-clockwise"></i><span>Refresh NMS</span></button>
@@ -25,77 +25,94 @@
     <button type="button" data-status-quick="offline"><span class="nms-orbit offline"><i></i></span><small>PELANGGAN OFFLINE</small><strong id="nmsOfflineCount">0</strong><em>lihat →</em></button>
     <button type="button" data-status-quick="isolated"><span class="nms-orbit isolated"><i></i></span><small>ISOLIR</small><strong id="nmsIsolatedCount">0</strong><em>lihat →</em></button>
     <div><span class="nms-orbit linked"><i></i></span><small>LINK BILLING</small><strong id="nmsLinkedCount">0</strong></div>
-    <button type="button" data-unmatched-open><span class="nms-orbit offline"><i></i></span><small>BELUM SINKRON</small><strong id="nmsUnmatchedCount">0</strong><em>review →</em></button>
+    <button type="button" data-nms-tab-open="sync"><span class="nms-orbit offline"><i></i></span><small>BELUM SINKRON</small><strong id="nmsUnmatchedCount">0</strong><em>review →</em></button>
   </div>
 
-  <div class="nms-site-tabs" role="tablist">
+  <div class="nms-site-tabs" role="tablist" aria-label="Filter site router">
     <button class="active" data-site="all"><i class="bi bi-grid-fill"></i> Semua Site</button>
     <% sites.forEach(site=>{ %><button data-site="<%= site.code %>"><span></span><%= site.code %><small><%= site.name %></small></button><% }) %>
   </div>
 
-  <div class="nms-focus-grid">
-    <article class="nms-focus-card customer-health">
-      <div class="nms-focus-head"><div><span>LIVE CUSTOMER HEALTH</span><h3>Status Pelanggan PPPoE</h3></div><div class="nms-focus-total"><small>TOTAL TERPANTAU</small><b id="nmsCustomerTotal">0</b></div></div>
-      <div class="nms-customer-health-list">
-        <button type="button" data-status-quick="online"><span><i class="online"></i><b>Online</b></span><strong id="nmsOnlineFocus">0</strong><div><i id="nmsOnlineBar"></i></div></button>
-        <button type="button" data-status-quick="offline"><span><i class="offline"></i><b>Offline</b></span><strong id="nmsOfflineFocus">0</strong><div><i id="nmsOfflineBar"></i></div></button>
-        <button type="button" data-status-quick="isolated"><span><i class="isolated"></i><b>Isolir</b></span><strong id="nmsIsolatedFocus">0</strong><div><i id="nmsIsolatedBar"></i></div></button>
-      </div>
-      <div class="nms-focus-foot"><i class="bi bi-broadcast-pin"></i><span>Telemetry terakhir <b id="nmsLastSync">Menghubungkan…</b></span></div>
-    </article>
+  <!-- ===================== CONTENT TABS (Vanilla JS) ===================== -->
+  <nav class="nms-content-tabs" role="tablist" aria-label="Modul MikroTik NMS">
+    <button class="active" data-nms-tab="router"><i class="bi bi-hdd-rack-fill"></i>Monitoring Router</button>
+    <button data-nms-tab="pppoe"><i class="bi bi-router-fill"></i>PPPoE Config &amp; Aktif</button>
+    <button data-nms-tab="sync"><i class="bi bi-arrow-repeat"></i>Sync &amp; Audit</button>
+  </nav>
 
-    <article class="nms-focus-card sync-health">
-      <div class="nms-focus-head"><div><span>BILLING ↔ MIKROTIK</span><h3>Health Sinkronisasi</h3></div><span class="nms-sync-grade" id="nmsSyncGrade">CHECKING</span></div>
-      <div class="nms-sync-health-body">
-        <div class="nms-sync-ring" id="nmsSyncCoverageRing" style="--coverage:0"><span><b id="nmsSyncCoverage">0%</b><small>SYNC</small></span></div>
-        <div class="nms-sync-health-stats">
-          <span><small>Terhubung Billing</small><b id="nmsLinkedFocus">0</b></span>
-          <span><small>Belum Sinkron</small><b id="nmsUnmatchedFocus">0</b></span>
-          <span><small>Kandidat Aman</small><b id="nmsSafeCount">0</b></span>
-          <span><small>Perlu Review</small><b id="nmsReviewCount">0</b></span>
+  <!-- ===================== TAB 1: ROUTER SYSTEM MONITORING ===================== -->
+  <div class="nms-content-pane active" data-nms-pane="router">
+    <div class="nms-focus-grid nms-focus-grid-solo">
+      <article class="nms-focus-card customer-health">
+        <div class="nms-focus-head"><div><span>LIVE CUSTOMER HEALTH</span><h3>Status Pelanggan PPPoE</h3></div><div class="nms-focus-total"><small>TOTAL TERPANTAU</small><b id="nmsCustomerTotal">0</b></div></div>
+        <div class="nms-customer-health-list">
+          <button type="button" data-status-quick="online"><span><i class="online"></i><b>Online</b></span><strong id="nmsOnlineFocus">0</strong><div><i id="nmsOnlineBar"></i></div></button>
+          <button type="button" data-status-quick="offline"><span><i class="offline"></i><b>Offline</b></span><strong id="nmsOfflineFocus">0</strong><div><i id="nmsOfflineBar"></i></div></button>
+          <button type="button" data-status-quick="isolated"><span><i class="isolated"></i><b>Isolir</b></span><strong id="nmsIsolatedFocus">0</strong><div><i id="nmsIsolatedBar"></i></div></button>
         </div>
-      </div>
-      <% if(isAdmin){ %><button class="nms-inline-action" type="button" id="nmsOpenSyncSecondary"><i class="bi bi-sliders2"></i><span><b>Buka Sync Center</b><small>Pilih pelanggan, router, dan secret secara manual.</small></span><i class="bi bi-chevron-right"></i></button><% } %>
-    </article>
+        <div class="nms-focus-foot"><i class="bi bi-broadcast-pin"></i><span>Telemetry terakhir <b id="nmsLastSync">Menghubungkan…</b></span></div>
+      </article>
+    </div>
 
-    <article class="nms-focus-card smart-sync">
-      <div class="nms-focus-head"><div><span>SMART RECONCILIATION</span><h3>Antrean Sinkronisasi</h3></div><span class="nms-smart-badge"><i class="bi bi-shield-check"></i> SAFE MATCH</span></div>
-      <div class="nms-smart-queue" id="nmsSmartQueue"><div class="nms-smart-empty"><i class="bi bi-hourglass-split"></i>Menunggu telemetry…</div></div>
-      <% if(isAdmin){ %><button class="nms-smart-apply" id="nmsSmartSyncSecondary" type="button"><i class="bi bi-stars"></i><span><b>Sinkronkan Kandidat Aman</b><small id="nmsSmartSyncHint">Hanya match high-confidence pada site yang sama.</small></span></button><% } %>
-    </article>
-  </div>
-
-  <div class="nms-secondary-head"><div><span class="module-kicker">ROUTER TELEMETRY</span><h3>Health & Live Traffic</h3><small>Informasi router dibuat compact agar fokus utama tetap pelanggan dan sinkronisasi PPPoE.</small></div></div>
-  <div class="nms-site-grid" id="nmsSiteGrid">
-    <% routers.forEach((r,index)=>{ %>
-      <div class="nms-router-row" data-router-shell="<%= r.id %>" data-site="<%= r.site_code %>" style="--delay:<%= index*60 %>ms">
-        <article class="nms-router-card loading" data-router="<%= r.id %>">
+    <div class="nms-secondary-head"><div><span class="module-kicker">ROUTER SYSTEM MONITORING</span><h3>CPU · Memory · Disk · Uptime · RouterOS</h3><small>Widget Live Traffic per-interface sudah dihapus agar polling NMS lebih ringan untuk server maupun router.</small></div></div>
+    <div class="nms-site-grid" id="nmsSiteGrid">
+      <% routers.forEach((r,index)=>{ %>
+        <article class="nms-router-card loading" data-router="<%= r.id %>" data-site="<%= r.site_code %>" style="--delay:<%= index*60 %>ms">
           <div class="nms-router-head"><div><span><i></i>SITE <%= r.site_code %></span><h3><%= r.name %></h3></div><div class="nms-router-health"><span class="nms-health-score" data-health-score>HEALTH --</span><b class="nms-health">CONNECTING</b></div></div>
           <div class="nms-router-core"><div class="nms-radar"><i></i><i></i><span><b>--</b><small>CPU</small></span></div><div class="nms-router-spec"><span><small>RouterOS</small><b>--</b></span><span><small>Uptime</small><b>--</b></span><span><small>Latency</small><b>--</b></span></div></div>
           <div class="nms-resource-grid"><span><i class="bi bi-memory"></i><small>RAM</small><b data-resource-memory>--</b></span><span><i class="bi bi-device-ssd-fill"></i><small>STORAGE</small><b data-resource-storage>--</b></span><span><i class="bi bi-cpu-fill"></i><small>ARCH</small><b data-resource-architecture>--</b></span><span><i class="bi bi-thermometer-half"></i><small>BOARD</small><b data-resource-board>--</b></span></div>
           <div class="nms-router-counts"><span class="online"><b>0</b><small>Online</small></span><span class="offline"><b>0</b><small>Offline</small></span><span class="isolated"><b>0</b><small>Isolir</small></span><span class="linked"><b>0</b><small>Billing</small></span></div>
         </article>
-        <section class="nms-traffic-panel" data-traffic-panel="<%= r.id %>">
-          <div class="nms-traffic-panel-head"><div><span><i class="bi bi-activity"></i> LIVE TRAFFIC</span><h3><%= r.name %></h3><small>RX/TX · refresh otomatis 15 detik</small></div><div class="nms-interface-control"><label><span>INTERFACE</span><select data-interface-select data-router="<%= r.id %>" aria-label="Pilih interface"><option>Memuat…</option></select></label></div></div>
-          <div class="nms-traffic-metrics"><span class="rx"><small><i class="bi bi-arrow-down"></i> RX</small><b>0 bps</b></span><span class="tx"><small><i class="bi bi-arrow-up"></i> TX</small><b>0 bps</b></span><span class="peak"><small>PEAK</small><b data-peak-rate>0 bps</b></span><span class="average"><small>AVG</small><b data-avg-rate>0 bps</b></span></div>
-          <div class="nms-traffic-state"><span><i class="bi bi-ethernet"></i><b data-interface-name>Memuat interface…</b></span><em data-interface-state>MENUNGGU</em></div>
-          <div class="nms-traffic-chart large"><canvas data-traffic-chart></canvas><div class="nms-traffic-legend"><span class="rx"><i></i>RX <b>0 bps</b></span><span class="tx"><i></i>TX <b>0 bps</b></span></div></div>
-        </section>
-      </div>
-    <% }) %>
+      <% }) %>
+    </div>
   </div>
 
-  <div class="nms-workspace">
-    <div class="nms-reconcile" id="nmsReconcile" hidden>
-      <div class="nms-reconcile-head"><div><span class="module-kicker">BILLING RECONCILIATION</span><h3>Pelanggan Belum Sinkron</h3><small>Pelanggan aktif tanpa pasangan secret yang valid. Pilih saran atau kelola manual.</small></div><button type="button" data-unmatched-close><i class="bi bi-x-lg"></i></button></div>
+  <!-- ===================== TAB 2: PPPoE CONFIGURATION & ACTIVE MONITORING ===================== -->
+  <div class="nms-content-pane" data-nms-pane="pppoe">
+    <div class="nms-workspace">
+      <div class="nms-workspace-head">
+        <div><span class="module-kicker">REGISTRI SECRET PPPoE</span><h3>Konfigurasi &amp; Sesi Aktif Pelanggan</h3><small>IP address, MAC/Caller ID, dan uptime user tampil langsung dari RouterOS; rekomendasi dibatasi ke pelanggan pada site router yang sama.</small></div>
+        <div class="nms-tools"><label><i class="bi bi-search"></i><input id="nmsSearch" type="search" placeholder="Cari username, pelanggan, IP…"></label><select id="nmsStatusFilter"><option value="all">Semua Status</option><option value="online">Online</option><option value="offline">Offline</option><option value="isolated">Isolir</option></select></div>
+      </div>
+      <div class="table-responsive"><table class="app-table nms-table"><thead><tr><th>Status</th><th>Secret PPPoE</th><th>Billing / Suggestion</th><th>Site / Router</th><th>Profil</th><th>IP / MAC / Uptime User</th><th>Sisa Tagihan</th><th>Tindakan</th></tr></thead><tbody id="nmsSecretRows"><tr><td colspan="8"><div class="nms-loading-state"><i class="bi bi-router"></i><strong>Mengambil telemetri MikroTik</strong><small>Sinkronisasi seluruh site sedang berjalan…</small></div></td></tr></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- ===================== TAB 3: PPPoE SYNCHRONIZATION CENTER (AUDIT) ===================== -->
+  <div class="nms-content-pane" data-nms-pane="sync">
+    <div class="nms-audit-badges">
+      <div class="synced"><i class="bi bi-check-circle-fill"></i><span><small>SYNCED</small><b id="nmsAuditSynced">0</b></span></div>
+      <div class="missing"><i class="bi bi-question-circle-fill"></i><span><small>MISSING IN ROUTER</small><b id="nmsAuditMissing">0</b></span></div>
+      <div class="rogue"><i class="bi bi-exclamation-octagon-fill"></i><span><small>ROGUE / ILEGAL SECRET</small><b id="nmsAuditRogue">0</b></span></div>
+    </div>
+
+    <div class="nms-focus-grid nms-focus-grid-audit">
+      <article class="nms-focus-card sync-health">
+        <div class="nms-focus-head"><div><span>BILLING ↔ MIKROTIK</span><h3>Health Sinkronisasi</h3></div><span class="nms-sync-grade" id="nmsSyncGrade">CHECKING</span></div>
+        <div class="nms-sync-health-body">
+          <div class="nms-sync-ring" id="nmsSyncCoverageRing" style="--coverage:0"><span><b id="nmsSyncCoverage">0%</b><small>SYNC</small></span></div>
+          <div class="nms-sync-health-stats">
+            <span><small>Terhubung Billing</small><b id="nmsLinkedFocus">0</b></span>
+            <span><small>Belum Sinkron</small><b id="nmsUnmatchedFocus">0</b></span>
+            <span><small>Kandidat Aman</small><b id="nmsSafeCount">0</b></span>
+            <span><small>Perlu Review</small><b id="nmsReviewCount">0</b></span>
+          </div>
+        </div>
+        <% if(isAdmin){ %><button class="nms-inline-action" type="button" id="nmsOpenSyncSecondary"><i class="bi bi-sliders2"></i><span><b>Buka Sync Center</b><small>Pilih pelanggan, router, dan secret secara manual.</small></span><i class="bi bi-chevron-right"></i></button><% } %>
+      </article>
+
+      <article class="nms-focus-card smart-sync">
+        <div class="nms-focus-head"><div><span>SMART RECONCILIATION</span><h3>Antrean Sinkronisasi</h3></div><span class="nms-smart-badge"><i class="bi bi-shield-check"></i> SAFE MATCH</span></div>
+        <div class="nms-smart-queue" id="nmsSmartQueue"><div class="nms-smart-empty"><i class="bi bi-hourglass-split"></i>Menunggu telemetry…</div></div>
+        <% if(isAdmin){ %><button class="nms-smart-apply" id="nmsSmartSyncSecondary" type="button"><i class="bi bi-stars"></i><span><b>Sinkronkan Kandidat Aman</b><small id="nmsSmartSyncHint">Hanya match high-confidence pada site yang sama.</small></span></button><% } %>
+      </article>
+    </div>
+
+    <div class="nms-reconcile" id="nmsReconcile">
+      <div class="nms-reconcile-head"><div><span class="module-kicker">BILLING RECONCILIATION</span><h3>Pelanggan Belum Sinkron (Missing in Router)</h3><small>Pelanggan aktif tanpa pasangan secret yang valid. Pilih saran atau kelola manual.</small></div></div>
       <div class="nms-unmatched-grid" id="nmsUnmatchedRows"></div>
-      <div class="nms-exempt-note"><i class="bi bi-shield-check"></i><div><b>Akun non-billing tidak dihitung sebagai masalah sinkronisasi</b><small>Tambahkan tag <code>[ADMIN]</code> atau <code>[FREE]</code> pada comment/profile secret untuk akun admin, monitoring, server, staf, gratis, dan layanan internal.</small></div></div>
+      <div class="nms-exempt-note"><i class="bi bi-shield-check"></i><div><b>Akun non-billing tidak dihitung sebagai Rogue/Ilegal</b><small>Tambahkan tag <code>[ADMIN]</code> atau <code>[FREE]</code> pada comment/profile secret untuk akun admin, monitoring, server, staf, gratis, dan layanan internal.</small></div></div>
     </div>
-    <div class="nms-workspace-head">
-      <div><span class="module-kicker">REGISTRI SECRET PPPoE</span><h3>Operasional Pelanggan & Auto Suggest</h3><small>Data langsung dari RouterOS; rekomendasi dibatasi ke pelanggan pada site router yang sama.</small></div>
-      <div class="nms-tools"><label><i class="bi bi-search"></i><input id="nmsSearch" type="search" placeholder="Cari username, pelanggan, IP…"></label><select id="nmsStatusFilter"><option value="all">Semua Status</option><option value="online">Online</option><option value="offline">Offline</option><option value="isolated">Isolir</option></select></div>
-    </div>
-    <div class="table-responsive"><table class="app-table nms-table"><thead><tr><th>Status</th><th>Secret PPPoE</th><th>Billing / Suggestion</th><th>Site / Router</th><th>Profil</th><th>Sesi / Remote</th><th>Sisa Tagihan</th><th>Tindakan</th></tr></thead><tbody id="nmsSecretRows"><tr><td colspan="8"><div class="nms-loading-state"><i class="bi bi-router"></i><strong>Mengambil telemetri MikroTik</strong><small>Sinkronisasi seluruh site sedang berjalan…</small></div></td></tr></tbody></table></div>
   </div>
 
   <div class="nms-toast" id="nmsToast" hidden></div>
@@ -145,7 +162,7 @@
         <div data-pppoe-panel="manual" hidden>
           <div class="nms-sync-step"><span>2</span><div><b>Pilih Router MikroTik</b><small>Daftar router berasal dari database, tidak bergantung pada status telemetry.</small></div></div>
           <select class="form-select" name="router_id" id="nmsSyncRouter"><option value="">Pilih pelanggan dahulu</option></select>
-          <div class="nms-sync-step mt-3"><span>3</span><div><b>Cari & Pilih Secret</b><small>Jika router offline, refresh NMS setelah koneksi router kembali.</small></div></div>
+          <div class="nms-sync-step mt-3"><span>3</span><div><b>Cari &amp; Pilih Secret</b><small>Jika router offline, refresh NMS setelah koneksi router kembali.</small></div></div>
           <label class="nms-sync-search"><i class="bi bi-search"></i><input type="search" id="nmsSyncSecretSearch" placeholder="Cari username, profile, atau komentar…" autocomplete="off"></label>
           <select name="secret_id" id="nmsSyncSecret" size="7" aria-label="Pilih secret PPPoE"><option value="">Pilih router terlebih dahulu</option></select>
         </div>
