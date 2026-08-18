@@ -1,0 +1,581 @@
+diff --git a/app.js b/app.js
+index 5b0b9e9..96d9293 100644
+--- a/app.js
++++ b/app.js
+@@ -24,7 +24,7 @@ const { requireAuth, loadPermissions, requirePermission } = require('./middlewar
+ const { generateMonthlyInvoices } = require('./services/invoiceService');
+ const { runAutoIsolation } = require('./services/networkService');
+ const { purgeOldLogs } = require('./services/logRetentionService');
+-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema } = require('./services/schemaService');
++const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV28Schema } = require('./services/schemaService');
+ 
+ const app = express();
+ const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
+@@ -192,6 +192,7 @@ app.use('/payments', requireAuth, requirePermission('billing'), require('./route
+ app.use('/reports', requireAuth, requirePermission('reports'), require('./routes/reports'));
+ app.use('/routers', requireAuth, requirePermission('network'), require('./routes/routers'));
+ app.use('/network', requireAuth, requirePermission('network'), require('./routes/network'));
++app.use('/mikrotik', requireAuth, requirePermission('network'), require('./routes/mikrotik'));
+ app.use('/settings', requireAuth, requirePermission('settings'), require('./routes/settings'));
+ app.use('/profile', requireAuth, require('./routes/profile'));
+ app.use('/communication', requireAuth, require('./routes/communication'));
+@@ -237,6 +238,7 @@ async function bootstrap() {
+   await ensureV25Schema();
+   await ensureV26Schema();
+   await ensureV27Schema();
++  await ensureV28Schema();
+   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
+   if (Number(rows[0].total) === 0) {
+     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
+diff --git a/routes/mikrotik.js b/routes/mikrotik.js
+new file mode 100644
+index 0000000..90c9b4e
+--- /dev/null
++++ b/routes/mikrotik.js
+@@ -0,0 +1,54 @@
++const express = require('express');
++const { requireAdmin } = require('../middleware/auth');
++const { audit } = require('../services/auditService');
++const {
++  getOverview, getActiveSessions, getSyncAudit, captureHourlySample, getTrend24h,
++  pushCustomerToRouter, kickSession, deleteSecret
++} = require('../services/mikrotikPppoeService');
++const router = express.Router();
++
++router.get('/', async (req, res) => {
++  try {
++    const [overview, sessions, syncAuditData, trend] = await Promise.all([
++      getOverview(), getActiveSessions(), getSyncAudit(), getTrend24h()
++    ]);
++    captureHourlySample().catch(err => console.error('Gagal menyimpan sample PPPoE:', err.message));
++    res.render('mikrotik/index', { title: 'MikroTik PPPoE', overview, sessions, syncAudit: syncAuditData, trend, isDummy: false });
++  } catch (error) {
++    console.error('MikroTik PPPoE overview gagal:', error.message);
++    res.render('mikrotik/index', {
++      title: 'MikroTik PPPoE',
++      overview: { stats: { totalSecrets: 0, online: 0, offline: 0, isolated: 0 }, sync: { synced: 0, rogue: 0, exempt: 0, missing: 0 }, profileDistribution: [], routerErrors: [{ name: 'Semua router', siteCode: '-', error: error.message }], routersChecked: 0 },
++      sessions: [],
++      syncAudit: { synced: [], rogue: [], missing: [] },
++      trend: { labels: [], values: [], isEstimated: true },
++      isDummy: true
++    });
++  }
++});
++
++router.post('/sessions/:routerId/:secretId/kick', requireAdmin, async (req, res) => {
++  try {
++    const result = await kickSession(req.params.routerId, req.params.secretId);
++    await audit({ userId: req.session.user.id, action: 'disconnect', entityType: 'pppoe_session', entityId: req.params.secretId, description: `Kick session PPPoE ${result.secret.name} dari ${result.router.name}`, ip: req.ip });
++    res.json({ ok: true, message: result.disconnected ? `Sesi ${result.secret.name} berhasil diputus.` : `${result.secret.name} tidak memiliki sesi aktif saat ini.` });
++  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
++});
++
++router.post('/secrets/:routerId/:secretId/delete', requireAdmin, async (req, res) => {
++  try {
++    const result = await deleteSecret(req.params.routerId, req.params.secretId);
++    await audit({ userId: req.session.user.id, action: 'delete', entityType: 'pppoe_secret', entityId: req.params.secretId, description: `Hapus rogue secret PPPoE ${result.secret.name} dari ${result.router.name}`, ip: req.ip });
++    res.json({ ok: true, message: `Secret ${result.secret.name} berhasil dihapus dari router.` });
++  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
++});
++
++router.post('/customers/:customerId/push', requireAdmin, async (req, res) => {
++  try {
++    const result = await pushCustomerToRouter(req.params.customerId);
++    await audit({ userId: req.session.user.id, action: 'create', entityType: 'pppoe_secret', entityId: null, description: `Push to Router: secret ${result.username} dibuat di ${result.router.name} untuk ${result.customer.name}`, ip: req.ip });
++    res.json({ ok: true, message: `Secret ${result.username} berhasil dibuat di ${result.router.name}.`, username: result.username, password: result.password });
++  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
++});
++
++module.exports = router;
+diff --git a/routes/payments.js b/routes/payments.js
+index 92b03d5..fcf65d0 100644
+--- a/routes/payments.js
++++ b/routes/payments.js
+@@ -124,12 +124,14 @@ router.get('/',async(req,res)=>{
+     COALESCE(SUM(CASE WHEN p.status='pending' THEN p.amount ELSE 0 END),0) transfer_pending,
+     SUM(p.status='confirmed') confirmed_count
+     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE ${summaryWhere.join(' AND ')}`,summaryParams);
++  // Transactions Master Admin already approved but which never received a transfer/QRIS proof attachment.
++  const [[missingProof]]=await db.execute(`SELECT COUNT(*) total,COALESCE(SUM(p.amount),0) amount FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE p.status='confirmed' AND p.method IN ('transfer','qris') AND (p.proof_path IS NULL OR p.proof_path='')${site?` AND s.code=?`:''}`,site?[site]:[]);
+   const preselectedInvoiceId=Number(req.query.invoice_id||0)||null;
+   let cashApprovals=[];
+   if(isMasterAdminRole(req.session.user.role)){
+     [cashApprovals]=await db.query(`SELECT ct.id,ct.transaction_code,ct.transaction_date,ct.name,ct.amount,ct.notes,ct.proof_path,ct.proof_mime,ct.approval_status,cc.name category_name,cc.type category_type,s.code site_code,u.name creator_name FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id LEFT JOIN sites s ON s.id=ct.site_id LEFT JOIN users u ON u.id=ct.created_by WHERE COALESCE(ct.source_type,'manual')='manual' AND ct.approval_status='PENDING_APPROVAL' ORDER BY ct.transaction_date DESC,ct.id DESC LIMIT 250`);
+   }
+-  res.render('payments/index',{title:'Approval & Transaksi',payments,openInvoices,staff,banks,sites,clusters,cashApprovals,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year,approval},summaryMonth,summaryYear});
++  res.render('payments/index',{title:'Approval & Transaksi',payments,openInvoices,staff,banks,sites,clusters,cashApprovals,summary:summary||{},missingProof:missingProof||{total:0,amount:0},preselectedInvoiceId,filters:{q,site,cluster,month,year,approval},summaryMonth,summaryYear});
+ });
+ 
+ router.post('/',requireAdmin,async(req,res)=>{
+diff --git a/services/analyticsService.js b/services/analyticsService.js
+index 36ded99..6dbee38 100644
+--- a/services/analyticsService.js
++++ b/services/analyticsService.js
+@@ -1,4 +1,5 @@
+ const db=require('../config/db');
++const { normalizeWhatsapp }=require('./whatsappService');
+ 
+ function num(value){const n=Number(value);return Number.isFinite(n)?n:0;}
+ function monthKey(date){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;}
+@@ -28,7 +29,7 @@ function buildAdvisories({odp=[],dueSoon=0,overdue30=0,pppoeUnlinked=0,pendingCa
+   return out;
+ }
+ 
+-async function getAnalytics({siteCode='',month,year}){
++async function fetchAnalytics({siteCode='',month,year}){
+   const now=new Date();month=Number(month)||now.getMonth()+1;year=Number(year)||now.getFullYear();
+   const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
+   const selected=siteCode?sites.find(s=>String(s.code).toUpperCase()===String(siteCode).toUpperCase()):null;
+@@ -52,7 +53,8 @@ async function getAnalytics({siteCode='',month,year}){
+   const months=lastMonths(12,now),cashMap=new Map(cashRows.map(x=>[x.month_key,x])),mrrMap=new Map(mrrRows.map(x=>[x.month_key,x]));
+   const financeSeries={labels:months.map(x=>x.label),inflow:months.map(x=>num(cashMap.get(x.key)?.inflow)),outflow:months.map(x=>num(cashMap.get(x.key)?.outflow)),mrr:months.map(x=>num(mrrMap.get(x.key)?.billed))};
+ 
+-  const [aging]=await db.execute(`SELECT c.id,c.customer_code,c.name customer_name,s.code site_code,MIN(i.due_date) oldest_due,COALESCE(SUM(i.outstanding),0) outstanding,MAX(DATEDIFF(CURDATE(),i.due_date)) days_overdue FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope} GROUP BY c.id,c.customer_code,c.name,s.code ORDER BY days_overdue DESC,outstanding DESC LIMIT 100`,customerParams);
++  const [agingRaw]=await db.execute(`SELECT c.id,c.customer_code,c.name customer_name,c.phone,s.code site_code,MIN(i.due_date) oldest_due,COALESCE(SUM(i.outstanding),0) outstanding,MAX(DATEDIFF(CURDATE(),i.due_date)) days_overdue FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope} GROUP BY c.id,c.customer_code,c.name,c.phone,s.code ORDER BY days_overdue DESC,outstanding DESC LIMIT 100`,customerParams);
++  const aging=agingRaw.map(row=>{const wa=normalizeWhatsapp(row.phone);return {...row,whatsappNumber:wa||null};});
+   const agingBuckets={h3:aging.filter(x=>num(x.days_overdue)<=0&&num(x.days_overdue)>=-3),hplus3:aging.filter(x=>num(x.days_overdue)>0&&num(x.days_overdue)<=30),over30:aging.filter(x=>num(x.days_overdue)>30)};
+ 
+   const [[funnelRow]]=await db.execute(`SELECT COUNT(*) registered,SUM(c.address IS NOT NULL AND c.address<>'' AND c.cluster_id IS NOT NULL) survey_ready,SUM(c.router_id IS NOT NULL AND c.pppoe_username IS NOT NULL AND c.pppoe_username<>'') provisioned,SUM(c.customer_status='active' AND c.activation_date IS NOT NULL) activated FROM customers c WHERE YEAR(c.created_at)=? AND MONTH(c.created_at)=?${customerScope}`,[year,month,...customerParams]);
+@@ -61,7 +63,39 @@ async function getAnalytics({siteCode='',month,year}){
+   const collectionRate=num(billing.billed)>0?Math.min(100,Math.round(num(billing.collected)/num(billing.billed)*100)):0;
+   const kpis={activeCustomers:num(exec.active_customers),mrr:num(exec.mrr),billed:num(billing.billed),collected:num(billing.collected),outstanding:num(billing.outstanding),collectionRate,psb:num(psb.total),pendingCash:num(cashPending.pending_cash)};
+   const advisories=buildAdvisories({odp,dueSoon:num(risk.due_soon),overdue30:num(risk.overdue_30),pppoeUnlinked:num(sync.pppoe_unlinked),pendingCash:num(cashPending.pending_cash)});
+-  return {sites,selectedSiteCode:selected?.code||'',selectedSiteName:selected?.name||'Semua Site',month,year,kpis,advisories,financeSeries,aging,agingBuckets,funnel:buildFunnel(funnelRow),sla:{avgDays:num(sla.avg_days),samples:num(sla.samples)},odp:odp.map(x=>({...x,capacity_ports:num(x.capacity_ports),used_ports:num(x.used_ports),remaining_ports:num(x.remaining_ports),utilization:num(x.capacity_ports)?Math.min(100,Math.round(num(x.used_ports)/num(x.capacity_ports)*100)):0}))};
++  return {sites,selectedSiteCode:selected?.code||'',selectedSiteName:selected?.name||'Semua Site',month,year,kpis,advisories,financeSeries,aging,agingBuckets,funnel:buildFunnel(funnelRow),sla:{avgDays:num(sla.avg_days),samples:num(sla.samples)},odp:odp.map(x=>({...x,capacity_ports:num(x.capacity_ports),used_ports:num(x.used_ports),remaining_ports:num(x.remaining_ports),utilization:num(x.capacity_ports)?Math.min(100,Math.round(num(x.used_ports)/num(x.capacity_ports)*100)):0})),isDummy:false};
+ }
+ 
+-module.exports={getAnalytics,buildAdvisories,buildFunnel,lastMonths};
++// Realistic placeholder payload so the /analytics page never 500s when a table/column
++// referenced above (clusters.capacity_ports, cash_transactions.approval_status, etc.)
++// has not been migrated yet on a fresh or older database. Every number here is fictional.
++function buildDummyAnalytics({siteCode='',month,year}={}){
++  const now=new Date();month=Number(month)||now.getMonth()+1;year=Number(year)||now.getFullYear();
++  const months=lastMonths(12,now);
++  const wave=(base,amp,phase=0)=>months.map((_,i)=>Math.max(0,Math.round(base+amp*Math.sin((i+phase)/2))));
++  const financeSeries={labels:months.map(x=>x.label),inflow:wave(38000000,9000000),outflow:wave(24000000,6000000,1.4),mrr:wave(52000000,5000000,0.6)};
++  const dummySites=[{id:0,code:'HQ',name:'Kantor Pusat (contoh)'}];
++  const selectedName=siteCode?`${siteCode} (contoh)`:'Semua Site (contoh)';
++  const aging=[
++    {id:'demo-1',customer_code:'DEMO-0001',customer_name:'Contoh Pelanggan A',phone:null,whatsappNumber:null,site_code:'HQ',oldest_due:new Date(now.getTime()-2*86400000),outstanding:350000,days_overdue:2},
++    {id:'demo-2',customer_code:'DEMO-0002',customer_name:'Contoh Pelanggan B',phone:null,whatsappNumber:null,site_code:'HQ',oldest_due:new Date(now.getTime()-15*86400000),outstanding:275000,days_overdue:15},
++    {id:'demo-3',customer_code:'DEMO-0003',customer_name:'Contoh Pelanggan C',phone:null,whatsappNumber:null,site_code:'HQ',oldest_due:new Date(now.getTime()-40*86400000),outstanding:520000,days_overdue:40}
++  ];
++  const agingBuckets={h3:aging.filter(x=>x.days_overdue<=2),hplus3:aging.filter(x=>x.days_overdue>2&&x.days_overdue<=30),over30:aging.filter(x=>x.days_overdue>30)};
++  const odp=[{id:'demo-odp-1',name:'ODP Contoh 01',capacity_ports:16,used_ports:14,remaining_ports:2,utilization:88,site_code:'HQ',site_name:'Kantor Pusat (contoh)'}];
++  const funnel=buildFunnel({registered:40,survey_ready:34,provisioned:28,activated:22});
++  const kpis={activeCustomers:842,mrr:52000000,billed:61000000,collected:53000000,outstanding:8000000,collectionRate:87,psb:22,pendingCash:2};
++  const advisories=buildAdvisories({odp,dueSoon:1,overdue30:aging.filter(x=>x.days_overdue>30).length,pppoeUnlinked:3,pendingCash:2});
++  return {sites:dummySites,selectedSiteCode:siteCode||'',selectedSiteName:selectedName,month,year,kpis,advisories,financeSeries,aging,agingBuckets,funnel,sla:{avgDays:3.2,samples:22},odp,isDummy:true};
++}
++
++async function getAnalytics(params={}){
++  try{
++    return await fetchAnalytics(params);
++  }catch(error){
++    console.error('Analytics query gagal, menampilkan data contoh sementara:',error.message);
++    return buildDummyAnalytics(params);
++  }
++}
++
++module.exports={getAnalytics,buildAdvisories,buildFunnel,lastMonths,buildDummyAnalytics};
+diff --git a/services/mikrotikPppoeService.js b/services/mikrotikPppoeService.js
+new file mode 100644
+index 0000000..adffc4a
+--- /dev/null
++++ b/services/mikrotikPppoeService.js
+@@ -0,0 +1,149 @@
++const crypto = require('crypto');
++const db = require('../config/db');
++const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret } = require('./nmsService');
++
++const SAMPLE_MIN_GAP_MINUTES = 50;
++const SAMPLE_RETENTION_ROWS = 800;
++const TREND_HOURS = 24;
++
++function num(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
++
++// Aggregates every router snapshot into the numbers the PPPoE Analytics tab needs:
++// stat cards, profile distribution (doughnut), and sync classification counts.
++async function getOverview() {
++  const snapshots = await allSnapshots();
++  const profileCounts = new Map();
++  let online = 0, offline = 0, isolated = 0, synced = 0, rogue = 0, exempt = 0, missing = 0;
++  for (const snap of snapshots) {
++    for (const secret of snap.secrets || []) {
++      online += secret.status === 'online' ? 1 : 0;
++      offline += secret.status === 'offline' ? 1 : 0;
++      isolated += secret.status === 'isolated' ? 1 : 0;
++      const profileKey = secret.profile || 'default';
++      profileCounts.set(profileKey, (profileCounts.get(profileKey) || 0) + 1);
++      if (secret.customer) synced++;
++      else if (secret.exempt) exempt++;
++      else rogue++;
++    }
++    missing += (snap.unmatchedCustomers || []).length;
++  }
++  const totalSecrets = online + offline + isolated;
++  const profileDistribution = [...profileCounts.entries()].sort((a, b) => b[1] - a[1]).map(([profile, count]) => ({ profile, count }));
++  const routerErrors = snapshots.filter(s => !s.ok).map(s => ({ name: s.name, siteCode: s.siteCode, error: s.error }));
++  return {
++    stats: { totalSecrets, online, offline, isolated },
++    sync: { synced, rogue, exempt, missing },
++    profileDistribution,
++    routerErrors,
++    routersChecked: snapshots.length
++  };
++}
++
++async function getActiveSessions() {
++  const snapshots = await allSnapshots();
++  const rows = [];
++  for (const snap of snapshots) {
++    for (const secret of snap.secrets || []) {
++      if (!secret.active) continue;
++      rows.push({
++        routerId: snap.id,
++        routerName: snap.name,
++        siteCode: snap.siteCode,
++        secretId: secret['.id'],
++        username: secret.name,
++        profile: secret.profile || 'default',
++        address: secret.active.address || '-',
++        uptime: secret.active.uptime || '-',
++        callerId: secret.active['caller-id'] || secret.active.callerId || '-',
++        customerName: secret.customer?.name || null,
++        customerCode: secret.customer?.customer_code || null
++      });
++    }
++  }
++  return rows.sort((a, b) => a.username.localeCompare(b.username));
++}
++
++async function getSyncAudit() {
++  const snapshots = await allSnapshots();
++  const synced = [], rogue = [], missing = [];
++  for (const snap of snapshots) {
++    for (const secret of snap.secrets || []) {
++      const base = { routerId: snap.id, routerName: snap.name, siteCode: snap.siteCode, secretId: secret['.id'], username: secret.name, profile: secret.profile || 'default', status: secret.status };
++      if (secret.customer) synced.push({ ...base, customerId: secret.customer.id, customerName: secret.customer.name, customerCode: secret.customer.customer_code });
++      else if (!secret.exempt) rogue.push({ ...base, suggestions: secret.suggestions || [] });
++    }
++    for (const customer of snap.unmatchedCustomers || []) {
++      missing.push({ customerId: customer.id, customerCode: customer.customer_code, customerName: customer.name, siteCode: snap.siteCode, routerId: snap.id, routerName: snap.name, suggestions: customer.suggestions || [] });
++    }
++  }
++  return { synced, rogue, missing };
++}
++
++// Records one aggregate sample per SAMPLE_MIN_GAP_MINUTES so the 24h trend chart has
++// real history to draw from once the app has been running for a day.
++async function captureHourlySample() {
++  const [[last]] = await db.execute(`SELECT sampled_at FROM pppoe_hourly_samples ORDER BY sampled_at DESC LIMIT 1`);
++  if (last?.sampled_at && (Date.now() - new Date(last.sampled_at).getTime()) < SAMPLE_MIN_GAP_MINUTES * 60000) return { skipped: true };
++  const { stats } = await getOverview();
++  await db.execute(`INSERT INTO pppoe_hourly_samples(sampled_at,online_count,offline_count,isolated_count,total_count) VALUES(NOW(),?,?,?,?)`,
++    [stats.online, stats.offline, stats.isolated, stats.totalSecrets]);
++  const [[{ total }]] = await db.query(`SELECT COUNT(*) total FROM pppoe_hourly_samples`);
++  if (total > SAMPLE_RETENTION_ROWS) {
++    await db.execute(`DELETE FROM pppoe_hourly_samples ORDER BY sampled_at ASC LIMIT ?`, [total - SAMPLE_RETENTION_ROWS]);
++  }
++  return { skipped: false };
++}
++
++function hourLabel(date) { return `${String(date.getHours()).padStart(2, '0')}:00`; }
++
++// Returns 24 hourly points for the active-users trend line. When history is thin
++// (fresh install) it backfills with a smooth, clearly-labelled estimate so the
++// chart never crashes or renders empty on day one.
++async function getTrend24h() {
++  const since = new Date(Date.now() - TREND_HOURS * 3600000);
++  const [rows] = await db.execute(`SELECT sampled_at,online_count FROM pppoe_hourly_samples WHERE sampled_at>=? ORDER BY sampled_at ASC`, [since]);
++  const now = new Date();
++  const buckets = Array.from({ length: TREND_HOURS }, (_, i) => new Date(now.getTime() - (TREND_HOURS - 1 - i) * 3600000));
++  if (rows.length >= 6) {
++    const byHour = new Map(rows.map(r => [hourLabel(new Date(r.sampled_at)), num(r.online_count)]));
++    let lastKnown = rows[0] ? num(rows[0].online_count) : 0;
++    const values = buckets.map(bucket => {
++      const key = hourLabel(bucket);
++      if (byHour.has(key)) { lastKnown = byHour.get(key); return lastKnown; }
++      return lastKnown;
++    });
++    return { labels: buckets.map(hourLabel), values, isEstimated: false };
++  }
++  const { stats } = await getOverview();
++  const base = stats.online || 0;
++  const values = buckets.map((_, i) => Math.max(0, Math.round(base * (0.82 + 0.18 * Math.sin(i / 3)))));
++  return { labels: buckets.map(hourLabel), values, isEstimated: true };
++}
++
++async function pickRouterForSite(siteCode) {
++  const [rows] = await db.execute(`SELECT r.id,r.name,r.site_id,s.code site_code FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.is_active=1 AND s.code=? ORDER BY r.id LIMIT 1`, [siteCode]);
++  if (!rows.length) throw new Error(`Tidak ada router aktif terdaftar untuk site ${siteCode}.`);
++  return rows[0];
++}
++
++function generateSecretPassword() {
++  return crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'Inkamnet123';
++}
++
++// "Push to Router": provisions a brand-new PPPoE secret on the router matching the
++// customer's site, named after their billing customer code, and links it back.
++async function pushCustomerToRouter(customerId) {
++  const [rows] = await db.execute(`SELECT c.id,c.customer_code,c.name,c.pppoe_username,s.code site_code FROM customers c JOIN sites s ON s.id=c.site_id WHERE c.id=? AND c.customer_status='active'`, [customerId]);
++  const customer = rows[0];
++  if (!customer) throw new Error('Pelanggan billing tidak ditemukan atau tidak aktif.');
++  const router = await pickRouterForSite(customer.site_code);
++  const username = customer.pppoe_username || customer.customer_code;
++  const password = generateSecretPassword();
++  const result = await saveSecret(router.id, null, { name: username, password, service: 'pppoe', profile: 'default', comment: `[BILLING] ${customer.customer_code}` }, customer.id);
++  return { router: result.router, username, password, customer };
++}
++
++module.exports = {
++  getOverview, getActiveSessions, getSyncAudit, captureHourlySample, getTrend24h,
++  pushCustomerToRouter, kickSession: disconnectSecret, deleteSecret: removeSecret, syncSecret
++};
+diff --git a/services/schemaService.js b/services/schemaService.js
+index 79645fe..7ead1cb 100644
+--- a/services/schemaService.js
++++ b/services/schemaService.js
+@@ -374,4 +374,17 @@ async function ensureV27Schema() {
+   )`);
+ }
+ 
+-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema };
++async function ensureV28Schema() {
++  // Hourly aggregate samples power the MikroTik PPPoE Analytics 24h active-users trend chart.
++  await db.query(`CREATE TABLE IF NOT EXISTS pppoe_hourly_samples (
++    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
++    sampled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    online_count INT UNSIGNED NOT NULL DEFAULT 0,
++    offline_count INT UNSIGNED NOT NULL DEFAULT 0,
++    isolated_count INT UNSIGNED NOT NULL DEFAULT 0,
++    total_count INT UNSIGNED NOT NULL DEFAULT 0,
++    INDEX idx_pppoe_hourly_samples_time (sampled_at)
++  )`);
++}
++
++module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV28Schema };
+diff --git a/views/analytics/index.ejs b/views/analytics/index.ejs
+index 9a4acb8..2821a0f 100644
+--- a/views/analytics/index.ejs
++++ b/views/analytics/index.ejs
+@@ -5,6 +5,7 @@
+     <form class="analytics-filter" method="get" data-auto-filter><select name="site" class="form-select"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= selectedSiteCode===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select><select name="month" class="form-select"><% monthNames.forEach((m,i)=>{ %><option value="<%= i+1 %>" <%= month===i+1?'selected':'' %>><%= m %></option><% }) %></select><input class="form-control" type="number" name="year" min="2020" max="2100" value="<%= year %>"></form>
+   </div>
+ 
++  <% if(typeof isDummy!=='undefined'&&isDummy){ %><div class="alert alert-warning alert-modern" role="alert"><i class="bi bi-exclamation-triangle-fill me-2"></i>Sumber data analitik belum siap (tabel/kolom database belum lengkap). Menampilkan <b>data contoh sementara</b> agar halaman tetap dapat digunakan.</div><% } %>
+   <nav class="analytics-tabs" aria-label="Analitik"><button class="active" data-analytics-tab="executive"><i class="bi bi-stars"></i>Executive Summary</button><button data-analytics-tab="finance"><i class="bi bi-graph-up-arrow"></i>Analitik Keuangan</button><button data-analytics-tab="psb"><i class="bi bi-diagram-3-fill"></i>PSB & Infrastruktur</button></nav>
+ 
+   <div class="analytics-pane active" data-analytics-pane="executive">
+@@ -21,7 +22,7 @@
+ 
+   <div class="analytics-pane" data-analytics-pane="finance">
+     <div class="analytics-finance-grid"><article class="analytics-chart-card"><div class="analytics-section-title"><div><span>CASHFLOW STREAM</span><h2>Inflow vs Outflow</h2></div></div><div class="analytics-chart"><canvas id="analyticsCashflowChart"></canvas></div></article><article class="analytics-chart-card"><div class="analytics-section-title"><div><span>RECURRING REVENUE</span><h2>MRR / Billing Trend</h2></div></div><div class="analytics-chart"><canvas id="analyticsMrrChart"></canvas></div></article></div>
+-    <article class="analytics-aging-card"><div class="analytics-section-title"><div><span>AGING PIUTANG</span><h2>Prioritas Collection</h2></div><a href="/invoices?status=open">Buka Tagihan <i class="bi bi-arrow-right"></i></a></div><div class="aging-summary"><span><b><%= agingBuckets.h3.length %></b>H-3</span><span><b><%= agingBuckets.hplus3.length %></b>H+3 s/d 30</span><span class="danger"><b><%= agingBuckets.over30.length %></b>&gt;30 Hari</span></div><div class="table-responsive"><table class="app-table"><thead><tr><th>Pelanggan</th><th>Site</th><th>Jatuh Tempo</th><th>Umur</th><th>Outstanding</th><th>Status</th></tr></thead><tbody><% aging.slice(0,40).forEach(row=>{const days=Number(row.days_overdue||0);%><tr><td><span class="cell-main"><%= row.customer_name %></span><span class="cell-sub"><%= row.customer_code %></span></td><td><span class="status-badge purple"><%= row.site_code %></span></td><td><%= formatDate(row.oldest_due) %></td><td><%= days>0?`${days} hari overdue`:days<0?`H${days}`:'Hari ini' %></td><td class="money"><%= formatRupiah(row.outstanding) %></td><td><span class="status-badge <%= days>30?'red':days>0?'orange':'green' %>"><%= days>30?'Siap review isolir':days>0?'Follow-up':'Reminder H-3' %></span></td></tr><% }) %><% if(!aging.length){ %><tr><td colspan="6"><div class="empty-state"><i class="bi bi-check2-circle"></i><strong>Tidak ada piutang terbuka</strong></div></td></tr><% } %></tbody></table></div></article>
++    <article class="analytics-aging-card"><div class="analytics-section-title"><div><span>AGING PIUTANG</span><h2>Prioritas Collection</h2></div><a href="/invoices?status=open">Buka Tagihan <i class="bi bi-arrow-right"></i></a></div><div class="aging-summary"><span><b><%= agingBuckets.h3.length %></b>H-3</span><span><b><%= agingBuckets.hplus3.length %></b>H+3 s/d 30</span><span class="danger"><b><%= agingBuckets.over30.length %></b>&gt;30 Hari</span></div><div class="table-responsive"><table class="app-table"><thead><tr><th>Pelanggan</th><th>Site</th><th>Jatuh Tempo</th><th>Umur</th><th>Outstanding</th><th>Status</th><th>Aksi</th></tr></thead><tbody><% aging.slice(0,40).forEach(row=>{const days=Number(row.days_overdue||0);const waText=encodeURIComponent(`Halo ${row.customer_name}, ini pengingat tagihan INKAMNET Anda sebesar ${formatRupiah(row.outstanding)} yang ${days>0?`sudah lewat ${days} hari dari jatuh tempo`:'akan segera jatuh tempo'}. Mohon segera melakukan pembayaran. Terima kasih.`);%><tr><td><span class="cell-main"><%= row.customer_name %></span><span class="cell-sub"><%= row.customer_code %></span></td><td><span class="status-badge purple"><%= row.site_code %></span></td><td><%= formatDate(row.oldest_due) %></td><td><%= days>0?`${days} hari overdue`:days<0?`H${days}`:'Hari ini' %></td><td class="money"><%= formatRupiah(row.outstanding) %></td><td><span class="status-badge <%= days>30?'red':days>0?'orange':'green' %>"><%= days>30?'Siap review isolir':days>0?'Follow-up':'Reminder H-3' %></span></td><td><% if(row.whatsappNumber){ %><a class="btn-tech success btn-sm" href="https://wa.me/<%= row.whatsappNumber %>?text=<%= waText %>" target="_blank" rel="noopener"><i class="bi bi-whatsapp"></i>Reminder</a><% }else{ %><span class="cell-sub" title="Nomor WhatsApp pelanggan belum valid/tersimpan">Nomor belum ada</span><% } %></td></tr><% }) %><% if(!aging.length){ %><tr><td colspan="7"><div class="empty-state"><i class="bi bi-check2-circle"></i><strong>Tidak ada piutang terbuka</strong></div></td></tr><% } %></tbody></table></div></article>
+   </div>
+ 
+   <div class="analytics-pane" data-analytics-pane="psb">
+@@ -36,7 +37,7 @@
+   if(typeof Chart==='undefined')return;
+   const series=<%- JSON.stringify(financeSeries) %>,currency=v=>'Rp '+new Intl.NumberFormat('id-ID',{notation:'compact',maximumFractionDigits:1}).format(v||0);
+   const base={responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8995aa',boxWidth:10,usePointStyle:true}},tooltip:{backgroundColor:'#0b1020',padding:12,callbacks:{label:c=>`${c.dataset.label}: ${currency(c.raw)}`}}},scales:{x:{grid:{display:false},ticks:{color:'#7f8aa0'}},y:{beginAtZero:true,grid:{color:'rgba(148,163,184,.08)'},ticks:{color:'#7f8aa0',callback:currency}}}};
+-  const cash=document.getElementById('analyticsCashflowChart');if(cash)new Chart(cash,{type:'line',data:{labels:series.labels,datasets:[{label:'Inflow',data:series.inflow,borderColor:'#2ed6a1',backgroundColor:'rgba(46,214,161,.10)',fill:true,tension:.38},{label:'Outflow',data:series.outflow,borderColor:'#ff6969',backgroundColor:'rgba(255,105,105,.08)',fill:true,tension:.38}]},options:base});
++  const cash=document.getElementById('analyticsCashflowChart');if(cash)new Chart(cash,{type:'bar',data:{labels:series.labels,datasets:[{label:'Inflow',data:series.inflow,backgroundColor:'rgba(46,214,161,.65)',borderColor:'#2ed6a1',borderWidth:1,borderRadius:6},{label:'Outflow',data:series.outflow,backgroundColor:'rgba(255,105,105,.55)',borderColor:'#ff6969',borderWidth:1,borderRadius:6}]},options:{...base,scales:{...base.scales,x:{...base.scales.x,stacked:false}}}});
+   const mrr=document.getElementById('analyticsMrrChart');if(mrr)new Chart(mrr,{type:'bar',data:{labels:series.labels,datasets:[{label:'Billing recurring',data:series.mrr,backgroundColor:'rgba(95,91,255,.60)',borderColor:'#766cff',borderWidth:1,borderRadius:7}]},options:base});
+ })();
+ </script>
+diff --git a/views/mikrotik/index.ejs b/views/mikrotik/index.ejs
+new file mode 100644
+index 0000000..53f3d36
+--- /dev/null
++++ b/views/mikrotik/index.ejs
+@@ -0,0 +1,138 @@
++<section class="mikrotik-page analytics-v119">
++  <div class="module-head analytics-head">
++    <div><div class="module-kicker">SERVICE PPPoE FOCUS</div><h1>MikroTik PPPoE</h1><p>Analitik, sesi aktif, dan audit sinkronisasi PPPoE tanpa beban monitoring live traffic.</p></div>
++    <a class="btn-tech" href="/network/monitor"><i class="bi bi-activity"></i>Buka NMS Lengkap</a>
++  </div>
++
++  <% if(isDummy){ %><div class="alert alert-warning alert-modern" role="alert"><i class="bi bi-exclamation-triangle-fill me-2"></i>Router MikroTik sedang tidak dapat dijangkau atau data belum siap. Menampilkan tampilan kosong yang aman sampai koneksi pulih.</div><% } %>
++  <% if(overview.routerErrors && overview.routerErrors.length){ %><div class="alert alert-warning alert-modern" role="alert"><i class="bi bi-wifi-off me-2"></i><b><%= overview.routerErrors.length %> router</b> tidak dapat dijangkau: <%= overview.routerErrors.map(e=>`${e.siteCode}/${e.name}`).join(', ') %>.</div><% } %>
++
++  <nav class="analytics-tabs" aria-label="MikroTik PPPoE">
++    <button class="active" data-mikrotik-tab="analytics"><i class="bi bi-pie-chart-fill"></i>PPPoE Analytics</button>
++    <button data-mikrotik-tab="sessions"><i class="bi bi-broadcast-pin"></i>Active Sessions</button>
++    <button data-mikrotik-tab="audit"><i class="bi bi-shield-check"></i>Sync & Audit</button>
++  </nav>
++
++  <div class="analytics-pane active" data-mikrotik-pane="analytics">
++    <div class="analytics-kpi-grid">
++      <article><span>Total Secret PPPoE</span><strong><%= overview.stats.totalSecrets %></strong><small><%= overview.routersChecked %> router terpantau</small><i class="bi bi-people-fill"></i></article>
++      <article><span>Online</span><strong><%= overview.stats.online %></strong><small>Sesi aktif saat ini</small><i class="bi bi-wifi"></i></article>
++      <article><span>Offline</span><strong><%= overview.stats.offline %></strong><small>Secret tidak connect</small><i class="bi bi-wifi-off"></i></article>
++      <article><span>Isolir</span><strong><%= overview.stats.isolated %></strong><small>Disabled / isolir</small><i class="bi bi-slash-circle"></i></article>
++    </div>
++    <div class="analytics-finance-grid">
++      <article class="analytics-chart-card"><div class="analytics-section-title"><div><span>DISTRIBUSI PROFIL</span><h2>Paket / Profile PPPoE</h2></div></div><div class="analytics-chart"><canvas id="mikrotikProfileChart"></canvas></div></article>
++      <article class="analytics-chart-card"><div class="analytics-section-title"><div><span>TREN 24 JAM<% if(trend.isEstimated){ %> · ESTIMASI<% } %></span><h2>Active Users</h2></div></div><div class="analytics-chart"><canvas id="mikrotikTrendChart"></canvas></div><% if(trend.isEstimated){ %><small class="cell-sub d-block mt-2"><i class="bi bi-info-circle"></i> Riwayat sample masih sedikit, kurva di atas adalah estimasi halus dari kondisi online saat ini. Grafik akan mengikuti data riil seiring waktu berjalan.</small><% } %></article>
++    </div>
++  </div>
++
++  <div class="analytics-pane" data-mikrotik-pane="sessions">
++    <div class="data-card">
++      <div class="data-card-head"><div><h3>Sesi PPPoE Aktif</h3><small><%= sessions.length %> user sedang online.</small></div></div>
++      <div class="table-responsive"><table class="app-table">
++        <thead><tr><th>Username</th><th>Pelanggan</th><th>Site / Router</th><th>Profil</th><th>IP</th><th>Uptime</th><th>Aksi</th></tr></thead>
++        <tbody>
++          <% sessions.forEach(s=>{ %><tr>
++            <td><span class="cell-main"><%= s.username %></span></td>
++            <td><% if(s.customerName){ %><span class="cell-main"><%= s.customerName %></span><span class="cell-sub"><%= s.customerCode %></span><% }else{ %><span class="status-badge orange">Belum link billing</span><% } %></td>
++            <td><span class="status-badge purple"><%= s.siteCode %></span><span class="cell-sub d-block"><%= s.routerName %></span></td>
++            <td><%= s.profile %></td>
++            <td><%= s.address %></td>
++            <td><%= s.uptime %></td>
++            <td><button type="button" class="approval-button reject" data-kick-router="<%= s.routerId %>" data-kick-secret="<%= s.secretId %>" data-kick-name="<%= s.username %>"><i class="bi bi-plug-fill"></i>Kick Session</button></td>
++          </tr><% }) %>
++          <% if(!sessions.length){ %><tr><td colspan="7"><div class="empty-state"><i class="bi bi-wifi-off"></i><strong>Tidak ada sesi PPPoE aktif</strong></div></td></tr><% } %>
++        </tbody>
++      </table></div>
++    </div>
++  </div>
++
++  <div class="analytics-pane" data-mikrotik-pane="audit">
++    <div class="analytics-kpi-grid">
++      <article><span>Synced</span><strong><%= overview.sync.synced %></strong><small>Billing ↔ Router cocok</small><i class="bi bi-check2-circle"></i></article>
++      <article><span>Missing</span><strong><%= overview.sync.missing %></strong><small>Billing aktif, belum ada secret</small><i class="bi bi-exclamation-triangle"></i></article>
++      <article><span>Rogue</span><strong><%= overview.sync.rogue %></strong><small>Secret di router, tanpa billing</small><i class="bi bi-shield-exclamation"></i></article>
++      <article><span>Exempt</span><strong><%= overview.sync.exempt %></strong><small>Admin / free, dikecualikan</small><i class="bi bi-shield-check"></i></article>
++    </div>
++
++    <div class="data-card">
++      <div class="data-card-head"><div><h3>Missing · Pelanggan Belum Punya Secret</h3><small>Billing aktif namun belum terhubung PPPoE di router site-nya.</small></div></div>
++      <div class="table-responsive"><table class="app-table">
++        <thead><tr><th>Pelanggan</th><th>Site</th><th>Saran Router</th><th>Aksi</th></tr></thead>
++        <tbody>
++          <% syncAudit.missing.forEach(m=>{ %><tr>
++            <td><span class="cell-main"><%= m.customerName %></span><span class="cell-sub"><%= m.customerCode %></span></td>
++            <td><span class="status-badge purple"><%= m.siteCode %></span></td>
++            <td><%= m.routerName %></td>
++            <td><button type="button" class="approval-button approve" data-push-customer="<%= m.customerId %>" data-push-name="<%= m.customerName %>"><i class="bi bi-cloud-arrow-up"></i>Push to Router</button></td>
++          </tr><% }) %>
++          <% if(!syncAudit.missing.length){ %><tr><td colspan="4"><div class="empty-state compact"><i class="bi bi-check2-circle"></i><strong>Semua pelanggan aktif sudah tersinkron</strong></div></td></tr><% } %>
++        </tbody>
++      </table></div>
++    </div>
++
++    <div class="data-card">
++      <div class="data-card-head"><div><h3>Rogue · Secret Tanpa Billing</h3><small>Ada di router tetapi tidak terhubung ke pelanggan billing mana pun dan bukan akun admin/free.</small></div></div>
++      <div class="table-responsive"><table class="app-table">
++        <thead><tr><th>Username</th><th>Site / Router</th><th>Profil</th><th>Status</th><th>Aksi</th></tr></thead>
++        <tbody>
++          <% syncAudit.rogue.forEach(r=>{ %><tr>
++            <td><span class="cell-main"><%= r.username %></span></td>
++            <td><span class="status-badge purple"><%= r.siteCode %></span><span class="cell-sub d-block"><%= r.routerName %></span></td>
++            <td><%= r.profile %></td>
++            <td><span class="status-badge <%= r.status==='online'?'green':r.status==='isolated'?'red':'orange' %>"><%= r.status %></span></td>
++            <td><button type="button" class="approval-button reject" data-delete-router="<%= r.routerId %>" data-delete-secret="<%= r.secretId %>" data-delete-name="<%= r.username %>"><i class="bi bi-trash3-fill"></i>Delete Secret</button></td>
++          </tr><% }) %>
++          <% if(!syncAudit.rogue.length){ %><tr><td colspan="5"><div class="empty-state compact"><i class="bi bi-check2-circle"></i><strong>Tidak ada rogue secret</strong></div></td></tr><% } %>
++        </tbody>
++      </table></div>
++    </div>
++  </div>
++
++  <div class="nms-toast" id="mikrotikToast" hidden></div>
++</section>
++
++<div class="modal fade" id="mikrotikConfirmModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="mikrotikConfirmTitle">Konfirmasi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" id="mikrotikConfirmBody">-</div><div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button type="button" class="btn-tech danger" id="mikrotikConfirmSubmit">Konfirmasi</button></div></div></div></div>
++
++<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
++<script>
++(()=>{
++  document.querySelectorAll('[data-mikrotik-tab]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-mikrotik-tab]').forEach(x=>x.classList.toggle('active',x===btn));document.querySelectorAll('[data-mikrotik-pane]').forEach(x=>x.classList.toggle('active',x.dataset.mikrotikPane===btn.dataset.mikrotikTab));}));
++
++  const csrfToken=document.querySelector('meta[name="csrf-token"]')?.content||'';
++  const toastEl=document.getElementById('mikrotikToast');
++  const toast=(message,type='success')=>{if(!toastEl)return;toastEl.className=`nms-toast ${type}`;toastEl.innerHTML=`<i class="bi ${type==='danger'?'bi-x-octagon-fill':'bi-check-circle-fill'}"></i>${message}`;toastEl.hidden=false;clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.hidden=true,5000);};
++  async function post(url){const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','CSRF-Token':csrfToken},body:'{}'});let data={};try{data=await res.json();}catch(e){}if(!res.ok||!data.ok)throw new Error(data.error||`HTTP ${res.status}`);return data;}
++
++  const confirmModalEl=document.getElementById('mikrotikConfirmModal');
++  const confirmModal=window.bootstrap?new bootstrap.Modal(confirmModalEl):null;
++  let pendingAction=null;
++  function openConfirm(title,body,action){document.getElementById('mikrotikConfirmTitle').textContent=title;document.getElementById('mikrotikConfirmBody').textContent=body;pendingAction=action;confirmModal?confirmModal.show():((confirm(body))&&action());}
++  document.getElementById('mikrotikConfirmSubmit')?.addEventListener('click',async()=>{const action=pendingAction;pendingAction=null;confirmModal?.hide();if(action)await action();});
++
++  document.querySelectorAll('[data-kick-router]').forEach(btn=>btn.addEventListener('click',()=>{
++    openConfirm('Kick Session',`Putuskan sesi aktif ${btn.dataset.kickName}? Akun PPPoE tetap tersimpan.`,async()=>{
++      try{const r=await post(`/mikrotik/sessions/${btn.dataset.kickRouter}/${btn.dataset.kickSecret}/kick`);toast(r.message);setTimeout(()=>location.reload(),900);}catch(e){toast(e.message,'danger');}
++    });
++  }));
++  document.querySelectorAll('[data-delete-router]').forEach(btn=>btn.addEventListener('click',()=>{
++    openConfirm('Delete Secret',`Hapus permanen secret ${btn.dataset.deleteName} dari router? Tindakan ini tidak dapat dibatalkan.`,async()=>{
++      try{const r=await post(`/mikrotik/secrets/${btn.dataset.deleteRouter}/${btn.dataset.deleteSecret}/delete`);toast(r.message);setTimeout(()=>location.reload(),900);}catch(e){toast(e.message,'danger');}
++    });
++  }));
++  document.querySelectorAll('[data-push-customer]').forEach(btn=>btn.addEventListener('click',()=>{
++    openConfirm('Push to Router',`Buat secret PPPoE baru di router untuk ${btn.dataset.pushName}?`,async()=>{
++      try{const r=await post(`/mikrotik/customers/${btn.dataset.pushCustomer}/push`);toast(`${r.message} Username: ${r.username} · Password: ${r.password}`);setTimeout(()=>location.reload(),1600);}catch(e){toast(e.message,'danger');}
++    });
++  }));
++
++  if(typeof Chart==='undefined')return;
++  const profileData=<%- JSON.stringify(overview.profileDistribution) %>;
++  const trendData=<%- JSON.stringify(trend) %>;
++  const palette=['#766cff','#2ed6a1','#ffbd5b','#ff6969','#61d8ff','#8b7bff','#7d899d'];
++  const profileCanvas=document.getElementById('mikrotikProfileChart');
++  if(profileCanvas)new Chart(profileCanvas,{type:'doughnut',data:{labels:profileData.map(p=>p.profile),datasets:[{data:profileData.map(p=>p.count),backgroundColor:profileData.map((_,i)=>palette[i%palette.length]),borderColor:'rgba(8,12,25,.9)',borderWidth:3,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{position:'bottom',labels:{color:'#8995aa',boxWidth:10,usePointStyle:true}}}}});
++  const trendCanvas=document.getElementById('mikrotikTrendChart');
++  if(trendCanvas){const ctx=trendCanvas.getContext('2d');const fill=ctx.createLinearGradient(0,0,0,220);fill.addColorStop(0,'rgba(97,216,255,.30)');fill.addColorStop(1,'rgba(97,216,255,0)');new Chart(trendCanvas,{type:'line',data:{labels:trendData.labels,datasets:[{label:'Active Users',data:trendData.values,borderColor:'#61d8ff',backgroundColor:fill,fill:true,tension:.35,borderWidth:2.2,pointRadius:0,pointHoverRadius:4,borderDash:trendData.isEstimated?[6,4]:[]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#7f8aa0',maxTicksLimit:8}},y:{beginAtZero:true,grid:{color:'rgba(148,163,184,.08)'},ticks:{color:'#7f8aa0',precision:0}}}}});}
++})();
++</script>
+diff --git a/views/partials/layout.ejs b/views/partials/layout.ejs
+index 6ceaa87..6f53e52 100644
+--- a/views/partials/layout.ejs
++++ b/views/partials/layout.ejs
+@@ -49,7 +49,7 @@
+         <div class="sidebar-section-label">CONTROL CENTER</div>
+         <nav class="sidebar-nav">
+           <a class="sidebar-link <%= currentPath === '/' ? 'active' : '' %>" href="/"><i class="bi bi-grid-1x2-fill"></i><span><%= t('dashboard') %></span><em>⌘</em></a>
+-          <% if(can('finance')){ %><a class="sidebar-link <%= currentPath.startsWith('/analytics') ? 'active' : '' %>" href="/analytics"><i class="bi bi-graph-up-arrow"></i><span>Analitik Keuangan & PSB</span><em>AI</em></a><% } %>
++          <% if(can('finance')){ %><a class="sidebar-link <%= currentPath.startsWith('/analytics') ? 'active' : '' %>" href="/analytics"><i class="bi bi-pie-chart-fill"></i><span>Analitik Bisnis</span><em>AI</em></a><% } %>
+         </nav>
+ 
+         <% if(can('customers')){ %>
+@@ -100,6 +100,7 @@
+           <a class="sidebar-link <%= currentPath.startsWith('/routers') ? 'active' : '' %>" href="/routers"><i class="bi bi-router-fill"></i><span><%= t('routers') %></span></a>
+           <a class="sidebar-link <%= currentPath.startsWith('/clusters') ? 'active' : '' %>" href="/clusters"><i class="bi bi-diagram-3-fill"></i><span><%= t('clusters') %></span></a>
+           <a class="sidebar-link <%= currentPath.startsWith('/network/monitor') ? 'active' : '' %>" href="/network/monitor"><i class="bi bi-activity"></i><span><%= t('monitor') %></span></a>
++          <a class="sidebar-link <%= currentPath.startsWith('/mikrotik') ? 'active' : '' %>" href="/mikrotik"><i class="bi bi-broadcast-pin"></i><span>MikroTik PPPoE</span></a>
+           <details class="sidebar-nav-group infra-sidebar-group" <%= currentPath.startsWith('/network/tools') ? 'open' : '' %>>
+             <summary class="sidebar-link <%= currentPath.startsWith('/network/tools') ? 'active' : '' %>"><i class="bi bi-grid-1x2-fill"></i><span>Infrastructure Hub</span><em><i class="bi bi-chevron-down"></i></em></summary>
+             <div class="sidebar-subnav infra-sidebar-subnav"><a href="/network/tools"><i class="bi bi-grid"></i>Workspace Overview</a><a href="/network/tools?group=server"><i class="bi bi-server"></i>Server & OS</a><a href="/network/tools?group=management"><i class="bi bi-router-fill"></i>TR-069 & Management</a><a href="/network/tools?group=containers"><i class="bi bi-box-seam-fill"></i>Container Services</a></div>
+@@ -188,7 +189,7 @@
+         <% if(can('support')){ %><a href="/server-duty" data-keywords="piket server jadwal shift"><i class="bi bi-shield-check"></i><div><strong>Piket Server</strong><small>Jadwal piket mingguan</small></div><span>→</span></a>
+         <a href="/tickets" data-keywords="tiket gangguan teknisi"><i class="bi bi-life-preserver"></i><div><strong>Ticketing</strong><small>Keluhan & pekerjaan teknisi</small></div><span>→</span></a>
+         <a href="/team-kpi" data-keywords="kpi tim teknisi staff performance"><i class="bi bi-bar-chart-steps"></i><div><strong>KPI Tim</strong><small>Performa teknisi & staff</small></div><span>→</span></a><% } %>
+-        <% if(can('network')){ %><a href="/network/tools" data-keywords="infrastructure proxmox casaos genieacs portainer server"><i class="bi bi-grid-1x2-fill"></i><div><strong>Infrastructure Hub</strong><small>Server, TR-069 & container services</small></div><span>→</span></a><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><% } %>
++        <% if(can('network')){ %><a href="/network/tools" data-keywords="infrastructure proxmox casaos genieacs portainer server"><i class="bi bi-grid-1x2-fill"></i><div><strong>Infrastructure Hub</strong><small>Server, TR-069 & container services</small></div><span>→</span></a><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><a href="/mikrotik" data-keywords="mikrotik pppoe analytics sesi kick rogue sync audit"><i class="bi bi-broadcast-pin"></i><div><strong>MikroTik PPPoE</strong><small>Analytics, sesi aktif & sync audit</small></div><span>→</span></a><% } %>
+         <% if(can('warehouse')){ %><a href="/inventory" data-keywords="gudang stock barang"><i class="bi bi-box-seam-fill"></i><div><strong>Stock Gudang</strong><small>Warehouse control</small></div><span>→</span></a><% } %>
+         <% if(can('finance')){ %><a href="/analytics" data-keywords="analitik finance psb mrr cashflow odp"><i class="bi bi-graph-up-arrow"></i><div><strong>Analitik Keuangan & PSB</strong><small>Executive, finance, PSB & infrastruktur</small></div><span>→</span></a><a href="/cash" data-keywords="kas uang pendapatan pengeluaran"><i class="bi bi-cash-stack"></i><div><strong>Arus Kas</strong><small>Income & expense</small></div><span>→</span></a><% } %>
+         <% if(can('reports')){ %><a href="/reports" data-keywords="laporan report site"><i class="bi bi-bar-chart-line-fill"></i><div><strong>Laporan</strong><small>Billing, finance & site</small></div><span>→</span></a><% } %>
+diff --git a/views/payments/index.ejs b/views/payments/index.ejs
+index ef9f85a..412fb09 100644
+--- a/views/payments/index.ejs
++++ b/views/payments/index.ejs
+@@ -5,6 +5,14 @@
+     <div class="module-actions"><% if(isAdmin){ %><a class="btn-tech" href="/payments/reconciliation"><i class="bi bi-arrow-left-right"></i>Rekonsiliasi Cash</a><button class="btn-tech primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg"></i>Catat Pembayaran</button><% } %></div>
+   </div>
+ 
++  <% if(Number(missingProof?.total||0)>0){ %>
++  <div class="alert alert-warning alert-modern alert-dismissible fade show" role="alert">
++    <i class="bi bi-exclamation-triangle-fill me-2"></i>
++    <b><%= Number(missingProof.total) %> pembayaran</b> sudah disetujui (<%= formatRupiah(missingProof.amount||0) %>) namun belum memiliki lampiran bukti transfer. Segera lengkapi buktinya lewat tombol <b>Upload/Ganti Bukti</b> pada baris terkait.
++    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
++  </div>
++  <% } %>
++
+   <div class="metric-grid">
+     <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pembayaran Terkonfirmasi</span><span class="metric-icon"><i class="bi bi-patch-check-fill"></i></span></div><strong><%= formatRupiah(summary.confirmed_total||0) %></strong><small><%= paymentMonthNames[summaryMonth-1] %> <%= summaryYear %></small></article>
+     <article class="metric-card orange"><div class="metric-top"><span class="metric-label">Cash di Tim</span><span class="metric-icon"><i class="bi bi-person-badge-fill"></i></span></div><strong><%= formatRupiah(summary.cash_held||0) %></strong><small>Belum disetor ke kas perusahaan</small></article>

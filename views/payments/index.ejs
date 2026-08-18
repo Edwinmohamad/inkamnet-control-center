@@ -5,6 +5,14 @@
     <div class="module-actions"><% if(isAdmin){ %><a class="btn-tech" href="/payments/reconciliation"><i class="bi bi-arrow-left-right"></i>Rekonsiliasi Cash</a><button class="btn-tech primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg"></i>Catat Pembayaran</button><% } %></div>
   </div>
 
+  <% if(Number(missingProof?.total||0)>0){ %>
+  <div class="alert alert-warning alert-modern alert-dismissible fade show" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <b><%= Number(missingProof.total) %> pembayaran</b> sudah disetujui (<%= formatRupiah(missingProof.amount||0) %>) namun belum memiliki lampiran bukti transfer. Segera lengkapi buktinya lewat tombol <b>Upload/Ganti Bukti</b> pada baris terkait.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+  <% } %>
+
   <div class="metric-grid">
     <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pembayaran Terkonfirmasi</span><span class="metric-icon"><i class="bi bi-patch-check-fill"></i></span></div><strong><%= formatRupiah(summary.confirmed_total||0) %></strong><small><%= paymentMonthNames[summaryMonth-1] %> <%= summaryYear %></small></article>
     <article class="metric-card orange"><div class="metric-top"><span class="metric-label">Cash di Tim</span><span class="metric-icon"><i class="bi bi-person-badge-fill"></i></span></div><strong><%= formatRupiah(summary.cash_held||0) %></strong><small>Belum disetor ke kas perusahaan</small></article>

@@ -1,0 +1,79 @@
+INKAMNET CONTROL CENTER — Revision patch on top of v1.19.0
+============================================================
+
+Cara pakai (GitHub Desktop, sama seperti patch v1.19.0):
+1. Salin isi folder ini ke root repository lokal inkamnet-control-center,
+   pilih Replace saat ditanya (hanya file yang tercantum di bawah yang berubah).
+2. Jalankan: npm install (jika belum) lalu npm run validate:v119
+3. Jika validasi OK, commit & push dari GitHub Desktop.
+4. Restart aplikasi. Migrasi schema baru (pppoe_hourly_samples) otomatis
+   dijalankan oleh ensureV28Schema() saat startup — tidak perlu migrasi manual.
+
+AUDIT SINGKAT
+-------------
+Sebagian besar item pada instruksi revisi TERNYATA SUDAH terimplementasi di
+repo v1.19.0 ini (dashboard tanpa widget Piket + user ticker, PSB hero widget
+warna kalem, Kondisi Pelanggan per Site, modul /analytics, Infrastructure Hub
+reverse-proxy, workflow approval kas). Patch ini HANYA menambah/melengkapi
+bagian yang benar-benar belum ada atau belum lengkap, supaya tidak menimpa
+pekerjaan yang sudah teruji.
+
+FILE YANG DIUBAH
+-----------------
+- app.js
+  Mount route baru /mikrotik + jalankan ensureV28Schema() saat bootstrap.
+- services/schemaService.js
+  Tambah ensureV28Schema(): tabel pppoe_hourly_samples untuk histori tren
+  active users MikroTik PPPoE.
+- services/analyticsService.js
+  * Anti-crash: query dibungkus try/catch, fallback ke data contoh realistis
+    (buildDummyAnalytics) jika tabel/kolom database belum siap — sebelumnya
+    modul /analytics bisa 500 error jika skema belum lengkap.
+  * Tabel Aging Piutang sekarang menyertakan nomor WhatsApp pelanggan
+    (dinormalisasi via whatsappService) untuk tombol WA reminder.
+- views/analytics/index.ejs
+  * Tombol "Reminder" WhatsApp di tiap baris Aging Piutang (wa.me + pesan
+    otomatis berisi nominal & status jatuh tempo).
+  * Banner peringatan saat data contoh (dummy) sedang ditampilkan.
+  * Grafik Cashflow diubah dari line menjadi grafik batang (bar) sesuai
+    permintaan "Grafik Batang Cashflow In/Out".
+- routes/payments.js & views/payments/index.ejs
+  Banner peringatan (kuning) di atas halaman Approval & Transaksi ketika ada
+  pembayaran yang sudah di-approve tetapi belum punya lampiran bukti transfer.
+  (Tombol Upload/Edit Bukti sendiri sudah bisa diakses sebelum & sesudah
+  approval sejak v1.19.0 — tidak diubah.)
+- views/partials/layout.ejs
+  * Menu sidebar baru "MikroTik PPPoE" (/mikrotik) di bawah Network.
+  * Command palette (Ctrl+K) entry untuk MikroTik PPPoE.
+  * Ikon menu Analitik diganti ke pie-chart agar sesuai permintaan asli.
+
+FILE BARU
+---------
+- routes/mikrotik.js
+- services/mikrotikPppoeService.js
+- views/mikrotik/index.ejs
+  Modul baru /mikrotik — fokus 100% Service PPPoE:
+  * Tab PPPoE Analytics: 4 stat card + doughnut distribusi profil + line
+    chart tren active users 24 jam (dari tabel pppoe_hourly_samples; sample
+    direkam otomatis setiap kunjungan halaman, maksimal 1x/~50 menit — pada
+    instalasi baru grafik memakai estimasi halus yang ditandai jelas di UI
+    sampai histori riil terkumpul).
+  * Tab Active Sessions: tabel user online + tombol "Kick Session".
+  * Tab Sync & Audit: klasifikasi Synced / Missing / Rogue / Exempt +
+    tombol "Push to Router" (buat secret baru untuk pelanggan billing yang
+    belum ada di router) dan "Delete Secret" (hapus rogue secret).
+  Semua aksi memakai requireAdmin + audit log, mengikuti pola yang sama
+  dengan routes/network.js yang sudah ada.
+
+CATATAN PENGUJIAN
+------------------
+- node --check pada seluruh file JS: OK.
+- npm run validate (syntax + EJS/CSRF/modal static check): OK, 39 EJS file.
+- npm run validate:v119 + 3 script test v119 lainnya: OK, semua lolos tanpa
+  regresi pada kontrak fitur v1.19 yang sudah ada.
+- Modul baru (routes/mikrotik.js, services/mikrotikPppoeService.js) diverifikasi
+  bisa di-require tanpa error setelah `npm install`.
+- Live smoke-test terhadap MySQL/router MikroTik sungguhan TIDAK dilakukan di
+  environment build ini (tidak ada akses database/router). Disarankan smoke-test
+  halaman /mikrotik, /analytics, dan /payments di staging sebelum promosi ke
+  production — sama seperti catatan QA pada INSTALL-v1.19.0.txt.

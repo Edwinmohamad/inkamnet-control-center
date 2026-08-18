@@ -1,4 +1,5 @@
 const db=require('../config/db');
+const { normalizeWhatsapp }=require('./whatsappService');
 
 function num(value){const n=Number(value);return Number.isFinite(n)?n:0;}
 function monthKey(date){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;}
@@ -28,7 +29,7 @@ function buildAdvisories({odp=[],dueSoon=0,overdue30=0,pppoeUnlinked=0,pendingCa
   return out;
 }
 
-async function getAnalytics({siteCode='',month,year}){
+async function fetchAnalytics({siteCode='',month,year}){
   const now=new Date();month=Number(month)||now.getMonth()+1;year=Number(year)||now.getFullYear();
   const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
   const selected=siteCode?sites.find(s=>String(s.code).toUpperCase()===String(siteCode).toUpperCase()):null;
@@ -52,7 +53,8 @@ async function getAnalytics({siteCode='',month,year}){
   const months=lastMonths(12,now),cashMap=new Map(cashRows.map(x=>[x.month_key,x])),mrrMap=new Map(mrrRows.map(x=>[x.month_key,x]));
   const financeSeries={labels:months.map(x=>x.label),inflow:months.map(x=>num(cashMap.get(x.key)?.inflow)),outflow:months.map(x=>num(cashMap.get(x.key)?.outflow)),mrr:months.map(x=>num(mrrMap.get(x.key)?.billed))};
 
-  const [aging]=await db.execute(`SELECT c.id,c.customer_code,c.name customer_name,s.code site_code,MIN(i.due_date) oldest_due,COALESCE(SUM(i.outstanding),0) outstanding,MAX(DATEDIFF(CURDATE(),i.due_date)) days_overdue FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope} GROUP BY c.id,c.customer_code,c.name,s.code ORDER BY days_overdue DESC,outstanding DESC LIMIT 100`,customerParams);
+  const [agingRaw]=await db.execute(`SELECT c.id,c.customer_code,c.name customer_name,c.phone,s.code site_code,MIN(i.due_date) oldest_due,COALESCE(SUM(i.outstanding),0) outstanding,MAX(DATEDIFF(CURDATE(),i.due_date)) days_overdue FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope} GROUP BY c.id,c.customer_code,c.name,c.phone,s.code ORDER BY days_overdue DESC,outstanding DESC LIMIT 100`,customerParams);
+  const aging=agingRaw.map(row=>{const wa=normalizeWhatsapp(row.phone);return {...row,whatsappNumber:wa||null};});
   const agingBuckets={h3:aging.filter(x=>num(x.days_overdue)<=0&&num(x.days_overdue)>=-3),hplus3:aging.filter(x=>num(x.days_overdue)>0&&num(x.days_overdue)<=30),over30:aging.filter(x=>num(x.days_overdue)>30)};
 
   const [[funnelRow]]=await db.execute(`SELECT COUNT(*) registered,SUM(c.address IS NOT NULL AND c.address<>'' AND c.cluster_id IS NOT NULL) survey_ready,SUM(c.router_id IS NOT NULL AND c.pppoe_username IS NOT NULL AND c.pppoe_username<>'') provisioned,SUM(c.customer_status='active' AND c.activation_date IS NOT NULL) activated FROM customers c WHERE YEAR(c.created_at)=? AND MONTH(c.created_at)=?${customerScope}`,[year,month,...customerParams]);
@@ -61,7 +63,39 @@ async function getAnalytics({siteCode='',month,year}){
   const collectionRate=num(billing.billed)>0?Math.min(100,Math.round(num(billing.collected)/num(billing.billed)*100)):0;
   const kpis={activeCustomers:num(exec.active_customers),mrr:num(exec.mrr),billed:num(billing.billed),collected:num(billing.collected),outstanding:num(billing.outstanding),collectionRate,psb:num(psb.total),pendingCash:num(cashPending.pending_cash)};
   const advisories=buildAdvisories({odp,dueSoon:num(risk.due_soon),overdue30:num(risk.overdue_30),pppoeUnlinked:num(sync.pppoe_unlinked),pendingCash:num(cashPending.pending_cash)});
-  return {sites,selectedSiteCode:selected?.code||'',selectedSiteName:selected?.name||'Semua Site',month,year,kpis,advisories,financeSeries,aging,agingBuckets,funnel:buildFunnel(funnelRow),sla:{avgDays:num(sla.avg_days),samples:num(sla.samples)},odp:odp.map(x=>({...x,capacity_ports:num(x.capacity_ports),used_ports:num(x.used_ports),remaining_ports:num(x.remaining_ports),utilization:num(x.capacity_ports)?Math.min(100,Math.round(num(x.used_ports)/num(x.capacity_ports)*100)):0}))};
+  return {sites,selectedSiteCode:selected?.code||'',selectedSiteName:selected?.name||'Semua Site',month,year,kpis,advisories,financeSeries,aging,agingBuckets,funnel:buildFunnel(funnelRow),sla:{avgDays:num(sla.avg_days),samples:num(sla.samples)},odp:odp.map(x=>({...x,capacity_ports:num(x.capacity_ports),used_ports:num(x.used_ports),remaining_ports:num(x.remaining_ports),utilization:num(x.capacity_ports)?Math.min(100,Math.round(num(x.used_ports)/num(x.capacity_ports)*100)):0})),isDummy:false};
 }
 
-module.exports={getAnalytics,buildAdvisories,buildFunnel,lastMonths};
+// Realistic placeholder payload so the /analytics page never 500s when a table/column
+// referenced above (clusters.capacity_ports, cash_transactions.approval_status, etc.)
+// has not been migrated yet on a fresh or older database. Every number here is fictional.
+function buildDummyAnalytics({siteCode='',month,year}={}){
+  const now=new Date();month=Number(month)||now.getMonth()+1;year=Number(year)||now.getFullYear();
+  const months=lastMonths(12,now);
+  const wave=(base,amp,phase=0)=>months.map((_,i)=>Math.max(0,Math.round(base+amp*Math.sin((i+phase)/2))));
+  const financeSeries={labels:months.map(x=>x.label),inflow:wave(38000000,9000000),outflow:wave(24000000,6000000,1.4),mrr:wave(52000000,5000000,0.6)};
+  const dummySites=[{id:0,code:'HQ',name:'Kantor Pusat (contoh)'}];
+  const selectedName=siteCode?`${siteCode} (contoh)`:'Semua Site (contoh)';
+  const aging=[
+    {id:'demo-1',customer_code:'DEMO-0001',customer_name:'Contoh Pelanggan A',phone:null,whatsappNumber:null,site_code:'HQ',oldest_due:new Date(now.getTime()-2*86400000),outstanding:350000,days_overdue:2},
+    {id:'demo-2',customer_code:'DEMO-0002',customer_name:'Contoh Pelanggan B',phone:null,whatsappNumber:null,site_code:'HQ',oldest_due:new Date(now.getTime()-15*86400000),outstanding:275000,days_overdue:15},
+    {id:'demo-3',customer_code:'DEMO-0003',customer_name:'Contoh Pelanggan C',phone:null,whatsappNumber:null,site_code:'HQ',oldest_due:new Date(now.getTime()-40*86400000),outstanding:520000,days_overdue:40}
+  ];
+  const agingBuckets={h3:aging.filter(x=>x.days_overdue<=2),hplus3:aging.filter(x=>x.days_overdue>2&&x.days_overdue<=30),over30:aging.filter(x=>x.days_overdue>30)};
+  const odp=[{id:'demo-odp-1',name:'ODP Contoh 01',capacity_ports:16,used_ports:14,remaining_ports:2,utilization:88,site_code:'HQ',site_name:'Kantor Pusat (contoh)'}];
+  const funnel=buildFunnel({registered:40,survey_ready:34,provisioned:28,activated:22});
+  const kpis={activeCustomers:842,mrr:52000000,billed:61000000,collected:53000000,outstanding:8000000,collectionRate:87,psb:22,pendingCash:2};
+  const advisories=buildAdvisories({odp,dueSoon:1,overdue30:aging.filter(x=>x.days_overdue>30).length,pppoeUnlinked:3,pendingCash:2});
+  return {sites:dummySites,selectedSiteCode:siteCode||'',selectedSiteName:selectedName,month,year,kpis,advisories,financeSeries,aging,agingBuckets,funnel,sla:{avgDays:3.2,samples:22},odp,isDummy:true};
+}
+
+async function getAnalytics(params={}){
+  try{
+    return await fetchAnalytics(params);
+  }catch(error){
+    console.error('Analytics query gagal, menampilkan data contoh sementara:',error.message);
+    return buildDummyAnalytics(params);
+  }
+}
+
+module.exports={getAnalytics,buildAdvisories,buildFunnel,lastMonths,buildDummyAnalytics};

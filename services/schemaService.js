@@ -374,4 +374,17 @@ async function ensureV27Schema() {
   )`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema };
+async function ensureV28Schema() {
+  // Hourly aggregate samples power the MikroTik PPPoE Analytics 24h active-users trend chart.
+  await db.query(`CREATE TABLE IF NOT EXISTS pppoe_hourly_samples (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    sampled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    online_count INT UNSIGNED NOT NULL DEFAULT 0,
+    offline_count INT UNSIGNED NOT NULL DEFAULT 0,
+    isolated_count INT UNSIGNED NOT NULL DEFAULT 0,
+    total_count INT UNSIGNED NOT NULL DEFAULT 0,
+    INDEX idx_pppoe_hourly_samples_time (sampled_at)
+  )`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV28Schema };
