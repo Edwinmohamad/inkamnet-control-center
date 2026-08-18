@@ -94,9 +94,15 @@ router.post('/:id/delete', requireAdmin, async(req,res)=>{
   const id=Number(req.params.id);
   const [[pkg]]=await db.execute(`SELECT id,name,site_id FROM packages WHERE id=? LIMIT 1`,[id]);
   if(!pkg){req.session.flash={type:'warning',message:'Paket tidak ditemukan.'};return res.redirect('/packages');}
-  const [[usage]]=await db.execute(`SELECT COUNT(*) n FROM customers WHERE package_id=?`,[id]);
+  // v1.22: only NON-archived customers count as "still in use" — an archived customer's package_id
+  // reference is historical (their row is already hidden from the active list), and should not block
+  // deletion. This fixes a reported bug where "0 pelanggan aktif" still showed this block, because the
+  // old query counted archived rows too. See routes/customers.js customerSql() — the packages JOIN was
+  // switched to LEFT JOIN so an archived customer whose package is later deleted still renders fine
+  // (blank package name) instead of silently vanishing from Data Diarsip.
+  const [[usage]]=await db.execute(`SELECT COUNT(*) n FROM customers WHERE package_id=? AND archived_at IS NULL`,[id]);
   if(Number(usage?.n||0)>0){
-    req.session.flash={type:'danger',message:`Paket ${pkg.name} masih dipakai ${usage.n} pelanggan dan tidak dapat dihapus permanen. Gunakan tombol Aktif/Nonaktif (Arsipkan Paket) agar paket berhenti ditawarkan tanpa memutus data pelanggan yang sudah memakainya.`};
+    req.session.flash={type:'danger',message:`Paket ${pkg.name} masih dipakai ${usage.n} pelanggan aktif dan tidak dapat dihapus permanen. Gunakan tombol Aktif/Nonaktif (Arsipkan Paket) agar paket berhenti ditawarkan tanpa memutus data pelanggan yang sudah memakainya.`};
     return res.redirect('/packages');
   }
   await db.execute(`DELETE FROM packages WHERE id=?`,[id]);
@@ -115,7 +121,7 @@ router.post('/bulk', requireAdmin, async(req,res)=>{
     const [rows]=await db.execute(`SELECT id,name FROM packages WHERE id IN (${placeholders})`,ids);
     if(!rows.length){req.session.flash={type:'warning',message:'Paket terpilih tidak ditemukan.'};return res.redirect('/packages');}
     const rowIds=rows.map(r=>r.id);const rowPlaceholders=rowIds.map(()=>'?').join(',');
-    const [usageCounts]=await db.execute(`SELECT package_id,COUNT(*) n FROM customers WHERE package_id IN (${rowPlaceholders}) GROUP BY package_id`,rowIds);
+    const [usageCounts]=await db.execute(`SELECT package_id,COUNT(*) n FROM customers WHERE package_id IN (${rowPlaceholders}) AND archived_at IS NULL GROUP BY package_id`,rowIds);
     const boundIds=new Set(usageCounts.filter(r=>Number(r.n)>0).map(r=>r.package_id));
     const eligible=rows.filter(r=>!boundIds.has(r.id));
     const skipped=rows.length-eligible.length;

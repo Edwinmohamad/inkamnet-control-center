@@ -139,7 +139,7 @@ router.post('/cash/:id/delete',requireAdmin,async(req,res)=>{
 router.post('/cash/:id/force-delete',requireMasterAdmin,async(req,res)=>{
   // Triggered from the generic #forceDeleteModal, whose hidden form only carries the CSRF token — so
   // the return-filter context is passed via the action URL's query string, not body fields.
-  const returnCtx=cashReturn(Object.keys(req.query).length?req.query:req.body);
+  const returnCtx=cashReturn({...req.query,...req.body});
   const [rows]=await db.execute(`SELECT proof_path,name,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual') LIMIT 1`,[req.params.id]);
   if(!rows.length){req.session.flash={type:'warning',message:'Transaksi otomatis dari pembayaran tidak dapat dihapus dari menu kas.'};return res.redirect(returnCtx);}
   const tx=rows[0];
@@ -147,6 +147,49 @@ router.post('/cash/:id/force-delete',requireMasterAdmin,async(req,res)=>{
   if(result.affectedRows&&tx.proof_path)await removeCashProof(tx.proof_path);
   if(result.affectedRows)await audit({userId:req.session.user.id,action:'force_delete',entityType:'cash_transaction',entityId:req.params.id,description:`HAPUS PAKSA transaksi kas ${tx.name} (status sebelumnya: ${tx.approval_status}, Master Admin override).`,ip:req.ip});
   req.session.flash={type:result.affectedRows?'success':'warning',message:result.affectedRows?`Transaksi kas ${tx.name} dihapus paksa permanen.`:'Transaksi tidak dapat dihapus.'};
+  res.redirect(returnCtx);
+});
+
+// v1.22 — checkbox-based bulk delete for Data Kas, mirroring the same per-row guards used by the
+// single-row routes above (never a bulk UPDATE/DELETE, always a per-row loop so the exact same rules
+// apply): 'delete' skips APPROVED/auto rows; 'force_delete' (Master Admin only) bypasses the APPROVED
+// guard but still refuses auto/payment-derived rows, exactly like /cash/:id/force-delete.
+router.post('/cash/bulk',requireAdmin,async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.cash_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  // return context (month/year/site/q) arrives via the bulk button's action URL query string, since
+  // the generic bulk-delete JS helper only posts action + id fields.
+  const returnCtx=cashReturn({...req.query,...req.body});
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu transaksi kas terlebih dahulu.'};return res.redirect(returnCtx);}
+  if(ids.length>500){req.session.flash={type:'danger',message:'Maksimal 500 transaksi per aksi massal.'};return res.redirect(returnCtx);}
+  const placeholders=ids.map(()=>'?').join(',');
+  if(action==='delete'){
+    const [rows]=await db.execute(`SELECT id,name,proof_path,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id IN (${placeholders}) AND (source_type IS NULL OR source_type='manual')`,ids);
+    const eligible=rows.filter(r=>r.approval_status!=='APPROVED');
+    const skipped=ids.length-eligible.length;
+    if(!eligible.length){req.session.flash={type:'danger',message:'Semua transaksi terpilih sudah APPROVED atau otomatis dari pembayaran, sehingga tidak dapat dihapus massal.'};return res.redirect(returnCtx);}
+    const eligibleIds=eligible.map(r=>r.id);const eligiblePlaceholders=eligibleIds.map(()=>'?').join(',');
+    await db.execute(`DELETE FROM cash_transactions WHERE id IN (${eligiblePlaceholders})`,eligibleIds);
+    for(const r of eligible)if(r.proof_path)await removeCashProof(r.proof_path);
+    await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'cash_transaction',entityId:null,description:`Hapus massal ${eligible.length} transaksi kas: ${eligible.map(r=>r.name).slice(0,20).join(', ')}${eligible.length>20?', ...':''}${skipped?` (${skipped} dilewati karena APPROVED/otomatis)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${eligible.length} transaksi kas dihapus permanen.${skipped?` ${skipped} transaksi dilewati karena sudah APPROVED atau otomatis dari pembayaran.`:''}`};
+    return res.redirect(returnCtx);
+  }
+  if(action==='force_delete'){
+    if(!isMasterAdminRole(req.session.user.role)){
+      req.session.flash={type:'danger',message:'Hapus Paksa hanya dapat dilakukan oleh Master Admin.'};
+      return res.redirect(returnCtx);
+    }
+    const [rows]=await db.execute(`SELECT id,name,proof_path FROM cash_transactions WHERE id IN (${placeholders}) AND (source_type IS NULL OR source_type='manual')`,ids);
+    if(!rows.length){req.session.flash={type:'warning',message:'Transaksi otomatis dari pembayaran tidak dapat dihapus dari menu kas.'};return res.redirect(returnCtx);}
+    const rowIds=rows.map(r=>r.id);const rowPlaceholders=rowIds.map(()=>'?').join(',');
+    await db.execute(`DELETE FROM cash_transactions WHERE id IN (${rowPlaceholders})`,rowIds);
+    for(const r of rows)if(r.proof_path)await removeCashProof(r.proof_path);
+    await audit({userId:req.session.user.id,action:'bulk_force_delete',entityType:'cash_transaction',entityId:null,description:`HAPUS PAKSA massal ${rows.length} transaksi kas (Master Admin override): ${rows.map(r=>r.name).slice(0,20).join(', ')}${rows.length>20?', ...':''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${rows.length} transaksi kas dihapus paksa permanen.`};
+    return res.redirect(returnCtx);
+  }
+  req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
   res.redirect(returnCtx);
 });
 

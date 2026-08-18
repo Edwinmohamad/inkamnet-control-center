@@ -1,0 +1,63 @@
+INKAMNET CONTROL CENTER — PATCH v1.22.0
+==========================================
+1) Bug fix: Paket Internet tidak bisa dihapus walau pelanggan sudah 0
+2) Fitur baru: Checkbox + Hapus Massal untuk Data Kas
+
+BUG FIX — PAKET INTERNET TIDAK BISA DIHAPUS
+---------------------------------------------
+Laporan: "Paket 15Mbps-KBG masih dipakai 1 pelanggan dan tidak dapat dihapus
+permanen" padahal jumlah pelanggan aktif sudah 0.
+
+Penyebab: guard pemeriksaan "masih dipakai pelanggan" menghitung SEMUA baris
+pelanggan dengan package_id tersebut, TERMASUK pelanggan yang statusnya sudah
+Diarsipkan (archived). Jadi walau tidak ada lagi pelanggan AKTIF yang pakai
+paket itu, satu pelanggan yang sudah diarsipkan tetap membuat paket terkunci.
+
+Perbaikan:
+- Guard sekarang hanya menghitung pelanggan yang TIDAK diarsipkan
+  (archived_at IS NULL). Pelanggan yang sudah diarsipkan tidak lagi
+  menghalangi penghapusan permanen paket (berlaku untuk hapus per-item
+  maupun hapus massal).
+- Supaya perubahan ini tetap aman: query daftar pelanggan (halaman Pelanggan
+  & detail pelanggan) yang tadinya JOIN paksa ke tabel Paket diubah menjadi
+  LEFT JOIN. Artinya jika suatu saat paket yang masih direferensikan oleh
+  pelanggan yang diarsipkan ini dihapus, pelanggan arsip tersebut TETAP
+  muncul di tab "Data Diarsip" (hanya kolom nama paketnya kosong) — tidak
+  hilang/disembunyikan secara tidak sengaja seperti sebelumnya berpotensi
+  terjadi.
+
+FITUR BARU — HAPUS MASSAL DI DATA KAS
+---------------------------------------
+Sebelumnya menu Data Kas hanya punya "Hapus" satu-satu per baris dan "Hapus
+Semua" (borongan satu bulan penuh, tanpa bisa pilih baris tertentu). Sekarang
+ditambahkan:
+- Checkbox di setiap baris transaksi manual (kolom checkbox baru paling kiri,
+  hanya tampil untuk Admin/Master Admin).
+- Floating action bar saat ada baris yang dicentang, dengan tombol:
+  • "Hapus Massal" — hapus transaksi terpilih. Transaksi yang sudah APPROVED
+    (sudah jadi jurnal resmi) atau otomatis dari pembayaran pelanggan akan
+    otomatis DILEWATI dan dilaporkan jumlahnya, persis seperti aturan hapus
+    satu-satu yang sudah ada.
+  • "Hapus Paksa Massal" (khusus Master Admin) — sama seperti fitur "Hapus
+    Paksa" v1.21.1, tapi untuk banyak transaksi sekaligus. Bisa menghapus
+    transaksi yang sudah APPROVED, TAPI transaksi otomatis dari pembayaran
+    tetap tidak bisa disentuh (agar tidak desync dengan sumbernya).
+
+FILE YANG DIUBAH
+-----------------
+- routes/packages.js         (guard usage-count sekarang exclude archived_at)
+- routes/customers.js        (query daftar & detail pelanggan: JOIN paket -> LEFT JOIN)
+- routes/finance.js          (route baru POST /cash/bulk: action delete & force_delete)
+- views/finance/cash.ejs     (checkbox per baris + floating bulk action bar)
+- views/partials/layout.ejs  (versi bumped ke v1.22.0)
+- package.json                (version -> 1.22.0)
+- scripts/validate-v119.js    (version assertion -> 1.22.0)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi & database seperti biasa.
+2. Timpa (overwrite) 7 file di atas sesuai struktur folder pada patch ini.
+3. Restart aplikasi Node.js.
+4. Hard-refresh browser (Ctrl+Shift+R).
+5. Coba lagi hapus paket yang sebelumnya terblokir — pastikan pelanggan yang
+   masih terkait sudah dalam status Diarsipkan, bukan Aktif.

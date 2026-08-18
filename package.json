@@ -1,6 +1,6 @@
 {
   "name": "inkamnet-billing",
-  "version": "1.21.1",
+  "version": "1.22.0",
   "private": true,
   "description": "INKAMNET Control Center v1.19.0 - executive dashboard, financial & PSB analytics, Infrastructure Hub, and cash approval workflow",
   "main": "app.js",
@@ -12,17 +12,19 @@
     "validate:v119": "npm run validate && node scripts/test-infrastructure-proxy.js && node scripts/test-cash-approval.js && node scripts/test-responsive-css.js && node scripts/validate-v119.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "bcryptjs": "3.0.2",
     "dotenv": "17.2.1",
     "ejs": "3.1.10",
+    "exceljs": "4.4.0",
     "express": "5.1.0",
     "express-ejs-layouts": "2.5.1",
     "express-mysql-session": "3.0.3",
     "express-session": "1.18.2",
+    "multer": "2.0.2",
     "mysql2": "3.14.3",
     "node-cron": "4.2.1",
-    "multer": "2.0.2",
-    "exceljs": "4.4.0",
-    "pdfkit": "0.19.1"
+    "pdfkit": "0.19.1",
+    "qrcode": "^1.5.4"
   }
 }
