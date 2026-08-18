@@ -1,0 +1,1440 @@
+diff --git a/app.js b/app.js
+index 5b0b9e9..96d9293 100644
+--- a/app.js
++++ b/app.js
+@@ -24,7 +24,7 @@ const { requireAuth, loadPermissions, requirePermission } = require('./middlewar
+ const { generateMonthlyInvoices } = require('./services/invoiceService');
+ const { runAutoIsolation } = require('./services/networkService');
+ const { purgeOldLogs } = require('./services/logRetentionService');
+-const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema } = require('./services/schemaService');
++const { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV28Schema } = require('./services/schemaService');
+ 
+ const app = express();
+ const assetVersion = ['public/css/app.css','public/js/app.js','public/js/nms.js']
+@@ -192,6 +192,7 @@ app.use('/payments', requireAuth, requirePermission('billing'), require('./route
+ app.use('/reports', requireAuth, requirePermission('reports'), require('./routes/reports'));
+ app.use('/routers', requireAuth, requirePermission('network'), require('./routes/routers'));
+ app.use('/network', requireAuth, requirePermission('network'), require('./routes/network'));
++app.use('/mikrotik', requireAuth, requirePermission('network'), require('./routes/mikrotik'));
+ app.use('/settings', requireAuth, requirePermission('settings'), require('./routes/settings'));
+ app.use('/profile', requireAuth, require('./routes/profile'));
+ app.use('/communication', requireAuth, require('./routes/communication'));
+@@ -237,6 +238,7 @@ async function bootstrap() {
+   await ensureV25Schema();
+   await ensureV26Schema();
+   await ensureV27Schema();
++  await ensureV28Schema();
+   const [rows] = await db.query('SELECT COUNT(*) total FROM users');
+   if (Number(rows[0].total) === 0) {
+     const username = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
+diff --git a/routes/analytics.js b/routes/analytics.js
+index fb01ef2..31642bc 100644
+--- a/routes/analytics.js
++++ b/routes/analytics.js
+@@ -1,8 +1,28 @@
+-const express=require('express');
+-const { getAnalytics }=require('../services/analyticsService');
+-const router=express.Router();
+-router.get('/',async(req,res)=>{
+-  const data=await getAnalytics({siteCode:String(req.query.site||'').trim().toUpperCase(),month:req.query.month,year:req.query.year});
+-  res.render('analytics/index',{title:'Analitik Keuangan & PSB',...data});
++const express = require('express');
++const { getAnalytics } = require('../services/analyticsService');
++const router = express.Router();
++
++function queryParams(req) {
++  return { siteCode: String(req.query.site || '').trim().toUpperCase(), month: req.query.month, year: req.query.year };
++}
++
++// Main dashboard page: Smart Overview, Analitik Keuangan & Cut-off, Analitik PSB & Infrastruktur.
++router.get('/', async (req, res) => {
++  const data = await getAnalytics(queryParams(req));
++  res.render('analytics/index', { title: 'Analitik Keuangan & PSB', ...data });
+ });
+-module.exports=router;
++
++// JSON endpoint powering the "Generate Laporan Analitik" modal — always
++// re-queried fresh so Download/Print/WA-to-owner reflect the latest numbers.
++// ?download=1 forces a file-download response instead of an inline JSON body.
++router.get('/export-report', async (req, res) => {
++  const data = await getAnalytics(queryParams(req));
++  const report = data.report;
++  if (String(req.query.download || '') === '1') {
++    const filename = `analitik-${data.selectedSiteCode || 'semua-site'}-${data.month}-${data.year}.json`.toLowerCase();
++    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
++  }
++  res.set('Cache-Control', 'no-store').json({ ok: true, isDummy: data.isDummy, report });
++});
++
++module.exports = router;
+diff --git a/routes/mikrotik.js b/routes/mikrotik.js
+new file mode 100644
+index 0000000..90c9b4e
+--- /dev/null
++++ b/routes/mikrotik.js
+@@ -0,0 +1,54 @@
++const express = require('express');
++const { requireAdmin } = require('../middleware/auth');
++const { audit } = require('../services/auditService');
++const {
++  getOverview, getActiveSessions, getSyncAudit, captureHourlySample, getTrend24h,
++  pushCustomerToRouter, kickSession, deleteSecret
++} = require('../services/mikrotikPppoeService');
++const router = express.Router();
++
++router.get('/', async (req, res) => {
++  try {
++    const [overview, sessions, syncAuditData, trend] = await Promise.all([
++      getOverview(), getActiveSessions(), getSyncAudit(), getTrend24h()
++    ]);
++    captureHourlySample().catch(err => console.error('Gagal menyimpan sample PPPoE:', err.message));
++    res.render('mikrotik/index', { title: 'MikroTik PPPoE', overview, sessions, syncAudit: syncAuditData, trend, isDummy: false });
++  } catch (error) {
++    console.error('MikroTik PPPoE overview gagal:', error.message);
++    res.render('mikrotik/index', {
++      title: 'MikroTik PPPoE',
++      overview: { stats: { totalSecrets: 0, online: 0, offline: 0, isolated: 0 }, sync: { synced: 0, rogue: 0, exempt: 0, missing: 0 }, profileDistribution: [], routerErrors: [{ name: 'Semua router', siteCode: '-', error: error.message }], routersChecked: 0 },
++      sessions: [],
++      syncAudit: { synced: [], rogue: [], missing: [] },
++      trend: { labels: [], values: [], isEstimated: true },
++      isDummy: true
++    });
++  }
++});
++
++router.post('/sessions/:routerId/:secretId/kick', requireAdmin, async (req, res) => {
++  try {
++    const result = await kickSession(req.params.routerId, req.params.secretId);
++    await audit({ userId: req.session.user.id, action: 'disconnect', entityType: 'pppoe_session', entityId: req.params.secretId, description: `Kick session PPPoE ${result.secret.name} dari ${result.router.name}`, ip: req.ip });
++    res.json({ ok: true, message: result.disconnected ? `Sesi ${result.secret.name} berhasil diputus.` : `${result.secret.name} tidak memiliki sesi aktif saat ini.` });
++  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
++});
++
++router.post('/secrets/:routerId/:secretId/delete', requireAdmin, async (req, res) => {
++  try {
++    const result = await deleteSecret(req.params.routerId, req.params.secretId);
++    await audit({ userId: req.session.user.id, action: 'delete', entityType: 'pppoe_secret', entityId: req.params.secretId, description: `Hapus rogue secret PPPoE ${result.secret.name} dari ${result.router.name}`, ip: req.ip });
++    res.json({ ok: true, message: `Secret ${result.secret.name} berhasil dihapus dari router.` });
++  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
++});
++
++router.post('/customers/:customerId/push', requireAdmin, async (req, res) => {
++  try {
++    const result = await pushCustomerToRouter(req.params.customerId);
++    await audit({ userId: req.session.user.id, action: 'create', entityType: 'pppoe_secret', entityId: null, description: `Push to Router: secret ${result.username} dibuat di ${result.router.name} untuk ${result.customer.name}`, ip: req.ip });
++    res.json({ ok: true, message: `Secret ${result.username} berhasil dibuat di ${result.router.name}.`, username: result.username, password: result.password });
++  } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
++});
++
++module.exports = router;
+diff --git a/routes/payments.js b/routes/payments.js
+index 92b03d5..fcf65d0 100644
+--- a/routes/payments.js
++++ b/routes/payments.js
+@@ -124,12 +124,14 @@ router.get('/',async(req,res)=>{
+     COALESCE(SUM(CASE WHEN p.status='pending' THEN p.amount ELSE 0 END),0) transfer_pending,
+     SUM(p.status='confirmed') confirmed_count
+     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE ${summaryWhere.join(' AND ')}`,summaryParams);
++  // Transactions Master Admin already approved but which never received a transfer/QRIS proof attachment.
++  const [[missingProof]]=await db.execute(`SELECT COUNT(*) total,COALESCE(SUM(p.amount),0) amount FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE p.status='confirmed' AND p.method IN ('transfer','qris') AND (p.proof_path IS NULL OR p.proof_path='')${site?` AND s.code=?`:''}`,site?[site]:[]);
+   const preselectedInvoiceId=Number(req.query.invoice_id||0)||null;
+   let cashApprovals=[];
+   if(isMasterAdminRole(req.session.user.role)){
+     [cashApprovals]=await db.query(`SELECT ct.id,ct.transaction_code,ct.transaction_date,ct.name,ct.amount,ct.notes,ct.proof_path,ct.proof_mime,ct.approval_status,cc.name category_name,cc.type category_type,s.code site_code,u.name creator_name FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id LEFT JOIN sites s ON s.id=ct.site_id LEFT JOIN users u ON u.id=ct.created_by WHERE COALESCE(ct.source_type,'manual')='manual' AND ct.approval_status='PENDING_APPROVAL' ORDER BY ct.transaction_date DESC,ct.id DESC LIMIT 250`);
+   }
+-  res.render('payments/index',{title:'Approval & Transaksi',payments,openInvoices,staff,banks,sites,clusters,cashApprovals,summary:summary||{},preselectedInvoiceId,filters:{q,site,cluster,month,year,approval},summaryMonth,summaryYear});
++  res.render('payments/index',{title:'Approval & Transaksi',payments,openInvoices,staff,banks,sites,clusters,cashApprovals,summary:summary||{},missingProof:missingProof||{total:0,amount:0},preselectedInvoiceId,filters:{q,site,cluster,month,year,approval},summaryMonth,summaryYear});
+ });
+ 
+ router.post('/',requireAdmin,async(req,res)=>{
+diff --git a/scripts/validate-v119.js b/scripts/validate-v119.js
+index 025458a..618e1cb 100644
+--- a/scripts/validate-v119.js
++++ b/scripts/validate-v119.js
+@@ -9,7 +9,7 @@ const checks=[];
+ function check(name,fn){fn();checks.push(name);}
+ 
+ check('dashboard cleanup',()=>{mustNot('views/dashboard/index.ejs','PIKET MINGGU INI');mustNot('views/dashboard/index.ejs','Piket Minggu Ini');must('views/dashboard/index.ejs','Traffic PSB Hari Ini');must('views/dashboard/index.ejs','Total PSB Bulan Ini');must('views/dashboard/index.ejs','dashboard-user-ticker');must('views/dashboard/index.ejs','KONDISI PELANGGAN PER SITE');});
+-check('analytics module',()=>{['routes/analytics.js','services/analyticsService.js','views/analytics/index.ejs'].forEach(exists);must('app.js',"app.use('/analytics'");must('views/partials/layout.ejs','href="/analytics"');must('views/analytics/index.ejs','SMART ADVISORY ENGINE');must('views/analytics/index.ejs','CASHFLOW STREAM');must('views/analytics/index.ejs','PSB CONVERSION FUNNEL');must('views/analytics/index.ejs','ODP CAPACITY HEATMAP');});
++check('analytics module',()=>{['routes/analytics.js','services/analyticsService.js','views/analytics/index.ejs'].forEach(exists);must('app.js',"app.use('/analytics'");must('views/partials/layout.ejs','href="/analytics"');must('views/analytics/index.ejs','Smart Advisory Engine');must('views/analytics/index.ejs','Cashflow Stream');must('views/analytics/index.ejs','PSB Conversion Funnel');must('views/analytics/index.ejs','ODP Capacity Heatmap');must('views/analytics/index.ejs','cdn.tailwindcss.com');must('views/analytics/index.ejs',"corePlugins: { preflight: false }");must('routes/analytics.js',"router.get('/export-report'");must('services/analyticsService.js','function cutoffWindow');must('services/analyticsService.js','function buildReportSummary');});
+ check('infrastructure hub',()=>{exists('services/infrastructureProxy.js');must('views/partials/layout.ejs','Infrastructure Hub');mustNot('views/network/tools.ejs','target="_blank"');must('views/network/tools.ejs','id="infraFrame"');must('views/network/tools.ejs','id="infraReload"');must('views/network/tools.ejs','id="infraFullscreen"');must('routes/network.js','/tools/proxy/:toolKey');must('services/infrastructureProxy.js','x-frame-options');must('services/infrastructureProxy.js','content-security-policy');must('middleware/csrf.js',"req.path.startsWith('/network/tools/proxy/')");});
+ check('cash approval workflow',()=>{must('services/schemaService.js',"PENDING_APPROVAL','APPROVED','REJECTED");must('routes/finance.js',"'manual','PENDING_APPROVAL'");must('routes/finance.js',"router.post('/cash/:id/approve',requireMasterAdmin");must('routes/finance.js',"router.post('/cash/:id/reject',requireMasterAdmin");must('routes/reports.js',"COALESCE(ct.approval_status,'APPROVED')='APPROVED'");must('views/payments/index.ejs','id="cash-approval"');must('views/payments/index.ejs','cashRejectModal');must('views/partials/layout.ejs','Approval & Transaksi');});
+ check('login ticker schema',()=>{must('services/schemaService.js','CREATE TABLE IF NOT EXISTS user_login_events');must('routes/auth.js','INSERT INTO user_login_events');must('routes/dashboard.js','frequentLogins');must('routes/dashboard.js','recentLogins');});
+diff --git a/services/analyticsService.js b/services/analyticsService.js
+index 36ded99..ff4e235 100644
+--- a/services/analyticsService.js
++++ b/services/analyticsService.js
+@@ -1,67 +1,312 @@
+-const db=require('../config/db');
++const db = require('../config/db');
++const { normalizeWhatsapp } = require('./whatsappService');
+ 
+-function num(value){const n=Number(value);return Number.isFinite(n)?n:0;}
+-function monthKey(date){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;}
+-function lastMonths(count=12,now=new Date()){
+-  const rows=[];
+-  for(let i=count-1;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);rows.push({key:monthKey(d),label:d.toLocaleDateString('id-ID',{month:'short',year:'2-digit',timeZone:'Asia/Jakarta'})});}
++// ---------------------------------------------------------------------------
++// Small helpers
++// ---------------------------------------------------------------------------
++function num(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
++function monthKey(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; }
++function lastMonths(count = 12, now = new Date()) {
++  const rows = [];
++  for (let i = count - 1; i >= 0; i--) {
++    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
++    rows.push({ key: monthKey(d), label: d.toLocaleDateString('id-ID', { month: 'short', year: '2-digit', timeZone: 'Asia/Jakarta' }) });
++  }
+   return rows;
+ }
+-function buildFunnel(row={}){
+-  const values=[num(row.registered),num(row.survey_ready),num(row.provisioned),num(row.activated)];
++function shortDate(value) {
++  if (!value) return '-';
++  return new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' }).format(new Date(value));
++}
++// The operational cash cut-off period runs from the 6th of a month through the
++// 5th of the following month. Passing the 1-based `month` straight into the
++// JS Date month slot (which is 0-based) naturally lands on "next month".
++function cutoffWindow(month, year) {
++  const start = new Date(year, month - 1, 6, 0, 0, 0);
++  const end = new Date(year, month, 5, 23, 59, 59);
++  return { start, end, label: `${shortDate(start)} – ${shortDate(end)}` };
++}
++function nextMonthOf(month, year) {
++  return month >= 12 ? { month: 1, year: year + 1 } : { month: month + 1, year };
++}
++
++// ---------------------------------------------------------------------------
++// Business-shape builders (used by both the real query path and the dummy
++// fallback, so the two payloads are always structurally identical).
++// ---------------------------------------------------------------------------
++function buildFunnel(row = {}) {
++  const values = [num(row.registered), num(row.survey_ready), num(row.provisioned), num(row.activated)];
+   return [
+-    {key:'registered',label:'Registrasi',value:values[0],hint:'Pelanggan dibuat pada periode'},
+-    {key:'survey',label:'Survei',value:values[1],hint:'Alamat + cluster sudah terisi'},
+-    {key:'fiber',label:'Penarikan FO',value:values[2],hint:'Router + PPPoE sudah diprovision'},
+-    {key:'active',label:'Teraktivasi',value:values[3],hint:'Activation date terisi dan aktif'}
++    { key: 'registered', label: 'Leads / Registrasi', value: values[0], hint: 'Pelanggan dibuat pada periode' },
++    { key: 'survey', label: 'Surveyed', value: values[1], hint: 'Alamat + cluster sudah terisi' },
++    { key: 'fiber', label: 'Installed', value: values[2], hint: 'Router + PPPoE sudah diprovision' },
++    { key: 'active', label: 'Activated', value: values[3], hint: 'Activation date terisi dan aktif' }
+   ];
+ }
+-function buildAdvisories({odp=[],dueSoon=0,overdue30=0,pppoeUnlinked=0,pendingCash=0}={}){
+-  const out=[];
+-  const low=odp.filter(x=>num(x.capacity_ports)>0&&num(x.remaining_ports)<2);
+-  if(low.length)out.push({tone:'danger',icon:'bi-diagram-3-fill',title:`${low.length} ODP hampir penuh`,detail:`Prioritaskan audit/ekspansi: ${low.slice(0,3).map(x=>`${x.site_code}/${x.name} sisa ${x.remaining_ports}`).join(', ')}.` ,href:'/clusters'});
+-  if(dueSoon>0)out.push({tone:'warning',icon:'bi-whatsapp',title:`${dueSoon} tagihan mendekati jatuh tempo`,detail:'Rekomendasi: WA Blast H-2 agar collection rate naik sebelum jadwal isolir.',href:'/invoices?status=open'});
+-  if(overdue30>0)out.push({tone:'danger',icon:'bi-exclamation-octagon-fill',title:`${overdue30} piutang >30 hari`,detail:'Prioritaskan follow-up dan review pelanggan yang siap masuk proses isolir.',href:'/invoices?status=overdue'});
+-  if(pppoeUnlinked>0)out.push({tone:'info',icon:'bi-router-fill',title:`${pppoeUnlinked} pelanggan belum link PPPoE`,detail:'Buka MikroTik NMS dan jalankan Smart Sync untuk rekonsiliasi billing ↔ PPPoE.',href:'/network/monitor'});
+-  if(pendingCash>0)out.push({tone:'purple',icon:'bi-shield-check',title:`${pendingCash} kas menunggu approval`,detail:'Saldo real belum berubah sampai Owner / Master Admin memverifikasi transaksi.',href:'/payments#cash-approval'});
+-  if(!out.length)out.push({tone:'success',icon:'bi-stars',title:'Operasional dalam kondisi baik',detail:'Tidak ada advisory kritis dari kapasitas ODP, aging, PPPoE, atau approval kas saat ini.',href:'/'});
++function odpTone(o) {
++  if (num(o.capacity_ports) === 0) return 'unknown';
++  if (num(o.remaining_ports) <= 1) return 'critical';
++  if (num(o.utilization) >= 75) return 'warning';
++  return 'healthy';
++}
++function buildAdvisories({ odp = [], dueDateMatrix = {}, siapIsolirCount = 0, pppoeUnlinked = 0, pendingCash = 0 } = {}) {
++  const out = [];
++
++  // 1. Rekonsiliasi kas tgl 5 vs tagihan tgl 30: apakah ada pelunasan yang jatuh
++  // di tanggal 6-7 (setelah closing kas tgl 5) sehingga overlap ke periode berikutnya.
++  const due30 = dueDateMatrix.due30 || {};
++  const overlap = num(due30.overlapNextCutoffAmount);
++  const withinCutoff = num(due30.withinCutoffAmount);
++  if (overlap > 0) {
++    out.push({
++      tone: 'warning', icon: 'bi-arrow-left-right',
++      title: `Rekonsiliasi kas: Rp ${overlap.toLocaleString('id-ID')} tagihan tgl 30 masuk di tgl 6-7`,
++      detail: `Pelunasan ini terjadi setelah closing kas tanggal 5, jadi belum tercermin di laporan periode berjalan. Pastikan tim finance mencatatnya pada closing kas periode berikutnya.`,
++      href: '/analytics?tab=finance'
++    });
++  } else if (withinCutoff > 0) {
++    out.push({
++      tone: 'success', icon: 'bi-check2-circle',
++      title: 'Rekonsiliasi kas tgl 30 aman',
++      detail: `Seluruh pelunasan tagihan tgl 30 yang tercatat (Rp ${withinCutoff.toLocaleString('id-ID')}) masuk sebelum closing kas tanggal 5. Tidak ada gap rekonsiliasi periode ini.`,
++      href: '/analytics?tab=finance'
++    });
++  }
++
++  // 2. ODP kritis (sisa port <= 1).
++  const low = odp.filter(x => odpTone(x) === 'critical');
++  if (low.length) {
++    out.push({
++      tone: 'danger', icon: 'bi-diagram-3-fill',
++      title: `${low.length} ODP kritis (sisa port ≤ 1)`,
++      detail: `Prioritaskan audit/ekspansi kapasitas: ${low.slice(0, 3).map(x => `${x.site_code}/${x.name} sisa ${x.remaining_ports}`).join(', ')}.`,
++      href: '/clusters'
++    });
++  }
++
++  // 3. WA blast untuk pelanggan siap-isolir (telat > 7 hari).
++  if (siapIsolirCount > 0) {
++    out.push({
++      tone: 'danger', icon: 'bi-whatsapp',
++      title: `${siapIsolirCount} pelanggan siap isolir (telat > 7 hari)`,
++      detail: 'Rekomendasi: kirim WA Blast reminder segera dari tab Analitik Keuangan sebelum proses isolir berjalan.',
++      href: '/analytics?tab=finance'
++    });
++  }
++
++  if (pppoeUnlinked > 0) out.push({ tone: 'info', icon: 'bi-router-fill', title: `${pppoeUnlinked} pelanggan belum link PPPoE`, detail: 'Buka MikroTik NMS dan jalankan Smart Sync untuk rekonsiliasi billing ↔ PPPoE.', href: '/network/monitor' });
++  if (pendingCash > 0) out.push({ tone: 'purple', icon: 'bi-shield-check', title: `${pendingCash} kas menunggu approval`, detail: 'Saldo real belum berubah sampai Owner / Master Admin memverifikasi transaksi.', href: '/payments#cash-approval' });
++  if (!out.length) out.push({ tone: 'success', icon: 'bi-stars', title: 'Operasional dalam kondisi baik', detail: 'Tidak ada advisory kritis dari rekonsiliasi kas, kapasitas ODP, atau aging piutang saat ini.', href: '/' });
+   return out;
+ }
+ 
+-async function getAnalytics({siteCode='',month,year}){
+-  const now=new Date();month=Number(month)||now.getMonth()+1;year=Number(year)||now.getFullYear();
+-  const [sites]=await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
+-  const selected=siteCode?sites.find(s=>String(s.code).toUpperCase()===String(siteCode).toUpperCase()):null;
+-  const siteId=selected?.id||null, customerScope=siteId?' AND c.site_id=?':'', customerParams=siteId?[siteId]:[];
+-  const cashScope=siteId?' AND ct.site_id=?':'', cashParams=siteId?[siteId]:[];
+-
+-  const [[exec]]=await db.execute(`SELECT COUNT(*) active_customers,COALESCE(SUM(p.price),0) mrr FROM customers c JOIN packages p ON p.id=c.package_id WHERE c.customer_status='active'${customerScope}`,customerParams);
+-  const [[billing]]=await db.execute(`SELECT COALESCE(SUM(i.total),0) billed,COALESCE(SUM(i.paid_amount),0) collected,COALESCE(SUM(i.outstanding),0) outstanding FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_month=? AND i.period_year=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`,[month,year,...customerParams]);
+-  const [[psb]]=await db.execute(`SELECT COUNT(*) total FROM customers c WHERE YEAR(COALESCE(c.activation_date,DATE(c.created_at)))=? AND MONTH(COALESCE(c.activation_date,DATE(c.created_at)))=?${customerScope}`,[year,month,...customerParams]);
+-  const [[risk]]=await db.execute(`SELECT
+-    SUM(i.outstanding>0 AND DATEDIFF(i.due_date,CURDATE()) BETWEEN 0 AND 2) due_soon,
+-    SUM(i.outstanding>0 AND DATEDIFF(CURDATE(),i.due_date)>30) overdue_30
+-    FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.status IN ('unpaid','partial','overdue')${customerScope}`,customerParams);
+-  const [[sync]]=await db.execute(`SELECT COUNT(*) pppoe_unlinked FROM customers c WHERE c.customer_status='active' AND (c.router_id IS NULL OR c.pppoe_username IS NULL OR c.pppoe_username='')${customerScope}`,customerParams);
+-  const [[cashPending]]=await db.execute(`SELECT COUNT(*) pending_cash FROM cash_transactions ct WHERE ct.approval_status='PENDING_APPROVAL'${cashScope}`,cashParams);
+-
+-  const [odp]=await db.execute(`SELECT cl.id,cl.name,cl.capacity_ports,cl.used_ports,GREATEST(COALESCE(cl.capacity_ports,0)-COALESCE(cl.used_ports,0),0) remaining_ports,s.code site_code,s.name site_name FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status<>'inactive'${siteId?' AND cl.site_id=?':''} ORDER BY s.code,remaining_ports,cl.name`,siteId?[siteId]:[]);
+-
+-  const [cashRows]=await db.execute(`SELECT DATE_FORMAT(ct.transaction_date,'%Y-%m') month_key,COALESCE(SUM(CASE WHEN cc.type='income' THEN ct.amount ELSE 0 END),0) inflow,COALESCE(SUM(CASE WHEN cc.type='expense' THEN ct.amount ELSE 0 END),0) outflow FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id WHERE COALESCE(ct.approval_status,'APPROVED')='APPROVED' AND ct.transaction_date>=DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'),INTERVAL 11 MONTH)${cashScope} GROUP BY DATE_FORMAT(ct.transaction_date,'%Y-%m') ORDER BY month_key`,cashParams);
+-  const [mrrRows]=await db.execute(`SELECT CONCAT(i.period_year,'-',LPAD(i.period_month,2,'0')) month_key,COALESCE(SUM(i.total),0) billed FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE STR_TO_DATE(CONCAT(i.period_year,'-',LPAD(i.period_month,2,'0'),'-01'),'%Y-%m-%d')>=DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'),INTERVAL 11 MONTH) AND i.status NOT IN ('cancelled','refunded')${customerScope} GROUP BY i.period_year,i.period_month ORDER BY i.period_year,i.period_month`,customerParams);
+-  const months=lastMonths(12,now),cashMap=new Map(cashRows.map(x=>[x.month_key,x])),mrrMap=new Map(mrrRows.map(x=>[x.month_key,x]));
+-  const financeSeries={labels:months.map(x=>x.label),inflow:months.map(x=>num(cashMap.get(x.key)?.inflow)),outflow:months.map(x=>num(cashMap.get(x.key)?.outflow)),mrr:months.map(x=>num(mrrMap.get(x.key)?.billed))};
+-
+-  const [aging]=await db.execute(`SELECT c.id,c.customer_code,c.name customer_name,s.code site_code,MIN(i.due_date) oldest_due,COALESCE(SUM(i.outstanding),0) outstanding,MAX(DATEDIFF(CURDATE(),i.due_date)) days_overdue FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope} GROUP BY c.id,c.customer_code,c.name,s.code ORDER BY days_overdue DESC,outstanding DESC LIMIT 100`,customerParams);
+-  const agingBuckets={h3:aging.filter(x=>num(x.days_overdue)<=0&&num(x.days_overdue)>=-3),hplus3:aging.filter(x=>num(x.days_overdue)>0&&num(x.days_overdue)<=30),over30:aging.filter(x=>num(x.days_overdue)>30)};
+-
+-  const [[funnelRow]]=await db.execute(`SELECT COUNT(*) registered,SUM(c.address IS NOT NULL AND c.address<>'' AND c.cluster_id IS NOT NULL) survey_ready,SUM(c.router_id IS NOT NULL AND c.pppoe_username IS NOT NULL AND c.pppoe_username<>'') provisioned,SUM(c.customer_status='active' AND c.activation_date IS NOT NULL) activated FROM customers c WHERE YEAR(c.created_at)=? AND MONTH(c.created_at)=?${customerScope}`,[year,month,...customerParams]);
+-  const [[sla]]=await db.execute(`SELECT ROUND(AVG(DATEDIFF(c.activation_date,DATE(c.created_at))),1) avg_days,COUNT(*) samples FROM customers c WHERE c.activation_date IS NOT NULL AND YEAR(c.activation_date)=? AND MONTH(c.activation_date)=?${customerScope}`,[year,month,...customerParams]);
+-
+-  const collectionRate=num(billing.billed)>0?Math.min(100,Math.round(num(billing.collected)/num(billing.billed)*100)):0;
+-  const kpis={activeCustomers:num(exec.active_customers),mrr:num(exec.mrr),billed:num(billing.billed),collected:num(billing.collected),outstanding:num(billing.outstanding),collectionRate,psb:num(psb.total),pendingCash:num(cashPending.pending_cash)};
+-  const advisories=buildAdvisories({odp,dueSoon:num(risk.due_soon),overdue30:num(risk.overdue_30),pppoeUnlinked:num(sync.pppoe_unlinked),pendingCash:num(cashPending.pending_cash)});
+-  return {sites,selectedSiteCode:selected?.code||'',selectedSiteName:selected?.name||'Semua Site',month,year,kpis,advisories,financeSeries,aging,agingBuckets,funnel:buildFunnel(funnelRow),sla:{avgDays:num(sla.avg_days),samples:num(sla.samples)},odp:odp.map(x=>({...x,capacity_ports:num(x.capacity_ports),used_ports:num(x.used_ports),remaining_ports:num(x.remaining_ports),utilization:num(x.capacity_ports)?Math.min(100,Math.round(num(x.used_ports)/num(x.capacity_ports)*100)):0}))};
++// Assembles the compact bundle used by both the in-page "Generate Laporan"
++// modal (rendered instantly from page-load data) and the /export-report
++// JSON endpoint (always freshly queried).
++function buildReportSummary(data) {
++  const odpCritical = data.odp.filter(o => odpTone(o) === 'critical').length;
++  const odpWarning = data.odp.filter(o => odpTone(o) === 'warning').length;
++  const odpHealthy = data.odp.filter(o => odpTone(o) === 'healthy').length;
++  const funnelActive = data.funnel.find(f => f.key === 'active')?.value || 0;
++  const funnelLeads = data.funnel.find(f => f.key === 'registered')?.value || 0;
++  return {
++    generatedAt: new Date().toISOString(),
++    period: { month: data.month, year: data.year, cutoffLabel: data.cutoff.label },
++    site: data.selectedSiteName,
++    executive: {
++      mrr: data.kpis.mrr,
++      cashRealizationCutoff: data.kpis.cashRealizationCutoff,
++      activeCustomers: data.kpis.activeCustomers,
++      churnRate: data.kpis.churnRate,
++      accrualBilled: data.dualMatrix.accrualBasis.billed,
++      cashCollected: data.dualMatrix.cashBasis.collected,
++      variance: data.dualMatrix.variance
++    },
++    network: {
++      avgSlaHours: data.sla.avgHours,
++      slaSamples: data.sla.samples,
++      psbConversionRate: funnelLeads ? Math.round((funnelActive / funnelLeads) * 100) : 0,
++      odpCritical, odpWarning, odpHealthy
++    },
++    advisories: data.advisories.map(a => ({ tone: a.tone, title: a.title, detail: a.detail })),
++    ownerWhatsapp: data.ownerWhatsapp || null
++  };
++}
++
++// ---------------------------------------------------------------------------
++// Real data path
++// ---------------------------------------------------------------------------
++async function fetchAnalytics({ siteCode = '', month, year }) {
++  const now = new Date();
++  month = Number(month) || now.getMonth() + 1;
++  year = Number(year) || now.getFullYear();
++  const cutoff = cutoffWindow(month, year);
++  const next = nextMonthOf(month, year);
++  const withinNextStart = new Date(next.year, next.month - 1, 1, 0, 0, 0);
++  const withinNextEnd = new Date(next.year, next.month - 1, 5, 23, 59, 59);
++  const overlapNextStart = new Date(next.year, next.month - 1, 6, 0, 0, 0);
++  const overlapNextEnd = new Date(next.year, next.month - 1, 7, 23, 59, 59);
++
++  const [sites] = await db.query(`SELECT id,code,name FROM sites WHERE is_active=1 ORDER BY code`);
++  const selected = siteCode ? sites.find(s => String(s.code).toUpperCase() === String(siteCode).toUpperCase()) : null;
++  const siteId = selected?.id || null;
++  const customerScope = siteId ? ' AND c.site_id=?' : '';
++  const customerParams = siteId ? [siteId] : [];
++  const cashScope = siteId ? ' AND ct.site_id=?' : '';
++  const cashParams = siteId ? [siteId] : [];
++
++  let ownerWhatsapp = null;
++  try {
++    const [[settingsRow]] = await db.query(`SELECT company_phone FROM settings WHERE id=1 LIMIT 1`);
++    ownerWhatsapp = normalizeWhatsapp(settingsRow?.company_phone) || null;
++  } catch (_) { ownerWhatsapp = null; }
++
++  // --- Executive KPIs -------------------------------------------------------
++  const [[exec]] = await db.execute(`SELECT COUNT(*) active_customers,COALESCE(SUM(p.price),0) mrr FROM customers c JOIN packages p ON p.id=c.package_id WHERE c.customer_status='active'${customerScope}`, customerParams);
++  const [[churn]] = await db.execute(`SELECT SUM(c.customer_status IN ('inactive','terminated','suspended') AND c.status_changed_at IS NOT NULL AND MONTH(c.status_changed_at)=? AND YEAR(c.status_changed_at)=?) churned FROM customers c WHERE 1=1${customerScope}`, [month, year, ...customerParams]);
++  const churnedCount = num(churn.churned);
++  const activeCustomers = num(exec.active_customers);
++  const churnRate = (activeCustomers + churnedCount) > 0 ? Math.round((churnedCount / (activeCustomers + churnedCount)) * 1000) / 10 : 0;
++
++  // --- Dual-matrix: Cash Basis (collected in the cut-off window) vs Accrual Basis (billed this period) ---
++  const [[cashBasisRow]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(p.amount),0) collected FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id WHERE p.status='confirmed' AND p.paid_at BETWEEN ? AND ?${customerScope}`, [cutoff.start, cutoff.end, ...customerParams]);
++  const [[accrualRow]] = await db.execute(`SELECT COUNT(*) count,COALESCE(SUM(i.total),0) billed FROM invoices i JOIN customers c ON c.id=i.customer_id WHERE i.period_month=? AND i.period_year=? AND i.status NOT IN ('cancelled','refunded')${customerScope}`, [month, year, ...customerParams]);
++  const dualMatrix = {
++    cashBasis: { collected: num(cashBasisRow.collected), count: num(cashBasisRow.count) },
++    accrualBasis: { billed: num(accrualRow.billed), count: num(accrualRow.count) },
++    variance: num(cashBasisRow.collected) - num(accrualRow.billed)
++  };
++
++  // --- Due-date matrix: Tgl 15 (grace s/d 20) vs Tgl 30 (grace s/d 7 bulan berikutnya) ---
++  const [dueGroupRows] = await db.execute(`SELECT CASE WHEN DAY(i.due_date)<=22 THEN 'due15' ELSE 'due30' END grp,
++      COUNT(*) total_invoices,COALESCE(SUM(i.total),0) billed,COALESCE(SUM(i.paid_amount),0) paid,COALESCE(SUM(i.outstanding),0) outstanding,
++      SUM(i.status='paid') paid_count,SUM(i.status IN ('unpaid','partial','overdue')) unpaid_count
++    FROM invoices i JOIN customers c ON c.id=i.customer_id
++    WHERE i.period_month=? AND i.period_year=? AND i.status NOT IN ('cancelled','refunded')${customerScope}
++    GROUP BY grp`, [month, year, ...customerParams]);
++  const [[due30Recon]] = await db.execute(`SELECT
++      COALESCE(SUM(CASE WHEN p.paid_at BETWEEN ? AND ? THEN p.amount ELSE 0 END),0) within_cutoff,
++      COALESCE(SUM(CASE WHEN p.paid_at BETWEEN ? AND ? THEN p.amount ELSE 0 END),0) overlap_next
++    FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id
++    WHERE p.status='confirmed' AND DAY(i.due_date)>22 AND i.period_month=? AND i.period_year=?${customerScope}`,
++    [withinNextStart, withinNextEnd, overlapNextStart, overlapNextEnd, month, year, ...customerParams]);
++  const dueGroupMap = new Map(dueGroupRows.map(r => [r.grp, r]));
++  function dueGroupShape(row) {
++    return { totalInvoices: num(row?.total_invoices), billed: num(row?.billed), paid: num(row?.paid), outstanding: num(row?.outstanding), paidCount: num(row?.paid_count), unpaidCount: num(row?.unpaid_count) };
++  }
++  const dueDateMatrix = {
++    due15: { label: 'Jatuh Tempo 15 (Grace s/d 20)', ...dueGroupShape(dueGroupMap.get('due15')) },
++    due30: { label: 'Jatuh Tempo 30 (Grace s/d 7 bulan berikutnya)', ...dueGroupShape(dueGroupMap.get('due30')), withinCutoffAmount: num(due30Recon.within_cutoff), overlapNextCutoffAmount: num(due30Recon.overlap_next) }
++  };
++
++  // --- ODP capacity heatmap --------------------------------------------------
++  const [odpRaw] = await db.execute(`SELECT cl.id,cl.name,cl.capacity_ports,cl.used_ports,GREATEST(COALESCE(cl.capacity_ports,0)-COALESCE(cl.used_ports,0),0) remaining_ports,s.code site_code,s.name site_name FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status<>'inactive'${siteId ? ' AND cl.site_id=?' : ''} ORDER BY s.code,remaining_ports,cl.name`, siteId ? [siteId] : []);
++  const odp = odpRaw.map(x => {
++    const capacity_ports = num(x.capacity_ports), used_ports = num(x.used_ports), remaining_ports = num(x.remaining_ports);
++    const utilization = capacity_ports ? Math.min(100, Math.round((used_ports / capacity_ports) * 100)) : 0;
++    return { ...x, capacity_ports, used_ports, remaining_ports, utilization, tone: odpTone({ capacity_ports, remaining_ports, utilization }) };
++  });
++
++  // --- Cashflow Stream: Inflow vs Outflow, trailing 6 months -----------------
++  const [cashRows] = await db.execute(`SELECT DATE_FORMAT(ct.transaction_date,'%Y-%m') month_key,COALESCE(SUM(CASE WHEN cc.type='income' THEN ct.amount ELSE 0 END),0) inflow,COALESCE(SUM(CASE WHEN cc.type='expense' THEN ct.amount ELSE 0 END),0) outflow FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id WHERE COALESCE(ct.approval_status,'APPROVED')='APPROVED' AND ct.transaction_date>=DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'),INTERVAL 5 MONTH)${cashScope} GROUP BY DATE_FORMAT(ct.transaction_date,'%Y-%m') ORDER BY month_key`, cashParams);
++  const months = lastMonths(6, now);
++  const cashMap = new Map(cashRows.map(x => [x.month_key, x]));
++  const financeSeries = { labels: months.map(x => x.label), inflow: months.map(x => num(cashMap.get(x.key)?.inflow)), outflow: months.map(x => num(cashMap.get(x.key)?.outflow)) };
++
++  // --- Aging piutang (with WhatsApp reminder number + "siap isolir" flag) ----
++  const [agingRaw] = await db.execute(`SELECT c.id,c.customer_code,c.name customer_name,c.phone,s.code site_code,MIN(i.due_date) oldest_due,COALESCE(SUM(i.outstanding),0) outstanding,MAX(DATEDIFF(CURDATE(),i.due_date)) days_overdue FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0${customerScope} GROUP BY c.id,c.customer_code,c.name,c.phone,s.code ORDER BY days_overdue DESC,outstanding DESC LIMIT 150`, customerParams);
++  const aging = agingRaw.map(row => ({ ...row, whatsappNumber: normalizeWhatsapp(row.phone) || null, siapIsolir: num(row.days_overdue) > 7 }));
++  const agingBuckets = {
++    h3: aging.filter(x => num(x.days_overdue) <= 0 && num(x.days_overdue) >= -3),
++    hplus3: aging.filter(x => num(x.days_overdue) > 0 && num(x.days_overdue) <= 30),
++    over30: aging.filter(x => num(x.days_overdue) > 30)
++  };
++  const siapIsolirCount = aging.filter(x => x.siapIsolir).length;
++
++  // --- PSB funnel + technician SLA (in hours) --------------------------------
++  const [[funnelRow]] = await db.execute(`SELECT COUNT(*) registered,SUM(c.address IS NOT NULL AND c.address<>'' AND c.cluster_id IS NOT NULL) survey_ready,SUM(c.router_id IS NOT NULL AND c.pppoe_username IS NOT NULL AND c.pppoe_username<>'') provisioned,SUM(c.customer_status='active' AND c.activation_date IS NOT NULL) activated FROM customers c WHERE YEAR(c.created_at)=? AND MONTH(c.created_at)=?${customerScope}`, [year, month, ...customerParams]);
++  const [[slaRow]] = await db.execute(`SELECT ROUND(AVG(TIMESTAMPDIFF(HOUR,c.created_at,c.activation_date)),1) avg_hours,COUNT(*) samples FROM customers c WHERE c.activation_date IS NOT NULL AND YEAR(c.activation_date)=? AND MONTH(c.activation_date)=?${customerScope}`, [year, month, ...customerParams]);
++
++  const [[sync]] = await db.execute(`SELECT COUNT(*) pppoe_unlinked FROM customers c WHERE c.customer_status='active' AND (c.router_id IS NULL OR c.pppoe_username IS NULL OR c.pppoe_username='')${customerScope}`, customerParams);
++  const [[cashPending]] = await db.execute(`SELECT COUNT(*) pending_cash FROM cash_transactions ct WHERE ct.approval_status='PENDING_APPROVAL'${cashScope}`, cashParams);
++
++  const kpis = {
++    mrr: num(exec.mrr),
++    cashRealizationCutoff: dualMatrix.cashBasis.collected,
++    activeCustomers,
++    churnRate
++  };
++  const advisories = buildAdvisories({ odp, dueDateMatrix, siapIsolirCount, pppoeUnlinked: num(sync.pppoe_unlinked), pendingCash: num(cashPending.pending_cash) });
++
++  const result = {
++    sites, selectedSiteCode: selected?.code || '', selectedSiteName: selected?.name || 'Semua Site',
++    month, year, cutoff, kpis, dualMatrix, dueDateMatrix, advisories, financeSeries,
++    aging, agingBuckets, siapIsolirCount,
++    funnel: buildFunnel(funnelRow),
++    sla: { avgHours: num(slaRow.avg_hours), samples: num(slaRow.samples) },
++    odp, ownerWhatsapp, isDummy: false
++  };
++  result.report = buildReportSummary(result);
++  return result;
++}
++
++// ---------------------------------------------------------------------------
++// Dummy fallback — same exact shape as fetchAnalytics(), realistic numbers,
++// used whenever any query above throws (fresh DB, missing column, migration
++// not run yet, DB unreachable, etc.) so the page never 500s.
++// ---------------------------------------------------------------------------
++function buildDummyAnalytics({ siteCode = '', month, year } = {}) {
++  const now = new Date();
++  month = Number(month) || now.getMonth() + 1;
++  year = Number(year) || now.getFullYear();
++  const cutoff = cutoffWindow(month, year);
++  const months = lastMonths(6, now);
++  const wave = (base, amp, phase = 0) => months.map((_, i) => Math.max(0, Math.round(base + amp * Math.sin((i + phase) / 2))));
++  const financeSeries = { labels: months.map(x => x.label), inflow: wave(38000000, 9000000), outflow: wave(24000000, 6000000, 1.4) };
++  const dummySites = [{ id: 0, code: 'HQ', name: 'Kantor Pusat (contoh)' }];
++  const selectedName = siteCode ? `${siteCode} (contoh)` : 'Semua Site (contoh)';
++
++  const aging = [
++    { id: 'demo-1', customer_code: 'DEMO-0001', customer_name: 'Contoh Pelanggan A', phone: null, whatsappNumber: null, site_code: 'HQ', oldest_due: new Date(now.getTime() - 2 * 86400000), outstanding: 350000, days_overdue: 2, siapIsolir: false },
++    { id: 'demo-2', customer_code: 'DEMO-0002', customer_name: 'Contoh Pelanggan B', phone: null, whatsappNumber: null, site_code: 'HQ', oldest_due: new Date(now.getTime() - 10 * 86400000), outstanding: 275000, days_overdue: 10, siapIsolir: true },
++    { id: 'demo-3', customer_code: 'DEMO-0003', customer_name: 'Contoh Pelanggan C', phone: null, whatsappNumber: null, site_code: 'HQ', oldest_due: new Date(now.getTime() - 40 * 86400000), outstanding: 520000, days_overdue: 40, siapIsolir: true }
++  ];
++  const agingBuckets = { h3: aging.filter(x => x.days_overdue <= 2), hplus3: aging.filter(x => x.days_overdue > 2 && x.days_overdue <= 30), over30: aging.filter(x => x.days_overdue > 30) };
++  const siapIsolirCount = aging.filter(x => x.siapIsolir).length;
++
++  const odpRaw = [
++    { id: 'demo-odp-1', name: 'ODP Contoh 01', capacity_ports: 16, used_ports: 15, remaining_ports: 1, site_code: 'HQ', site_name: 'Kantor Pusat (contoh)' },
++    { id: 'demo-odp-2', name: 'ODP Contoh 02', capacity_ports: 16, used_ports: 12, remaining_ports: 4, site_code: 'HQ', site_name: 'Kantor Pusat (contoh)' },
++    { id: 'demo-odp-3', name: 'ODP Contoh 03', capacity_ports: 16, used_ports: 6, remaining_ports: 10, site_code: 'HQ', site_name: 'Kantor Pusat (contoh)' }
++  ];
++  const odp = odpRaw.map(x => { const utilization = Math.round((x.used_ports / x.capacity_ports) * 100); return { ...x, utilization, tone: odpTone({ ...x, utilization }) }; });
++
++  const funnel = buildFunnel({ registered: 40, survey_ready: 34, provisioned: 28, activated: 22 });
++  const dualMatrix = { cashBasis: { collected: 47000000, count: 118 }, accrualBasis: { billed: 61000000, count: 132 }, variance: 47000000 - 61000000 };
++  const dueDateMatrix = {
++    due15: { label: 'Jatuh Tempo 15 (Grace s/d 20)', totalInvoices: 70, billed: 32000000, paid: 27000000, outstanding: 5000000, paidCount: 60, unpaidCount: 10 },
++    due30: { label: 'Jatuh Tempo 30 (Grace s/d 7 bulan berikutnya)', totalInvoices: 62, billed: 29000000, paid: 20000000, outstanding: 9000000, paidCount: 48, unpaidCount: 14, withinCutoffAmount: 15000000, overlapNextCutoffAmount: 5000000 }
++  };
++  const kpis = { mrr: 52000000, cashRealizationCutoff: dualMatrix.cashBasis.collected, activeCustomers: 842, churnRate: 1.8 };
++  const advisories = buildAdvisories({ odp, dueDateMatrix, siapIsolirCount, pppoeUnlinked: 3, pendingCash: 2 });
++
++  const result = {
++    sites: dummySites, selectedSiteCode: siteCode || '', selectedSiteName: selectedName,
++    month, year, cutoff, kpis, dualMatrix, dueDateMatrix, advisories, financeSeries,
++    aging, agingBuckets, siapIsolirCount, funnel,
++    sla: { avgHours: 26.4, samples: 22 }, odp, ownerWhatsapp: null, isDummy: true
++  };
++  result.report = buildReportSummary(result);
++  return result;
++}
++
++async function getAnalytics(params = {}) {
++  try {
++    return await fetchAnalytics(params);
++  } catch (error) {
++    console.error('Analytics query gagal, menampilkan data contoh sementara:', error.message);
++    return buildDummyAnalytics(params);
++  }
+ }
+ 
+-module.exports={getAnalytics,buildAdvisories,buildFunnel,lastMonths};
++module.exports = { getAnalytics, buildAdvisories, buildFunnel, lastMonths, buildDummyAnalytics, buildReportSummary, cutoffWindow };
+diff --git a/services/mikrotikPppoeService.js b/services/mikrotikPppoeService.js
+new file mode 100644
+index 0000000..adffc4a
+--- /dev/null
++++ b/services/mikrotikPppoeService.js
+@@ -0,0 +1,149 @@
++const crypto = require('crypto');
++const db = require('../config/db');
++const { allSnapshots, saveSecret, syncSecret, removeSecret, disconnectSecret } = require('./nmsService');
++
++const SAMPLE_MIN_GAP_MINUTES = 50;
++const SAMPLE_RETENTION_ROWS = 800;
++const TREND_HOURS = 24;
++
++function num(value) { const n = Number(value); return Number.isFinite(n) ? n : 0; }
++
++// Aggregates every router snapshot into the numbers the PPPoE Analytics tab needs:
++// stat cards, profile distribution (doughnut), and sync classification counts.
++async function getOverview() {
++  const snapshots = await allSnapshots();
++  const profileCounts = new Map();
++  let online = 0, offline = 0, isolated = 0, synced = 0, rogue = 0, exempt = 0, missing = 0;
++  for (const snap of snapshots) {
++    for (const secret of snap.secrets || []) {
++      online += secret.status === 'online' ? 1 : 0;
++      offline += secret.status === 'offline' ? 1 : 0;
++      isolated += secret.status === 'isolated' ? 1 : 0;
++      const profileKey = secret.profile || 'default';
++      profileCounts.set(profileKey, (profileCounts.get(profileKey) || 0) + 1);
++      if (secret.customer) synced++;
++      else if (secret.exempt) exempt++;
++      else rogue++;
++    }
++    missing += (snap.unmatchedCustomers || []).length;
++  }
++  const totalSecrets = online + offline + isolated;
++  const profileDistribution = [...profileCounts.entries()].sort((a, b) => b[1] - a[1]).map(([profile, count]) => ({ profile, count }));
++  const routerErrors = snapshots.filter(s => !s.ok).map(s => ({ name: s.name, siteCode: s.siteCode, error: s.error }));
++  return {
++    stats: { totalSecrets, online, offline, isolated },
++    sync: { synced, rogue, exempt, missing },
++    profileDistribution,
++    routerErrors,
++    routersChecked: snapshots.length
++  };
++}
++
++async function getActiveSessions() {
++  const snapshots = await allSnapshots();
++  const rows = [];
++  for (const snap of snapshots) {
++    for (const secret of snap.secrets || []) {
++      if (!secret.active) continue;
++      rows.push({
++        routerId: snap.id,
++        routerName: snap.name,
++        siteCode: snap.siteCode,
++        secretId: secret['.id'],
++        username: secret.name,
++        profile: secret.profile || 'default',
++        address: secret.active.address || '-',
++        uptime: secret.active.uptime || '-',
++        callerId: secret.active['caller-id'] || secret.active.callerId || '-',
++        customerName: secret.customer?.name || null,
++        customerCode: secret.customer?.customer_code || null
++      });
++    }
++  }
++  return rows.sort((a, b) => a.username.localeCompare(b.username));
++}
++
++async function getSyncAudit() {
++  const snapshots = await allSnapshots();
++  const synced = [], rogue = [], missing = [];
++  for (const snap of snapshots) {
++    for (const secret of snap.secrets || []) {
++      const base = { routerId: snap.id, routerName: snap.name, siteCode: snap.siteCode, secretId: secret['.id'], username: secret.name, profile: secret.profile || 'default', status: secret.status };
++      if (secret.customer) synced.push({ ...base, customerId: secret.customer.id, customerName: secret.customer.name, customerCode: secret.customer.customer_code });
++      else if (!secret.exempt) rogue.push({ ...base, suggestions: secret.suggestions || [] });
++    }
++    for (const customer of snap.unmatchedCustomers || []) {
++      missing.push({ customerId: customer.id, customerCode: customer.customer_code, customerName: customer.name, siteCode: snap.siteCode, routerId: snap.id, routerName: snap.name, suggestions: customer.suggestions || [] });
++    }
++  }
++  return { synced, rogue, missing };
++}
++
++// Records one aggregate sample per SAMPLE_MIN_GAP_MINUTES so the 24h trend chart has
++// real history to draw from once the app has been running for a day.
++async function captureHourlySample() {
++  const [[last]] = await db.execute(`SELECT sampled_at FROM pppoe_hourly_samples ORDER BY sampled_at DESC LIMIT 1`);
++  if (last?.sampled_at && (Date.now() - new Date(last.sampled_at).getTime()) < SAMPLE_MIN_GAP_MINUTES * 60000) return { skipped: true };
++  const { stats } = await getOverview();
++  await db.execute(`INSERT INTO pppoe_hourly_samples(sampled_at,online_count,offline_count,isolated_count,total_count) VALUES(NOW(),?,?,?,?)`,
++    [stats.online, stats.offline, stats.isolated, stats.totalSecrets]);
++  const [[{ total }]] = await db.query(`SELECT COUNT(*) total FROM pppoe_hourly_samples`);
++  if (total > SAMPLE_RETENTION_ROWS) {
++    await db.execute(`DELETE FROM pppoe_hourly_samples ORDER BY sampled_at ASC LIMIT ?`, [total - SAMPLE_RETENTION_ROWS]);
++  }
++  return { skipped: false };
++}
++
++function hourLabel(date) { return `${String(date.getHours()).padStart(2, '0')}:00`; }
++
++// Returns 24 hourly points for the active-users trend line. When history is thin
++// (fresh install) it backfills with a smooth, clearly-labelled estimate so the
++// chart never crashes or renders empty on day one.
++async function getTrend24h() {
++  const since = new Date(Date.now() - TREND_HOURS * 3600000);
++  const [rows] = await db.execute(`SELECT sampled_at,online_count FROM pppoe_hourly_samples WHERE sampled_at>=? ORDER BY sampled_at ASC`, [since]);
++  const now = new Date();
++  const buckets = Array.from({ length: TREND_HOURS }, (_, i) => new Date(now.getTime() - (TREND_HOURS - 1 - i) * 3600000));
++  if (rows.length >= 6) {
++    const byHour = new Map(rows.map(r => [hourLabel(new Date(r.sampled_at)), num(r.online_count)]));
++    let lastKnown = rows[0] ? num(rows[0].online_count) : 0;
++    const values = buckets.map(bucket => {
++      const key = hourLabel(bucket);
++      if (byHour.has(key)) { lastKnown = byHour.get(key); return lastKnown; }
++      return lastKnown;
++    });
++    return { labels: buckets.map(hourLabel), values, isEstimated: false };
++  }
++  const { stats } = await getOverview();
++  const base = stats.online || 0;
++  const values = buckets.map((_, i) => Math.max(0, Math.round(base * (0.82 + 0.18 * Math.sin(i / 3)))));
++  return { labels: buckets.map(hourLabel), values, isEstimated: true };
++}
++
++async function pickRouterForSite(siteCode) {
++  const [rows] = await db.execute(`SELECT r.id,r.name,r.site_id,s.code site_code FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.is_active=1 AND s.code=? ORDER BY r.id LIMIT 1`, [siteCode]);
++  if (!rows.length) throw new Error(`Tidak ada router aktif terdaftar untuk site ${siteCode}.`);
++  return rows[0];
++}
++
++function generateSecretPassword() {
++  return crypto.randomBytes(9).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'Inkamnet123';
++}
++
++// "Push to Router": provisions a brand-new PPPoE secret on the router matching the
++// customer's site, named after their billing customer code, and links it back.
++async function pushCustomerToRouter(customerId) {
++  const [rows] = await db.execute(`SELECT c.id,c.customer_code,c.name,c.pppoe_username,s.code site_code FROM customers c JOIN sites s ON s.id=c.site_id WHERE c.id=? AND c.customer_status='active'`, [customerId]);
++  const customer = rows[0];
++  if (!customer) throw new Error('Pelanggan billing tidak ditemukan atau tidak aktif.');
++  const router = await pickRouterForSite(customer.site_code);
++  const username = customer.pppoe_username || customer.customer_code;
++  const password = generateSecretPassword();
++  const result = await saveSecret(router.id, null, { name: username, password, service: 'pppoe', profile: 'default', comment: `[BILLING] ${customer.customer_code}` }, customer.id);
++  return { router: result.router, username, password, customer };
++}
++
++module.exports = {
++  getOverview, getActiveSessions, getSyncAudit, captureHourlySample, getTrend24h,
++  pushCustomerToRouter, kickSession: disconnectSecret, deleteSecret: removeSecret, syncSecret
++};
+diff --git a/services/schemaService.js b/services/schemaService.js
+index 79645fe..7ead1cb 100644
+--- a/services/schemaService.js
++++ b/services/schemaService.js
+@@ -374,4 +374,17 @@ async function ensureV27Schema() {
+   )`);
+ }
+ 
+-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema };
++async function ensureV28Schema() {
++  // Hourly aggregate samples power the MikroTik PPPoE Analytics 24h active-users trend chart.
++  await db.query(`CREATE TABLE IF NOT EXISTS pppoe_hourly_samples (
++    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
++    sampled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    online_count INT UNSIGNED NOT NULL DEFAULT 0,
++    offline_count INT UNSIGNED NOT NULL DEFAULT 0,
++    isolated_count INT UNSIGNED NOT NULL DEFAULT 0,
++    total_count INT UNSIGNED NOT NULL DEFAULT 0,
++    INDEX idx_pppoe_hourly_samples_time (sampled_at)
++  )`);
++}
++
++module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV28Schema };
+diff --git a/views/analytics/index.ejs b/views/analytics/index.ejs
+index 9a4acb8..0e5c021 100644
+--- a/views/analytics/index.ejs
++++ b/views/analytics/index.ejs
+@@ -1,42 +1,501 @@
+-<% const monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']; %>
+-<section class="analytics-page analytics-v119">
+-  <div class="module-head analytics-head">
+-    <div><div class="module-kicker">RT/RW NET BUSINESS INTELLIGENCE</div><h1>Analitik Keuangan & PSB</h1><p>Ringkasan eksekutif untuk collection, MRR, piutang, pertumbuhan PSB, dan kapasitas ODP.</p></div>
+-    <form class="analytics-filter" method="get" data-auto-filter><select name="site" class="form-select"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= selectedSiteCode===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select><select name="month" class="form-select"><% monthNames.forEach((m,i)=>{ %><option value="<%= i+1 %>" <%= month===i+1?'selected':'' %>><%= m %></option><% }) %></select><input class="form-control" type="number" name="year" min="2020" max="2100" value="<%= year %>"></form>
++<%
++/* ------------------------------------------------------------------------
++   Analitik Keuangan & PSB — standalone Tailwind CSS module.
++   This page intentionally loads the Tailwind Play CDN with Preflight (the
++   global CSS reset) DISABLED, because it renders inside the shared app
++   shell (views/partials/layout.ejs) which already styles the sidebar /
++   topbar / bootstrap modals with Bootstrap. Enabling Preflight would reset
++   heading/button/table defaults for the WHOLE page, not just this module.
++   ------------------------------------------------------------------------ */
++const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
++const yearOptions = (() => { const y = new Date().getFullYear(); const out = []; for (let i = y - 2; i <= y + 1; i++) out.push(i); return out; })();
++function toneClasses(tone) {
++  const map = {
++    danger: 'border-rose-500/40 bg-rose-500/10 text-rose-100',
++    warning: 'border-amber-500/40 bg-amber-500/10 text-amber-100',
++    success: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100',
++    info: 'border-sky-500/40 bg-sky-500/10 text-sky-100',
++    purple: 'border-violet-500/40 bg-violet-500/10 text-violet-100'
++  };
++  return map[tone] || map.info;
++}
++function odpBadge(tone) {
++  const map = {
++    healthy: { label: 'Aman', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
++    warning: { label: 'Hampir Penuh', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/40' },
++    critical: { label: 'Kritis / Penuh', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/40' },
++    unknown: { label: 'Belum Diisi', cls: 'bg-slate-500/15 text-slate-300 border-slate-500/40' }
++  };
++  return map[tone] || map.unknown;
++}
++%>
++<section id="analyticsModule" class="rounded-3xl border border-slate-700/60 bg-slate-900 p-4 sm:p-6 text-slate-100 shadow-2xl shadow-black/30">
++
++  <!-- ============================== HEADER ============================== -->
++  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
++    <div>
++      <div class="inline-flex items-center gap-2 rounded-full border border-violet-500/40 bg-violet-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-violet-300">
++        <i class="bi bi-stars"></i> RT/RW Net Business Intelligence
++      </div>
++      <h1 class="mt-3 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">Analitik Keuangan &amp; PSB</h1>
++      <p class="mt-1 max-w-2xl text-sm text-slate-400">
++        Periode cut-off kas operasional berjalan <b class="text-slate-200"><%= cutoff.label %></b> (tgl 6 s/d tgl 5 bulan berikutnya) ·
++        Site: <b class="text-slate-200"><%= selectedSiteName %></b>
++      </p>
++    </div>
++    <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
++      <form method="get" class="flex flex-wrap items-center gap-2">
++        <select name="site" class="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500">
++          <option value="">Semua Site</option>
++          <% sites.forEach(s => { %><option value="<%= s.code %>" <%= selectedSiteCode === s.code ? 'selected' : '' %>><%= s.code %> · <%= s.name %></option><% }) %>
++        </select>
++        <select name="month" class="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500">
++          <% monthNames.forEach((m, i) => { %><option value="<%= i + 1 %>" <%= month === i + 1 ? 'selected' : '' %>><%= m %></option><% }) %>
++        </select>
++        <select name="year" class="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500">
++          <% yearOptions.forEach(y => { %><option value="<%= y %>" <%= year === y ? 'selected' : '' %>><%= y %></option><% }) %>
++        </select>
++      </form>
++      <button type="button" id="openReportModalBtn" class="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-900/40 transition hover:from-violet-500 hover:to-indigo-500 active:scale-[0.98]">
++        📊 Generate Laporan Analitik
++      </button>
++    </div>
++  </div>
++
++  <% if (isDummy) { %>
++  <div class="mt-5 flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
++    <i class="bi bi-exclamation-triangle-fill mt-0.5 text-lg"></i>
++    <div><b>Sumber data belum siap.</b> Tabel/kolom database yang dibutuhkan analitik ini belum lengkap, sehingga halaman menampilkan <b>data contoh (mockup)</b> yang realistis agar tetap dapat digunakan tanpa error.</div>
+   </div>
++  <% } %>
+ 
+-  <nav class="analytics-tabs" aria-label="Analitik"><button class="active" data-analytics-tab="executive"><i class="bi bi-stars"></i>Executive Summary</button><button data-analytics-tab="finance"><i class="bi bi-graph-up-arrow"></i>Analitik Keuangan</button><button data-analytics-tab="psb"><i class="bi bi-diagram-3-fill"></i>PSB & Infrastruktur</button></nav>
++  <!-- ============================== TABS ============================== -->
++  <nav class="mt-6 flex gap-2 overflow-x-auto rounded-2xl border border-slate-700/60 bg-slate-800/60 p-1.5" role="tablist" aria-label="Analitik">
++    <button type="button" data-analytics-tab="overview" class="analytics-tab-btn flex-1 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-300 transition"><i class="bi bi-stars mr-1.5"></i>Smart Overview</button>
++    <button type="button" data-analytics-tab="finance" class="analytics-tab-btn flex-1 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-300 transition"><i class="bi bi-graph-up-arrow mr-1.5"></i>Analitik Keuangan &amp; Cut-off</button>
++    <button type="button" data-analytics-tab="psb" class="analytics-tab-btn flex-1 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-300 transition"><i class="bi bi-diagram-3-fill mr-1.5"></i>PSB &amp; Infrastruktur</button>
++  </nav>
+ 
+-  <div class="analytics-pane active" data-analytics-pane="executive">
+-    <div class="analytics-kpi-grid">
+-      <article><span>Pelanggan Aktif</span><strong><%= kpis.activeCustomers %></strong><small><%= selectedSiteCode||'Semua site' %></small><i class="bi bi-people-fill"></i></article>
+-      <article><span>MRR Aktif</span><strong><%= formatRupiah(kpis.mrr) %></strong><small>Nilai paket pelanggan aktif</small><i class="bi bi-cash-stack"></i></article>
+-      <article><span>Collection Rate</span><strong><%= kpis.collectionRate %>%</strong><small><%= monthNames[month-1] %> <%= year %></small><i class="bi bi-pie-chart-fill"></i></article>
+-      <article><span>Outstanding</span><strong><%= formatRupiah(kpis.outstanding) %></strong><small>Piutang periode terpilih</small><i class="bi bi-exclamation-diamond-fill"></i></article>
+-      <article><span>PSB Bulan Ini</span><strong><%= kpis.psb %></strong><small>Pemasangan baru</small><i class="bi bi-person-plus-fill"></i></article>
+-      <article><span>Kas Pending</span><strong><%= kpis.pendingCash %></strong><small>Belum masuk saldo real</small><i class="bi bi-shield-check"></i></article>
++  <!-- ============================ TAB 1: SMART OVERVIEW ============================ -->
++  <div data-analytics-pane="overview" class="analytics-pane mt-6 space-y-6">
++    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400">MRR <i class="bi bi-cash-stack text-violet-400"></i></div>
++        <div class="mt-2 text-2xl font-extrabold text-white"><%= formatRupiah(kpis.mrr) %></div>
++        <div class="mt-1 text-xs text-slate-400">Recurring revenue pelanggan aktif</div>
++      </div>
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400">Realisasi Kas Cut-off Tgl 5 <i class="bi bi-wallet2 text-emerald-400"></i></div>
++        <div class="mt-2 text-2xl font-extrabold text-white"><%= formatRupiah(kpis.cashRealizationCutoff) %></div>
++        <div class="mt-1 text-xs text-slate-400">Cash basis · periode <%= cutoff.label %></div>
++      </div>
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400">Total User Aktif <i class="bi bi-people-fill text-sky-400"></i></div>
++        <div class="mt-2 text-2xl font-extrabold text-white"><%= kpis.activeCustomers %></div>
++        <div class="mt-1 text-xs text-slate-400"><%= selectedSiteName %></div>
++      </div>
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++        <div class="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400">Churn Rate <i class="bi bi-person-dash-fill text-rose-400"></i></div>
++        <div class="mt-2 text-2xl font-extrabold text-white"><%= kpis.churnRate %>%</div>
++        <div class="mt-1 text-xs text-slate-400"><%= monthNames[month - 1] %> <%= year %></div>
++      </div>
++    </div>
++
++    <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++      <div class="mb-4 flex items-center justify-between">
++        <div>
++          <div class="text-xs font-bold uppercase tracking-wider text-violet-300">Smart Advisory Engine</div>
++          <h2 class="text-lg font-bold text-white">Insight &amp; Rekomendasi Otomatis</h2>
++        </div>
++        <i class="bi bi-lightbulb-fill text-2xl text-amber-300"></i>
++      </div>
++      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
++        <% advisories.forEach(a => { %>
++        <a href="<%= a.href %>" class="group flex items-start gap-3 rounded-xl border p-4 transition hover:brightness-110 <%= toneClasses(a.tone) %>">
++          <i class="bi <%= a.icon %> mt-0.5 text-lg"></i>
++          <div class="min-w-0 flex-1">
++            <div class="font-semibold"><%= a.title %></div>
++            <div class="mt-0.5 text-xs opacity-80"><%= a.detail %></div>
++          </div>
++          <i class="bi bi-arrow-right opacity-0 transition group-hover:opacity-100"></i>
++        </a>
++        <% }) %>
++      </div>
++    </div>
++
++    <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++      <div class="mb-3">
++        <div class="text-xs font-bold uppercase tracking-wider text-slate-400">Cashflow Stream</div>
++        <h2 class="text-lg font-bold text-white">Tren Inflow vs Outflow — 6 Bulan Terakhir</h2>
++      </div>
++      <div class="h-72"><canvas id="cfCashflowChart"></canvas></div>
+     </div>
+-    <article class="analytics-advisory-card"><div class="analytics-section-title"><div><span>SMART ADVISORY ENGINE</span><h2>Saran Otomatis</h2></div><i class="bi bi-lightbulb-fill"></i></div><div class="analytics-advisory-list"><% advisories.forEach(a=>{ %><a class="<%= a.tone %>" href="<%= a.href %>"><i class="bi <%= a.icon %>"></i><div><strong><%= a.title %></strong><small><%= a.detail %></small></div><span class="bi bi-arrow-right"></span></a><% }) %></div></article>
+   </div>
+ 
+-  <div class="analytics-pane" data-analytics-pane="finance">
+-    <div class="analytics-finance-grid"><article class="analytics-chart-card"><div class="analytics-section-title"><div><span>CASHFLOW STREAM</span><h2>Inflow vs Outflow</h2></div></div><div class="analytics-chart"><canvas id="analyticsCashflowChart"></canvas></div></article><article class="analytics-chart-card"><div class="analytics-section-title"><div><span>RECURRING REVENUE</span><h2>MRR / Billing Trend</h2></div></div><div class="analytics-chart"><canvas id="analyticsMrrChart"></canvas></div></article></div>
+-    <article class="analytics-aging-card"><div class="analytics-section-title"><div><span>AGING PIUTANG</span><h2>Prioritas Collection</h2></div><a href="/invoices?status=open">Buka Tagihan <i class="bi bi-arrow-right"></i></a></div><div class="aging-summary"><span><b><%= agingBuckets.h3.length %></b>H-3</span><span><b><%= agingBuckets.hplus3.length %></b>H+3 s/d 30</span><span class="danger"><b><%= agingBuckets.over30.length %></b>&gt;30 Hari</span></div><div class="table-responsive"><table class="app-table"><thead><tr><th>Pelanggan</th><th>Site</th><th>Jatuh Tempo</th><th>Umur</th><th>Outstanding</th><th>Status</th></tr></thead><tbody><% aging.slice(0,40).forEach(row=>{const days=Number(row.days_overdue||0);%><tr><td><span class="cell-main"><%= row.customer_name %></span><span class="cell-sub"><%= row.customer_code %></span></td><td><span class="status-badge purple"><%= row.site_code %></span></td><td><%= formatDate(row.oldest_due) %></td><td><%= days>0?`${days} hari overdue`:days<0?`H${days}`:'Hari ini' %></td><td class="money"><%= formatRupiah(row.outstanding) %></td><td><span class="status-badge <%= days>30?'red':days>0?'orange':'green' %>"><%= days>30?'Siap review isolir':days>0?'Follow-up':'Reminder H-3' %></span></td></tr><% }) %><% if(!aging.length){ %><tr><td colspan="6"><div class="empty-state"><i class="bi bi-check2-circle"></i><strong>Tidak ada piutang terbuka</strong></div></td></tr><% } %></tbody></table></div></article>
++  <!-- ============================ TAB 2: FINANCE & CUT-OFF ============================ -->
++  <div data-analytics-pane="finance" class="analytics-pane mt-6 hidden space-y-6">
++    <div class="grid grid-cols-1 gap-6 xl:grid-cols-5">
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20 xl:col-span-3">
++        <div class="mb-3">
++          <div class="text-xs font-bold uppercase tracking-wider text-slate-400">Matrix Pelunasan Tagihan</div>
++          <h2 class="text-lg font-bold text-white">Due Date 15 vs 30 · Closing Kas Tgl 5</h2>
++        </div>
++        <div class="h-64"><canvas id="cfDueMatrixChart"></canvas></div>
++      </div>
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20 xl:col-span-2">
++        <div class="mb-3">
++          <div class="text-xs font-bold uppercase tracking-wider text-slate-400">Rekonsiliasi Tgl 30</div>
++          <h2 class="text-lg font-bold text-white">Overlap Closing Kas</h2>
++        </div>
++        <div class="space-y-3">
++          <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
++            <div class="text-xs text-emerald-300">Terbayar tgl 1–5 (sebelum closing)</div>
++            <div class="text-lg font-bold text-white"><%= formatRupiah(dueDateMatrix.due30.withinCutoffAmount) %></div>
++          </div>
++          <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
++            <div class="text-xs text-amber-300">Terbayar tgl 6–7 (overlap periode berikutnya)</div>
++            <div class="text-lg font-bold text-white"><%= formatRupiah(dueDateMatrix.due30.overlapNextCutoffAmount) %></div>
++          </div>
++          <div class="rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-400">
++            Dual-Matrix: Cash Basis (<%= formatRupiah(dualMatrix.cashBasis.collected) %>) vs Accrual Basis (<%= formatRupiah(dualMatrix.accrualBasis.billed) %>) ·
++            Selisih <b class="<%= dualMatrix.variance >= 0 ? 'text-emerald-300' : 'text-rose-300' %>"><%= formatRupiah(dualMatrix.variance) %></b>
++          </div>
++        </div>
++      </div>
++    </div>
++
++    <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
++        <div>
++          <div class="text-xs font-bold uppercase tracking-wider text-slate-400">Aging Piutang</div>
++          <h2 class="text-lg font-bold text-white">Prioritas Collection</h2>
++        </div>
++        <div class="flex flex-wrap gap-2" id="agingFilterBar">
++          <button type="button" data-aging-filter="all" class="aging-filter-btn active-filter rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200">Semua (<%= aging.length %>)</button>
++          <button type="button" data-aging-filter="h3" class="aging-filter-btn rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-300">H-3 (<%= agingBuckets.h3.length %>)</button>
++          <button type="button" data-aging-filter="hplus3" class="aging-filter-btn rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-300">H+3 s/d 30 (<%= agingBuckets.hplus3.length %>)</button>
++          <button type="button" data-aging-filter="over30" class="aging-filter-btn rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-300">&gt;30 Hari (<%= agingBuckets.over30.length %>)</button>
++          <button type="button" data-aging-filter="isolir" class="aging-filter-btn rounded-lg border border-rose-600/60 px-3 py-1.5 text-xs font-semibold text-rose-300">Siap Isolir (<%= siapIsolirCount %>)</button>
++        </div>
++      </div>
++      <div class="overflow-x-auto">
++        <table class="w-full min-w-[760px] text-left text-sm">
++          <thead>
++            <tr class="border-b border-slate-700 text-xs uppercase tracking-wider text-slate-400">
++              <th class="py-2 pr-3">Pelanggan</th><th class="py-2 pr-3">Site</th><th class="py-2 pr-3">Jatuh Tempo</th><th class="py-2 pr-3">Umur</th><th class="py-2 pr-3">Outstanding</th><th class="py-2 pr-3">Status</th><th class="py-2 pr-3">Aksi</th>
++            </tr>
++          </thead>
++          <tbody id="agingTableBody">
++            <% aging.forEach(row => {
++              const days = Number(row.days_overdue || 0);
++              const bucket = days <= 0 ? 'h3' : days <= 30 ? 'hplus3' : 'over30';
++              const waText = encodeURIComponent(`Halo ${row.customer_name}, ini pengingat tagihan INKAMNET Anda sebesar ${formatRupiah(row.outstanding)} yang ${days > 0 ? `sudah lewat ${days} hari dari jatuh tempo` : 'akan segera jatuh tempo'}. Mohon segera melakukan pembayaran. Terima kasih.`);
++            %>
++            <tr class="aging-row border-b border-slate-800/80 hover:bg-slate-700/20" data-bucket="<%= bucket %>" data-isolir="<%= row.siapIsolir ? '1' : '0' %>">
++              <td class="py-3 pr-3"><div class="font-semibold text-slate-100"><%= row.customer_name %></div><div class="text-xs text-slate-500"><%= row.customer_code %></div></td>
++              <td class="py-3 pr-3"><span class="rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-xs text-violet-300"><%= row.site_code %></span></td>
++              <td class="py-3 pr-3 text-slate-300"><%= formatDate(row.oldest_due) %></td>
++              <td class="py-3 pr-3 text-slate-300"><%= days > 0 ? `${days} hari overdue` : days < 0 ? `H${days}` : 'Hari ini' %></td>
++              <td class="py-3 pr-3 font-semibold text-slate-100"><%= formatRupiah(row.outstanding) %></td>
++              <td class="py-3 pr-3">
++                <% if (row.siapIsolir) { %><span class="rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-xs font-semibold text-rose-300">Siap Isolir</span>
++                <% } else if (days > 30) { %><span class="rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-xs text-rose-300">Review isolir</span>
++                <% } else if (days > 0) { %><span class="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">Follow-up</span>
++                <% } else { %><span class="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">Reminder H-3</span><% } %>
++              </td>
++              <td class="py-3 pr-3">
++                <% if (row.whatsappNumber) { %>
++                <a href="https://wa.me/<%= row.whatsappNumber %>?text=<%= waText %>" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-500"><i class="bi bi-whatsapp"></i>WA Reminder</a>
++                <% } else { %><span class="text-xs text-slate-500">Nomor belum ada</span><% } %>
++              </td>
++            </tr>
++            <% }) %>
++            <% if (!aging.length) { %>
++            <tr><td colspan="7" class="py-8 text-center text-slate-400"><i class="bi bi-check2-circle mr-1.5 text-emerald-400"></i>Tidak ada piutang terbuka</td></tr>
++            <% } %>
++          </tbody>
++        </table>
++        <div id="agingEmptyFiltered" class="hidden py-8 text-center text-sm text-slate-400">Tidak ada pelanggan pada kategori filter ini.</div>
++      </div>
++    </div>
+   </div>
+ 
+-  <div class="analytics-pane" data-analytics-pane="psb">
+-    <div class="analytics-psb-grid"><article class="analytics-funnel-card"><div class="analytics-section-title"><div><span>PSB CONVERSION FUNNEL</span><h2>Registrasi → Aktivasi</h2><small>Stage diturunkan dari kelengkapan alamat/cluster, provisioning PPPoE, dan activation date saat ini.</small></div></div><div class="psb-funnel"><% const base=Math.max(1,Number(funnel[0]?.value||0)); funnel.forEach((f,index)=>{ %><div style="--funnel-width:<%= Math.max(38,Math.round(Number(f.value||0)/base*100)) %>%"><span><i><%= index+1 %></i><b><%= f.label %></b><small><%= f.hint %></small></span><strong><%= f.value %></strong></div><% }) %></div></article><article class="analytics-sla-card"><span>RATA-RATA SLA PSB</span><strong><%= sla.avgDays %><small> hari</small></strong><p>Dari registrasi sampai activation date pada <%= sla.samples %> pelanggan teraktivasi.</p><i class="bi bi-stopwatch-fill"></i></article></div>
+-    <article class="analytics-odp-card"><div class="analytics-section-title"><div><span>ODP CAPACITY HEATMAP</span><h2>Kapasitas per Site / ODP</h2></div><a href="/clusters">Kelola ODP <i class="bi bi-arrow-right"></i></a></div><div class="odp-heatmap"><% odp.forEach(o=>{const tone=o.capacity_ports===0?'unknown':o.remaining_ports<2?'critical':o.utilization>=75?'warning':'healthy';%><a class="<%= tone %>" href="/clusters?site=<%= o.site_code %>"><span><b><%= o.site_code %></b><small><%= o.name %></small></span><strong><%= o.capacity_ports?`${o.used_ports}/${o.capacity_ports}`:'N/A' %></strong><em><%= o.capacity_ports?`${o.remaining_ports} port tersisa`:'Kapasitas belum diisi' %></em><i style="--odp-use:<%= o.utilization %>%"></i></a><% }) %><% if(!odp.length){ %><div class="empty-state"><i class="bi bi-diagram-3"></i><strong>Belum ada data ODP</strong></div><% } %></div></article>
++  <!-- ============================ TAB 3: PSB & INFRASTRUKTUR ============================ -->
++  <div data-analytics-pane="psb" class="analytics-pane mt-6 hidden space-y-6">
++    <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20 xl:col-span-2">
++        <div class="mb-3">
++          <div class="text-xs font-bold uppercase tracking-wider text-slate-400">PSB Conversion Funnel</div>
++          <h2 class="text-lg font-bold text-white">Leads → Surveyed → Installed → Activated</h2>
++        </div>
++        <div class="h-72"><canvas id="cfFunnelChart"></canvas></div>
++      </div>
++      <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++        <div class="text-xs font-bold uppercase tracking-wider text-slate-400">SLA Teknisi</div>
++        <div class="mt-2 flex items-baseline gap-2">
++          <span class="text-4xl font-extrabold text-white"><%= sla.avgHours %></span>
++          <span class="text-sm text-slate-400">jam</span>
++        </div>
++        <p class="mt-2 text-sm text-slate-400">Rata-rata kecepatan penanganan dari registrasi sampai aktivasi PSB, dari <%= sla.samples %> sampel pelanggan bulan ini.</p>
++        <i class="bi bi-stopwatch-fill mt-4 block text-4xl text-sky-400/70"></i>
++      </div>
++    </div>
++
++    <div class="rounded-2xl border border-slate-700/60 bg-slate-800/90 p-5 shadow-lg shadow-black/20">
++      <div class="mb-4 flex items-center justify-between">
++        <div>
++          <div class="text-xs font-bold uppercase tracking-wider text-slate-400">ODP Capacity Heatmap</div>
++          <h2 class="text-lg font-bold text-white">Kapasitas Port per Site / ODP</h2>
++        </div>
++        <a href="/clusters" class="text-xs font-semibold text-violet-300 hover:text-violet-200">Kelola ODP <i class="bi bi-arrow-right"></i></a>
++      </div>
++      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
++        <% odp.forEach(o => { const badge = odpBadge(o.tone); %>
++        <a href="/clusters?site=<%= o.site_code %>" class="rounded-xl border p-3 transition hover:brightness-110 <%= badge.cls %>">
++          <div class="flex items-center justify-between text-xs font-semibold"><span><%= o.site_code %></span><span class="rounded-full border px-2 py-0.5 <%= badge.cls %>"><%= badge.label %></span></div>
++          <div class="mt-1 truncate text-sm font-semibold text-slate-100"><%= o.name %></div>
++          <div class="mt-2 text-lg font-extrabold text-white"><%= o.capacity_ports ? `${o.used_ports}/${o.capacity_ports}` : 'N/A' %></div>
++          <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-900/60"><div class="h-full rounded-full bg-current" style="width:<%= o.utilization %>%"></div></div>
++          <div class="mt-1 text-[11px] opacity-80"><%= o.capacity_ports ? `${o.remaining_ports} port tersisa` : 'Kapasitas belum diisi' %></div>
++        </a>
++        <% }) %>
++        <% if (!odp.length) { %><div class="col-span-full py-8 text-center text-sm text-slate-400"><i class="bi bi-diagram-3 mr-1.5"></i>Belum ada data ODP</div><% } %>
++      </div>
++    </div>
+   </div>
+ </section>
++
++<!-- ============================== GENERATE REPORT MODAL ============================== -->
++<div id="reportModalBackdrop" class="fixed inset-0 z-[2000] hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
++  <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl">
++    <div class="flex items-start justify-between gap-3 border-b border-slate-700/70 p-5">
++      <div>
++        <div class="text-xs font-bold uppercase tracking-wider text-violet-300">Generate Laporan Analitik</div>
++        <h3 class="text-xl font-bold text-white">Ringkasan Eksekutif</h3>
++        <p class="mt-0.5 text-xs text-slate-400" id="reportModalPeriod">Memuat data terbaru…</p>
++      </div>
++      <button type="button" id="closeReportModalBtn" class="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white"><i class="bi bi-x-lg"></i></button>
++    </div>
++
++    <div class="space-y-5 p-5" id="reportModalBody">
++      <div id="reportModalLoading" class="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 p-4 text-sm text-slate-300">
++        <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-500 border-t-violet-400"></span> Mengambil data analitik terbaru…
++      </div>
++
++      <div id="reportModalContent" class="hidden space-y-5">
++        <div>
++          <div class="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">1. Ringkasan Eksekutif Keuangan &amp; Realisasi Kas</div>
++          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">MRR</div><div class="font-bold text-white" data-report-field="mrr">-</div></div>
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">Realisasi Kas Cut-off</div><div class="font-bold text-white" data-report-field="cashRealizationCutoff">-</div></div>
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">Accrual Billed</div><div class="font-bold text-white" data-report-field="accrualBilled">-</div></div>
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">Cash Collected</div><div class="font-bold text-white" data-report-field="cashCollected">-</div></div>
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">Selisih Cash vs Accrual</div><div class="font-bold text-white" data-report-field="variance">-</div></div>
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">Churn Rate</div><div class="font-bold text-white" data-report-field="churnRate">-</div></div>
++          </div>
++        </div>
++        <div>
++          <div class="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">2. Matriks Kesehatan Jaringan &amp; SLA PSB</div>
++          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">Avg SLA</div><div class="font-bold text-white" data-report-field="avgSlaHours">-</div></div>
++            <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3"><div class="text-[11px] text-slate-400">Konversi PSB</div><div class="font-bold text-white" data-report-field="psbConversionRate">-</div></div>
++            <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3"><div class="text-[11px] text-emerald-300">ODP Aman</div><div class="font-bold text-white" data-report-field="odpHealthy">-</div></div>
++            <div class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3"><div class="text-[11px] text-rose-300">ODP Kritis</div><div class="font-bold text-white" data-report-field="odpCritical">-</div></div>
++          </div>
++        </div>
++        <div>
++          <div class="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">Smart Advisory</div>
++          <ul id="reportModalAdvisories" class="space-y-1.5 text-sm text-slate-300"></ul>
++        </div>
++      </div>
++    </div>
++
++    <div class="flex flex-wrap items-center justify-end gap-2 border-t border-slate-700/70 p-5">
++      <a id="reportDownloadJsonBtn" href="#" class="rounded-xl border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800">Unduh JSON</a>
++      <button type="button" id="reportPrintBtn" class="inline-flex items-center gap-2 rounded-xl border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"><i class="bi bi-printer-fill"></i>Cetak / Download PDF</button>
++      <button type="button" id="reportWhatsappBtn" class="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-500"><i class="bi bi-whatsapp"></i>Kirim Ringkasan via WA ke Owner</button>
++    </div>
++  </div>
++</div>
++
++<!-- Printable-only summary sheet, populated by JS right before window.print(). -->
++<div id="analyticsPrintSheet" class="hidden bg-white p-8 text-slate-900"></div>
++
++<style>
++  @media print {
++    body * { visibility: hidden !important; }
++    #analyticsPrintSheet, #analyticsPrintSheet * { visibility: visible !important; }
++    #analyticsPrintSheet { display: block !important; position: absolute; top: 0; left: 0; width: 100%; }
++  }
++  .analytics-tab-btn.active-tab { background-color: rgb(124 58 237); color: #fff; box-shadow: 0 8px 20px -8px rgba(124,58,237,.6); }
++  .aging-filter-btn.active-filter { background-color: rgb(51 65 85); color: #fff; }
++</style>
++
++<script src="https://cdn.tailwindcss.com"></script>
++<script>tailwind.config = { corePlugins: { preflight: false } };</script>
+ <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+ <script>
+-(()=>{
+-  document.querySelectorAll('[data-analytics-tab]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-analytics-tab]').forEach(x=>x.classList.toggle('active',x===btn));document.querySelectorAll('[data-analytics-pane]').forEach(x=>x.classList.toggle('active',x.dataset.analyticsPane===btn.dataset.analyticsTab));}));
+-  if(typeof Chart==='undefined')return;
+-  const series=<%- JSON.stringify(financeSeries) %>,currency=v=>'Rp '+new Intl.NumberFormat('id-ID',{notation:'compact',maximumFractionDigits:1}).format(v||0);
+-  const base={responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8995aa',boxWidth:10,usePointStyle:true}},tooltip:{backgroundColor:'#0b1020',padding:12,callbacks:{label:c=>`${c.dataset.label}: ${currency(c.raw)}`}}},scales:{x:{grid:{display:false},ticks:{color:'#7f8aa0'}},y:{beginAtZero:true,grid:{color:'rgba(148,163,184,.08)'},ticks:{color:'#7f8aa0',callback:currency}}}};
+-  const cash=document.getElementById('analyticsCashflowChart');if(cash)new Chart(cash,{type:'line',data:{labels:series.labels,datasets:[{label:'Inflow',data:series.inflow,borderColor:'#2ed6a1',backgroundColor:'rgba(46,214,161,.10)',fill:true,tension:.38},{label:'Outflow',data:series.outflow,borderColor:'#ff6969',backgroundColor:'rgba(255,105,105,.08)',fill:true,tension:.38}]},options:base});
+-  const mrr=document.getElementById('analyticsMrrChart');if(mrr)new Chart(mrr,{type:'bar',data:{labels:series.labels,datasets:[{label:'Billing recurring',data:series.mrr,backgroundColor:'rgba(95,91,255,.60)',borderColor:'#766cff',borderWidth:1,borderRadius:7}]},options:base});
++(() => {
++  const money = v => 'Rp ' + new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 }).format(v || 0);
++
++  // ---- Tab switcher (vanilla JS, no page reload) ----
++  const tabButtons = document.querySelectorAll('[data-analytics-tab]');
++  const panes = document.querySelectorAll('[data-analytics-pane]');
++  function activateTab(name) {
++    tabButtons.forEach(btn => btn.classList.toggle('active-tab', btn.dataset.analyticsTab === name));
++    panes.forEach(pane => pane.classList.toggle('hidden', pane.dataset.analyticsPane !== name));
++  }
++  tabButtons.forEach(btn => btn.addEventListener('click', () => activateTab(btn.dataset.analyticsTab)));
++  activateTab('overview');
++
++  // ---- Aging piutang quick filters ----
++  const agingRows = [...document.querySelectorAll('.aging-row')];
++  const filterButtons = document.querySelectorAll('[data-aging-filter]');
++  const emptyState = document.getElementById('agingEmptyFiltered');
++  function applyAgingFilter(key) {
++    filterButtons.forEach(btn => btn.classList.toggle('active-filter', btn.dataset.agingFilter === key));
++    let visibleCount = 0;
++    agingRows.forEach(row => {
++      const matches = key === 'all' ? true : key === 'isolir' ? row.dataset.isolir === '1' : row.dataset.bucket === key;
++      row.classList.toggle('hidden', !matches);
++      if (matches) visibleCount++;
++    });
++    if (emptyState) emptyState.classList.toggle('hidden', visibleCount !== 0 || agingRows.length === 0);
++  }
++  filterButtons.forEach(btn => btn.addEventListener('click', () => applyAgingFilter(btn.dataset.agingFilter)));
++
++  // ---- Charts ----
++  if (typeof Chart !== 'undefined') {
++    const financeSeries = <%- JSON.stringify(financeSeries) %>;
++    const dueDateMatrix = <%- JSON.stringify(dueDateMatrix) %>;
++    const funnel = <%- JSON.stringify(funnel) %>;
++    const baseGrid = { color: 'rgba(148,163,184,.12)' };
++    const baseTicks = { color: '#94a3b8' };
++
++    const cashflowCanvas = document.getElementById('cfCashflowChart');
++    if (cashflowCanvas) {
++      const ctx = cashflowCanvas.getContext('2d');
++      const inflowFill = ctx.createLinearGradient(0, 0, 0, 260); inflowFill.addColorStop(0, 'rgba(16,185,129,.35)'); inflowFill.addColorStop(1, 'rgba(16,185,129,0)');
++      const outflowFill = ctx.createLinearGradient(0, 0, 0, 260); outflowFill.addColorStop(0, 'rgba(244,63,94,.28)'); outflowFill.addColorStop(1, 'rgba(244,63,94,0)');
++      new Chart(cashflowCanvas, {
++        type: 'line',
++        data: { labels: financeSeries.labels, datasets: [
++          { label: 'Inflow', data: financeSeries.inflow, borderColor: '#10b981', backgroundColor: inflowFill, fill: true, tension: .38, borderWidth: 2.4, pointRadius: 3 },
++          { label: 'Outflow', data: financeSeries.outflow, borderColor: '#f43f5e', backgroundColor: outflowFill, fill: true, tension: .38, borderWidth: 2.2, pointRadius: 3 }
++        ] },
++        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#cbd5e1' } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { grid: { display: false }, ticks: baseTicks }, y: { grid: baseGrid, ticks: { ...baseTicks, callback: v => money(v) } } } }
++      });
++    }
++
++    const dueMatrixCanvas = document.getElementById('cfDueMatrixChart');
++    if (dueMatrixCanvas) {
++      new Chart(dueMatrixCanvas, {
++        type: 'bar',
++        data: { labels: ['Jatuh Tempo 15', 'Jatuh Tempo 30'], datasets: [
++          { label: 'Tagihan (Billed)', data: [dueDateMatrix.due15.billed, dueDateMatrix.due30.billed], backgroundColor: 'rgba(245,158,11,.75)', borderRadius: 8 },
++          { label: 'Terbayar (Paid)', data: [dueDateMatrix.due15.paid, dueDateMatrix.due30.paid], backgroundColor: 'rgba(16,185,129,.75)', borderRadius: 8 },
++          { label: 'Outstanding', data: [dueDateMatrix.due15.outstanding, dueDateMatrix.due30.outstanding], backgroundColor: 'rgba(244,63,94,.65)', borderRadius: 8 }
++        ] },
++        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#cbd5e1', boxWidth: 10 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${money(c.raw)}` } } }, scales: { x: { grid: { display: false }, ticks: baseTicks }, y: { grid: baseGrid, ticks: { ...baseTicks, callback: v => money(v) } } } }
++      });
++    }
++
++    const funnelCanvas = document.getElementById('cfFunnelChart');
++    if (funnelCanvas) {
++      new Chart(funnelCanvas, {
++        type: 'bar',
++        data: { labels: funnel.map(f => f.label), datasets: [{ data: funnel.map(f => f.value), backgroundColor: ['#38bdf8', '#818cf8', '#a78bfa', '#34d399'], borderRadius: 10, barThickness: 34 }] },
++        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw} pelanggan` } } }, scales: { x: { grid: baseGrid, ticks: { ...baseTicks, precision: 0 } }, y: { grid: { display: false }, ticks: baseTicks } } }
++      });
++    }
++  }
++
++  // ---- Generate Laporan Analitik modal ----
++  const backdrop = document.getElementById('reportModalBackdrop');
++  const openBtn = document.getElementById('openReportModalBtn');
++  const closeBtn = document.getElementById('closeReportModalBtn');
++  const loadingEl = document.getElementById('reportModalLoading');
++  const contentEl = document.getElementById('reportModalContent');
++  const periodEl = document.getElementById('reportModalPeriod');
++  const advisoriesEl = document.getElementById('reportModalAdvisories');
++  const printBtn = document.getElementById('reportPrintBtn');
++  const waBtn = document.getElementById('reportWhatsappBtn');
++  const downloadBtn = document.getElementById('reportDownloadJsonBtn');
++  const printSheet = document.getElementById('analyticsPrintSheet');
++  const initialReport = <%- JSON.stringify(report) %>;
++  const ownerWhatsapp = <%- JSON.stringify(ownerWhatsapp) %>;
++  const queryString = new URLSearchParams({ site: '<%= selectedSiteCode %>', month: '<%= month %>', year: '<%= year %>' }).toString();
++  let currentReport = null;
++
++  function fillReport(report) {
++    currentReport = report;
++    periodEl.textContent = `${report.site} · ${report.period.cutoffLabel}`;
++    const fields = {
++      mrr: money(report.executive.mrr),
++      cashRealizationCutoff: money(report.executive.cashRealizationCutoff),
++      accrualBilled: money(report.executive.accrualBilled),
++      cashCollected: money(report.executive.cashCollected),
++      variance: money(report.executive.variance),
++      churnRate: report.executive.churnRate + '%',
++      avgSlaHours: report.network.avgSlaHours + ' jam',
++      psbConversionRate: report.network.psbConversionRate + '%',
++      odpHealthy: report.network.odpHealthy,
++      odpCritical: report.network.odpCritical
++    };
++    Object.entries(fields).forEach(([key, value]) => { const el = contentEl.querySelector(`[data-report-field="${key}"]`); if (el) el.textContent = value; });
++    advisoriesEl.innerHTML = report.advisories.map(a => `<li class="flex items-start gap-2"><i class="bi bi-dot text-violet-400"></i><span><b>${a.title}</b> — ${a.detail}</span></li>`).join('');
++    loadingEl.classList.add('hidden');
++    contentEl.classList.remove('hidden');
++    downloadBtn.href = `/analytics/export-report?${queryString}&download=1`;
++  }
++
++  function openModal() {
++    backdrop.classList.remove('hidden');
++    backdrop.classList.add('flex');
++    loadingEl.classList.remove('hidden');
++    contentEl.classList.add('hidden');
++    fetch(`/analytics/export-report?${queryString}`)
++      .then(res => res.json())
++      .then(data => fillReport(data.report))
++      .catch(() => fillReport(initialReport));
++  }
++  function closeModal() { backdrop.classList.add('hidden'); backdrop.classList.remove('flex'); }
++  openBtn?.addEventListener('click', openModal);
++  closeBtn?.addEventListener('click', closeModal);
++  backdrop?.addEventListener('click', e => { if (e.target === backdrop) closeModal(); });
++
++  printBtn?.addEventListener('click', () => {
++    const report = currentReport || initialReport;
++    printSheet.innerHTML = `
++      <h1 style="font-size:20px;font-weight:800;margin-bottom:4px;">Laporan Analitik Keuangan &amp; PSB</h1>
++      <p style="font-size:12px;color:#475569;margin-bottom:16px;">${report.site} · Periode cut-off ${report.period.cutoffLabel} · Dicetak ${new Date(report.generatedAt).toLocaleString('id-ID')}</p>
++      <h2 style="font-size:14px;font-weight:700;margin:12px 0 6px;">1. Ringkasan Eksekutif Keuangan &amp; Realisasi Kas</h2>
++      <table style="width:100%;border-collapse:collapse;font-size:12px;">
++        <tr><td style="padding:4px 0;">MRR</td><td style="text-align:right;">${money(report.executive.mrr)}</td></tr>
++        <tr><td style="padding:4px 0;">Realisasi Kas Cut-off</td><td style="text-align:right;">${money(report.executive.cashRealizationCutoff)}</td></tr>
++        <tr><td style="padding:4px 0;">Accrual Billed</td><td style="text-align:right;">${money(report.executive.accrualBilled)}</td></tr>
++        <tr><td style="padding:4px 0;">Cash Collected</td><td style="text-align:right;">${money(report.executive.cashCollected)}</td></tr>
++        <tr><td style="padding:4px 0;">Selisih Cash vs Accrual</td><td style="text-align:right;">${money(report.executive.variance)}</td></tr>
++        <tr><td style="padding:4px 0;">Churn Rate</td><td style="text-align:right;">${report.executive.churnRate}%</td></tr>
++      </table>
++      <h2 style="font-size:14px;font-weight:700;margin:16px 0 6px;">2. Matriks Kesehatan Jaringan &amp; SLA PSB</h2>
++      <table style="width:100%;border-collapse:collapse;font-size:12px;">
++        <tr><td style="padding:4px 0;">Rata-rata SLA Teknisi</td><td style="text-align:right;">${report.network.avgSlaHours} jam</td></tr>
++        <tr><td style="padding:4px 0;">Konversi PSB</td><td style="text-align:right;">${report.network.psbConversionRate}%</td></tr>
++        <tr><td style="padding:4px 0;">ODP Aman / Hampir Penuh / Kritis</td><td style="text-align:right;">${report.network.odpHealthy} / ${report.network.odpWarning} / ${report.network.odpCritical}</td></tr>
++      </table>
++      <h2 style="font-size:14px;font-weight:700;margin:16px 0 6px;">Smart Advisory</h2>
++      <ul style="font-size:12px;padding-left:16px;">${report.advisories.map(a => `<li style="margin-bottom:4px;"><b>${a.title}</b> — ${a.detail}</li>`).join('')}</ul>
++    `;
++    window.print();
++  });
++
++  waBtn?.addEventListener('click', () => {
++    const report = currentReport || initialReport;
++    const text = encodeURIComponent(`*Laporan Analitik INKAMNET*\n${report.site} · Periode cut-off ${report.period.cutoffLabel}\n\nMRR: ${money(report.executive.mrr)}\nRealisasi Kas Cut-off: ${money(report.executive.cashRealizationCutoff)}\nAccrual Billed: ${money(report.executive.accrualBilled)}\nChurn Rate: ${report.executive.churnRate}%\n\nSLA Teknisi: ${report.network.avgSlaHours} jam\nKonversi PSB: ${report.network.psbConversionRate}%\nODP Kritis: ${report.network.odpCritical}\n\nDikirim otomatis dari Analitik Keuangan & PSB.`);
++    const target = ownerWhatsapp || (report.ownerWhatsapp || '');
++    if (!target) { alert('Nomor WhatsApp Owner belum diisi di Pengaturan (Company Phone).'); return; }
++    window.open(`https://wa.me/${target}?text=${text}`, '_blank', 'noopener');
++  });
+ })();
+ </script>
+diff --git a/views/mikrotik/index.ejs b/views/mikrotik/index.ejs
+new file mode 100644
+index 0000000..53f3d36
+--- /dev/null
++++ b/views/mikrotik/index.ejs
+@@ -0,0 +1,138 @@
++<section class="mikrotik-page analytics-v119">
++  <div class="module-head analytics-head">
++    <div><div class="module-kicker">SERVICE PPPoE FOCUS</div><h1>MikroTik PPPoE</h1><p>Analitik, sesi aktif, dan audit sinkronisasi PPPoE tanpa beban monitoring live traffic.</p></div>
++    <a class="btn-tech" href="/network/monitor"><i class="bi bi-activity"></i>Buka NMS Lengkap</a>
++  </div>
++
++  <% if(isDummy){ %><div class="alert alert-warning alert-modern" role="alert"><i class="bi bi-exclamation-triangle-fill me-2"></i>Router MikroTik sedang tidak dapat dijangkau atau data belum siap. Menampilkan tampilan kosong yang aman sampai koneksi pulih.</div><% } %>
++  <% if(overview.routerErrors && overview.routerErrors.length){ %><div class="alert alert-warning alert-modern" role="alert"><i class="bi bi-wifi-off me-2"></i><b><%= overview.routerErrors.length %> router</b> tidak dapat dijangkau: <%= overview.routerErrors.map(e=>`${e.siteCode}/${e.name}`).join(', ') %>.</div><% } %>
++
++  <nav class="analytics-tabs" aria-label="MikroTik PPPoE">
++    <button class="active" data-mikrotik-tab="analytics"><i class="bi bi-pie-chart-fill"></i>PPPoE Analytics</button>
++    <button data-mikrotik-tab="sessions"><i class="bi bi-broadcast-pin"></i>Active Sessions</button>
++    <button data-mikrotik-tab="audit"><i class="bi bi-shield-check"></i>Sync & Audit</button>
++  </nav>
++
++  <div class="analytics-pane active" data-mikrotik-pane="analytics">
++    <div class="analytics-kpi-grid">
++      <article><span>Total Secret PPPoE</span><strong><%= overview.stats.totalSecrets %></strong><small><%= overview.routersChecked %> router terpantau</small><i class="bi bi-people-fill"></i></article>
++      <article><span>Online</span><strong><%= overview.stats.online %></strong><small>Sesi aktif saat ini</small><i class="bi bi-wifi"></i></article>
++      <article><span>Offline</span><strong><%= overview.stats.offline %></strong><small>Secret tidak connect</small><i class="bi bi-wifi-off"></i></article>
++      <article><span>Isolir</span><strong><%= overview.stats.isolated %></strong><small>Disabled / isolir</small><i class="bi bi-slash-circle"></i></article>
++    </div>
++    <div class="analytics-finance-grid">
++      <article class="analytics-chart-card"><div class="analytics-section-title"><div><span>DISTRIBUSI PROFIL</span><h2>Paket / Profile PPPoE</h2></div></div><div class="analytics-chart"><canvas id="mikrotikProfileChart"></canvas></div></article>
++      <article class="analytics-chart-card"><div class="analytics-section-title"><div><span>TREN 24 JAM<% if(trend.isEstimated){ %> · ESTIMASI<% } %></span><h2>Active Users</h2></div></div><div class="analytics-chart"><canvas id="mikrotikTrendChart"></canvas></div><% if(trend.isEstimated){ %><small class="cell-sub d-block mt-2"><i class="bi bi-info-circle"></i> Riwayat sample masih sedikit, kurva di atas adalah estimasi halus dari kondisi online saat ini. Grafik akan mengikuti data riil seiring waktu berjalan.</small><% } %></article>
++    </div>
++  </div>
++
++  <div class="analytics-pane" data-mikrotik-pane="sessions">
++    <div class="data-card">
++      <div class="data-card-head"><div><h3>Sesi PPPoE Aktif</h3><small><%= sessions.length %> user sedang online.</small></div></div>
++      <div class="table-responsive"><table class="app-table">
++        <thead><tr><th>Username</th><th>Pelanggan</th><th>Site / Router</th><th>Profil</th><th>IP</th><th>Uptime</th><th>Aksi</th></tr></thead>
++        <tbody>
++          <% sessions.forEach(s=>{ %><tr>
++            <td><span class="cell-main"><%= s.username %></span></td>
++            <td><% if(s.customerName){ %><span class="cell-main"><%= s.customerName %></span><span class="cell-sub"><%= s.customerCode %></span><% }else{ %><span class="status-badge orange">Belum link billing</span><% } %></td>
++            <td><span class="status-badge purple"><%= s.siteCode %></span><span class="cell-sub d-block"><%= s.routerName %></span></td>
++            <td><%= s.profile %></td>
++            <td><%= s.address %></td>
++            <td><%= s.uptime %></td>
++            <td><button type="button" class="approval-button reject" data-kick-router="<%= s.routerId %>" data-kick-secret="<%= s.secretId %>" data-kick-name="<%= s.username %>"><i class="bi bi-plug-fill"></i>Kick Session</button></td>
++          </tr><% }) %>
++          <% if(!sessions.length){ %><tr><td colspan="7"><div class="empty-state"><i class="bi bi-wifi-off"></i><strong>Tidak ada sesi PPPoE aktif</strong></div></td></tr><% } %>
++        </tbody>
++      </table></div>
++    </div>
++  </div>
++
++  <div class="analytics-pane" data-mikrotik-pane="audit">
++    <div class="analytics-kpi-grid">
++      <article><span>Synced</span><strong><%= overview.sync.synced %></strong><small>Billing ↔ Router cocok</small><i class="bi bi-check2-circle"></i></article>
++      <article><span>Missing</span><strong><%= overview.sync.missing %></strong><small>Billing aktif, belum ada secret</small><i class="bi bi-exclamation-triangle"></i></article>
++      <article><span>Rogue</span><strong><%= overview.sync.rogue %></strong><small>Secret di router, tanpa billing</small><i class="bi bi-shield-exclamation"></i></article>
++      <article><span>Exempt</span><strong><%= overview.sync.exempt %></strong><small>Admin / free, dikecualikan</small><i class="bi bi-shield-check"></i></article>
++    </div>
++
++    <div class="data-card">
++      <div class="data-card-head"><div><h3>Missing · Pelanggan Belum Punya Secret</h3><small>Billing aktif namun belum terhubung PPPoE di router site-nya.</small></div></div>
++      <div class="table-responsive"><table class="app-table">
++        <thead><tr><th>Pelanggan</th><th>Site</th><th>Saran Router</th><th>Aksi</th></tr></thead>
++        <tbody>
++          <% syncAudit.missing.forEach(m=>{ %><tr>
++            <td><span class="cell-main"><%= m.customerName %></span><span class="cell-sub"><%= m.customerCode %></span></td>
++            <td><span class="status-badge purple"><%= m.siteCode %></span></td>
++            <td><%= m.routerName %></td>
++            <td><button type="button" class="approval-button approve" data-push-customer="<%= m.customerId %>" data-push-name="<%= m.customerName %>"><i class="bi bi-cloud-arrow-up"></i>Push to Router</button></td>
++          </tr><% }) %>
++          <% if(!syncAudit.missing.length){ %><tr><td colspan="4"><div class="empty-state compact"><i class="bi bi-check2-circle"></i><strong>Semua pelanggan aktif sudah tersinkron</strong></div></td></tr><% } %>
++        </tbody>
++      </table></div>
++    </div>
++
++    <div class="data-card">
++      <div class="data-card-head"><div><h3>Rogue · Secret Tanpa Billing</h3><small>Ada di router tetapi tidak terhubung ke pelanggan billing mana pun dan bukan akun admin/free.</small></div></div>
++      <div class="table-responsive"><table class="app-table">
++        <thead><tr><th>Username</th><th>Site / Router</th><th>Profil</th><th>Status</th><th>Aksi</th></tr></thead>
++        <tbody>
++          <% syncAudit.rogue.forEach(r=>{ %><tr>
++            <td><span class="cell-main"><%= r.username %></span></td>
++            <td><span class="status-badge purple"><%= r.siteCode %></span><span class="cell-sub d-block"><%= r.routerName %></span></td>
++            <td><%= r.profile %></td>
++            <td><span class="status-badge <%= r.status==='online'?'green':r.status==='isolated'?'red':'orange' %>"><%= r.status %></span></td>
++            <td><button type="button" class="approval-button reject" data-delete-router="<%= r.routerId %>" data-delete-secret="<%= r.secretId %>" data-delete-name="<%= r.username %>"><i class="bi bi-trash3-fill"></i>Delete Secret</button></td>
++          </tr><% }) %>
++          <% if(!syncAudit.rogue.length){ %><tr><td colspan="5"><div class="empty-state compact"><i class="bi bi-check2-circle"></i><strong>Tidak ada rogue secret</strong></div></td></tr><% } %>
++        </tbody>
++      </table></div>
++    </div>
++  </div>
++
++  <div class="nms-toast" id="mikrotikToast" hidden></div>
++</section>
++
++<div class="modal fade" id="mikrotikConfirmModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="mikrotikConfirmTitle">Konfirmasi</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" id="mikrotikConfirmBody">-</div><div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button type="button" class="btn-tech danger" id="mikrotikConfirmSubmit">Konfirmasi</button></div></div></div></div>
++
++<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
++<script>
++(()=>{
++  document.querySelectorAll('[data-mikrotik-tab]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-mikrotik-tab]').forEach(x=>x.classList.toggle('active',x===btn));document.querySelectorAll('[data-mikrotik-pane]').forEach(x=>x.classList.toggle('active',x.dataset.mikrotikPane===btn.dataset.mikrotikTab));}));
++
++  const csrfToken=document.querySelector('meta[name="csrf-token"]')?.content||'';
++  const toastEl=document.getElementById('mikrotikToast');
++  const toast=(message,type='success')=>{if(!toastEl)return;toastEl.className=`nms-toast ${type}`;toastEl.innerHTML=`<i class="bi ${type==='danger'?'bi-x-octagon-fill':'bi-check-circle-fill'}"></i>${message}`;toastEl.hidden=false;clearTimeout(toastEl._t);toastEl._t=setTimeout(()=>toastEl.hidden=true,5000);};
++  async function post(url){const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','CSRF-Token':csrfToken},body:'{}'});let data={};try{data=await res.json();}catch(e){}if(!res.ok||!data.ok)throw new Error(data.error||`HTTP ${res.status}`);return data;}
++
++  const confirmModalEl=document.getElementById('mikrotikConfirmModal');
++  const confirmModal=window.bootstrap?new bootstrap.Modal(confirmModalEl):null;
++  let pendingAction=null;
++  function openConfirm(title,body,action){document.getElementById('mikrotikConfirmTitle').textContent=title;document.getElementById('mikrotikConfirmBody').textContent=body;pendingAction=action;confirmModal?confirmModal.show():((confirm(body))&&action());}
++  document.getElementById('mikrotikConfirmSubmit')?.addEventListener('click',async()=>{const action=pendingAction;pendingAction=null;confirmModal?.hide();if(action)await action();});
++
++  document.querySelectorAll('[data-kick-router]').forEach(btn=>btn.addEventListener('click',()=>{
++    openConfirm('Kick Session',`Putuskan sesi aktif ${btn.dataset.kickName}? Akun PPPoE tetap tersimpan.`,async()=>{
++      try{const r=await post(`/mikrotik/sessions/${btn.dataset.kickRouter}/${btn.dataset.kickSecret}/kick`);toast(r.message);setTimeout(()=>location.reload(),900);}catch(e){toast(e.message,'danger');}
++    });
++  }));
++  document.querySelectorAll('[data-delete-router]').forEach(btn=>btn.addEventListener('click',()=>{
++    openConfirm('Delete Secret',`Hapus permanen secret ${btn.dataset.deleteName} dari router? Tindakan ini tidak dapat dibatalkan.`,async()=>{
++      try{const r=await post(`/mikrotik/secrets/${btn.dataset.deleteRouter}/${btn.dataset.deleteSecret}/delete`);toast(r.message);setTimeout(()=>location.reload(),900);}catch(e){toast(e.message,'danger');}
++    });
++  }));
++  document.querySelectorAll('[data-push-customer]').forEach(btn=>btn.addEventListener('click',()=>{
++    openConfirm('Push to Router',`Buat secret PPPoE baru di router untuk ${btn.dataset.pushName}?`,async()=>{
++      try{const r=await post(`/mikrotik/customers/${btn.dataset.pushCustomer}/push`);toast(`${r.message} Username: ${r.username} · Password: ${r.password}`);setTimeout(()=>location.reload(),1600);}catch(e){toast(e.message,'danger');}
++    });
++  }));
++
++  if(typeof Chart==='undefined')return;
++  const profileData=<%- JSON.stringify(overview.profileDistribution) %>;
++  const trendData=<%- JSON.stringify(trend) %>;
++  const palette=['#766cff','#2ed6a1','#ffbd5b','#ff6969','#61d8ff','#8b7bff','#7d899d'];
++  const profileCanvas=document.getElementById('mikrotikProfileChart');
++  if(profileCanvas)new Chart(profileCanvas,{type:'doughnut',data:{labels:profileData.map(p=>p.profile),datasets:[{data:profileData.map(p=>p.count),backgroundColor:profileData.map((_,i)=>palette[i%palette.length]),borderColor:'rgba(8,12,25,.9)',borderWidth:3,hoverOffset:6}]},options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{position:'bottom',labels:{color:'#8995aa',boxWidth:10,usePointStyle:true}}}}});
++  const trendCanvas=document.getElementById('mikrotikTrendChart');
++  if(trendCanvas){const ctx=trendCanvas.getContext('2d');const fill=ctx.createLinearGradient(0,0,0,220);fill.addColorStop(0,'rgba(97,216,255,.30)');fill.addColorStop(1,'rgba(97,216,255,0)');new Chart(trendCanvas,{type:'line',data:{labels:trendData.labels,datasets:[{label:'Active Users',data:trendData.values,borderColor:'#61d8ff',backgroundColor:fill,fill:true,tension:.35,borderWidth:2.2,pointRadius:0,pointHoverRadius:4,borderDash:trendData.isEstimated?[6,4]:[]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#7f8aa0',maxTicksLimit:8}},y:{beginAtZero:true,grid:{color:'rgba(148,163,184,.08)'},ticks:{color:'#7f8aa0',precision:0}}}}});}
++})();
++</script>
+diff --git a/views/partials/layout.ejs b/views/partials/layout.ejs
+index 6ceaa87..6f53e52 100644
+--- a/views/partials/layout.ejs
++++ b/views/partials/layout.ejs
+@@ -49,7 +49,7 @@
+         <div class="sidebar-section-label">CONTROL CENTER</div>
+         <nav class="sidebar-nav">
+           <a class="sidebar-link <%= currentPath === '/' ? 'active' : '' %>" href="/"><i class="bi bi-grid-1x2-fill"></i><span><%= t('dashboard') %></span><em>⌘</em></a>
+-          <% if(can('finance')){ %><a class="sidebar-link <%= currentPath.startsWith('/analytics') ? 'active' : '' %>" href="/analytics"><i class="bi bi-graph-up-arrow"></i><span>Analitik Keuangan & PSB</span><em>AI</em></a><% } %>
++          <% if(can('finance')){ %><a class="sidebar-link <%= currentPath.startsWith('/analytics') ? 'active' : '' %>" href="/analytics"><i class="bi bi-pie-chart-fill"></i><span>Analitik Bisnis</span><em>AI</em></a><% } %>
+         </nav>
+ 
+         <% if(can('customers')){ %>
+@@ -100,6 +100,7 @@
+           <a class="sidebar-link <%= currentPath.startsWith('/routers') ? 'active' : '' %>" href="/routers"><i class="bi bi-router-fill"></i><span><%= t('routers') %></span></a>
+           <a class="sidebar-link <%= currentPath.startsWith('/clusters') ? 'active' : '' %>" href="/clusters"><i class="bi bi-diagram-3-fill"></i><span><%= t('clusters') %></span></a>
+           <a class="sidebar-link <%= currentPath.startsWith('/network/monitor') ? 'active' : '' %>" href="/network/monitor"><i class="bi bi-activity"></i><span><%= t('monitor') %></span></a>
++          <a class="sidebar-link <%= currentPath.startsWith('/mikrotik') ? 'active' : '' %>" href="/mikrotik"><i class="bi bi-broadcast-pin"></i><span>MikroTik PPPoE</span></a>
+           <details class="sidebar-nav-group infra-sidebar-group" <%= currentPath.startsWith('/network/tools') ? 'open' : '' %>>
+             <summary class="sidebar-link <%= currentPath.startsWith('/network/tools') ? 'active' : '' %>"><i class="bi bi-grid-1x2-fill"></i><span>Infrastructure Hub</span><em><i class="bi bi-chevron-down"></i></em></summary>
+             <div class="sidebar-subnav infra-sidebar-subnav"><a href="/network/tools"><i class="bi bi-grid"></i>Workspace Overview</a><a href="/network/tools?group=server"><i class="bi bi-server"></i>Server & OS</a><a href="/network/tools?group=management"><i class="bi bi-router-fill"></i>TR-069 & Management</a><a href="/network/tools?group=containers"><i class="bi bi-box-seam-fill"></i>Container Services</a></div>
+@@ -188,7 +189,7 @@
+         <% if(can('support')){ %><a href="/server-duty" data-keywords="piket server jadwal shift"><i class="bi bi-shield-check"></i><div><strong>Piket Server</strong><small>Jadwal piket mingguan</small></div><span>→</span></a>
+         <a href="/tickets" data-keywords="tiket gangguan teknisi"><i class="bi bi-life-preserver"></i><div><strong>Ticketing</strong><small>Keluhan & pekerjaan teknisi</small></div><span>→</span></a>
+         <a href="/team-kpi" data-keywords="kpi tim teknisi staff performance"><i class="bi bi-bar-chart-steps"></i><div><strong>KPI Tim</strong><small>Performa teknisi & staff</small></div><span>→</span></a><% } %>
+-        <% if(can('network')){ %><a href="/network/tools" data-keywords="infrastructure proxmox casaos genieacs portainer server"><i class="bi bi-grid-1x2-fill"></i><div><strong>Infrastructure Hub</strong><small>Server, TR-069 & container services</small></div><span>→</span></a><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><% } %>
++        <% if(can('network')){ %><a href="/network/tools" data-keywords="infrastructure proxmox casaos genieacs portainer server"><i class="bi bi-grid-1x2-fill"></i><div><strong>Infrastructure Hub</strong><small>Server, TR-069 & container services</small></div><span>→</span></a><a href="/network/monitor" data-keywords="mikrotik nms network noc monitor router"><i class="bi bi-activity"></i><div><strong>MikroTik NMS</strong><small>Status site, router & pelanggan</small></div><span>→</span></a><a href="/mikrotik" data-keywords="mikrotik pppoe analytics sesi kick rogue sync audit"><i class="bi bi-broadcast-pin"></i><div><strong>MikroTik PPPoE</strong><small>Analytics, sesi aktif & sync audit</small></div><span>→</span></a><% } %>
+         <% if(can('warehouse')){ %><a href="/inventory" data-keywords="gudang stock barang"><i class="bi bi-box-seam-fill"></i><div><strong>Stock Gudang</strong><small>Warehouse control</small></div><span>→</span></a><% } %>
+         <% if(can('finance')){ %><a href="/analytics" data-keywords="analitik finance psb mrr cashflow odp"><i class="bi bi-graph-up-arrow"></i><div><strong>Analitik Keuangan & PSB</strong><small>Executive, finance, PSB & infrastruktur</small></div><span>→</span></a><a href="/cash" data-keywords="kas uang pendapatan pengeluaran"><i class="bi bi-cash-stack"></i><div><strong>Arus Kas</strong><small>Income & expense</small></div><span>→</span></a><% } %>
+         <% if(can('reports')){ %><a href="/reports" data-keywords="laporan report site"><i class="bi bi-bar-chart-line-fill"></i><div><strong>Laporan</strong><small>Billing, finance & site</small></div><span>→</span></a><% } %>
+diff --git a/views/payments/index.ejs b/views/payments/index.ejs
+index ef9f85a..412fb09 100644
+--- a/views/payments/index.ejs
++++ b/views/payments/index.ejs
+@@ -5,6 +5,14 @@
+     <div class="module-actions"><% if(isAdmin){ %><a class="btn-tech" href="/payments/reconciliation"><i class="bi bi-arrow-left-right"></i>Rekonsiliasi Cash</a><button class="btn-tech primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg"></i>Catat Pembayaran</button><% } %></div>
+   </div>
+ 
++  <% if(Number(missingProof?.total||0)>0){ %>
++  <div class="alert alert-warning alert-modern alert-dismissible fade show" role="alert">
++    <i class="bi bi-exclamation-triangle-fill me-2"></i>
++    <b><%= Number(missingProof.total) %> pembayaran</b> sudah disetujui (<%= formatRupiah(missingProof.amount||0) %>) namun belum memiliki lampiran bukti transfer. Segera lengkapi buktinya lewat tombol <b>Upload/Ganti Bukti</b> pada baris terkait.
++    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
++  </div>
++  <% } %>
++
+   <div class="metric-grid">
+     <article class="metric-card green"><div class="metric-top"><span class="metric-label">Pembayaran Terkonfirmasi</span><span class="metric-icon"><i class="bi bi-patch-check-fill"></i></span></div><strong><%= formatRupiah(summary.confirmed_total||0) %></strong><small><%= paymentMonthNames[summaryMonth-1] %> <%= summaryYear %></small></article>
+     <article class="metric-card orange"><div class="metric-top"><span class="metric-label">Cash di Tim</span><span class="metric-icon"><i class="bi bi-person-badge-fill"></i></span></div><strong><%= formatRupiah(summary.cash_held||0) %></strong><small>Belum disetor ke kas perusahaan</small></article>

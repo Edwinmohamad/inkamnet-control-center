@@ -1,0 +1,106 @@
+INKAMNET CONTROL CENTER — Revision patch v1.19.2 (cumulative on top of v1.19.0)
+================================================================================
+Ini adalah patch KUMULATIF: berisi semua perubahan dari sesi sebelumnya
+(v1.19.1 — modul MikroTik PPPoE) DITAMBAH rebuild total modul Analitik pada
+sesi ini. Cukup terapkan patch ini sekali saja (tidak perlu apply v1.19.1
+secara terpisah).
+
+CARA PAKAI (GitHub Desktop)
+----------------------------
+1. Salin seluruh isi folder ini ke root repository lokal inkamnet-control-center,
+   pilih Replace saat ditanya.
+2. npm install (jika belum) lalu jalankan: npm run validate:v119
+3. Commit & push dari GitHub Desktop.
+4. Restart aplikasi — migrasi tabel pppoe_hourly_samples otomatis via
+   ensureV28Schema() saat startup.
+
+==================================================================
+BAGIAN BARU SESI INI — REBUILD TOTAL "Analitik Keuangan & PSB"
+==================================================================
+File yang ditulis ulang 100% (full rewrite, bukan patch/diff):
+  - services/analyticsService.js
+  - routes/analytics.js
+  - views/analytics/index.ejs
+
+Yang berubah secara fundamental:
+
+1. LOGIKA BISNIS & DATA (services/analyticsService.js)
+   - Cut-off Kas Operasional tgl 6 s/d tgl 5 bulan berikutnya: fungsi
+     cutoffWindow(month,year) menghasilkan window tanggal presisi (termasuk
+     rollover tahun untuk bulan Desember).
+   - Dual-Matrix Cash Basis vs Accrual Basis: cashBasis = pembayaran yang
+     benar-benar diterima dalam window cut-off; accrualBasis = total tagihan
+     periode tsb terlepas dari kapan dibayar.
+   - Due-Date Matrix Tgl 15 (grace s/d 20) vs Tgl 30 (grace s/d 7 bulan
+     berikutnya) — tagihan dikelompokkan dari DAY(due_date), plus rincian
+     pelunasan tagihan tgl 30 yang jatuh di tgl 1-5 (aman, sebelum closing)
+     vs tgl 6-7 (overlap ke periode cut-off berikutnya).
+   - Smart Advisory Engine: 3 rule sesuai spesifikasi — (1) status
+     rekonsiliasi kas tgl 5 vs tagihan tgl 30, (2) ODP kritis sisa port ≤ 1,
+     (3) rekomendasi WA Blast untuk pelanggan siap-isolir (telat > 7 hari).
+   - Anti-Crash Fallback dipertahankan & diperluas: seluruh query dibungkus
+     try/catch di getAnalytics(); jika gagal, buildDummyAnalytics()
+     mengembalikan payload contoh dengan BENTUK DATA YANG SAMA PERSIS
+     (termasuk cutoff, dualMatrix, dueDateMatrix, report) sehingga view
+     tidak pernah crash.
+   - buildReportSummary(data): merangkum data untuk modal "Generate
+     Laporan" & endpoint export — dipakai di kedua tempat agar konsisten.
+   - Churn rate & SLA kini dihitung ulang (SLA dalam jam via
+     TIMESTAMPDIFF(HOUR,...), bukan hari).
+
+2. ROUTER (routes/analytics.js)
+   - GET /analytics — tidak berubah secara perilaku, hanya delegasi ke
+     getAnalytics() yang baru.
+   - GET /analytics/export-report — endpoint JSON baru untuk fitur Generate
+     Report/Download. Selalu query ulang data terbaru. Tambahkan
+     ?download=1 untuk memaksa response sebagai file attachment
+     (analitik-<site>-<month>-<year>.json).
+
+3. FRONTEND (views/analytics/index.ejs) — REBUILD TOTAL
+   - UI Framework: Tailwind CSS via CDN (bg-slate-900 / card bg-slate-800/90
+     / border slate-700/60), Preflight DIMATIKAN (corePlugins.preflight:
+     false) supaya reset CSS Tailwind tidak menabrak Bootstrap yang dipakai
+     sidebar/topbar/modal lain di layout.ejs bersama.
+   - Tab switcher vanilla JS tanpa reload: Smart Overview, Analitik Keuangan
+     & Cut-off, PSB & Infrastruktur.
+   - Tab 1: 4 KPI card (MRR, Realisasi Kas Cut-off Tgl 5, Total User Aktif,
+     Churn Rate), Smart Advisory Engine (grid kartu alert interaktif),
+     Chart.js line chart Cashflow Stream Inflow vs Outflow 6 bulan.
+   - Tab 2: Chart.js bar chart Matrix Due 15 vs 30 (Billed/Paid/Outstanding),
+     panel rekonsiliasi overlap tgl 6-7, tabel Aging Piutang dengan filter
+     cepat (H-3, H+3~30, >30 Hari, Siap Isolir) yang difilter murni via
+     vanilla JS (tanpa reload), tombol "Kirim WA Reminder" per baris.
+   - Tab 3: Chart.js horizontal bar sebagai funnel PSB (Leads → Surveyed →
+     Installed → Activated), card SLA teknisi dalam jam, grid heatmap
+     kapasitas ODP dengan badge Hijau/Kuning/Merah.
+   - Modal "Generate Laporan Analitik": dibuka dari tombol header, fetch
+     data terbaru dari /analytics/export-report, menampilkan Ringkasan
+     Eksekutif + Matriks Kesehatan Jaringan & SLA, tombol "Cetak/Download
+     PDF" (browser print ke sheet cetak khusus) dan "Kirim Ringkasan via WA
+     ke Owner" (nomor diambil dari Pengaturan → Company Phone), plus link
+     "Unduh JSON" ke endpoint export-report.
+
+4. scripts/validate-v119.js
+   - Assertion analytics-module diperbarui mengikuti teks & fitur baru
+     (case-sensitive match sebelumnya untuk UI lama sudah tidak relevan
+     karena UI sengaja dirombak total ke Tailwind). Ditambah pengecekan
+     endpoint /export-report, cutoffWindow(), dan buildReportSummary().
+
+CATATAN PENGUJIAN SESI INI
+---------------------------
+- node --check pada ketiga file: OK.
+- npm run validate (syntax + EJS/CSRF/modal static check): OK, 39 EJS file.
+- npm run validate:v119 (assertion diperbarui) + 3 script test v119 lainnya:
+  OK, tanpa regresi.
+- Direct EJS render test (paket `ejs`, bukan hanya static check) dengan data
+  dummy penuh: berhasil render ~41 KB HTML, tidak ada "undefined"/"NaN" bocor
+  ke output, jumlah tag <div> seimbang.
+- Verifikasi manual logika cutoffWindow(): dengan TZ=Asia/Jakarta (sama
+  seperti yang di-set app.js saat boot), window 6 Agustus – 5 September dan
+  rollover Desember → Januari tahun berikutnya sudah benar.
+- Live smoke-test terhadap MySQL sungguhan TIDAK dilakukan (tidak ada akses
+  database di environment build ini — instalasi mariadb-server/docker gagal
+  karena mirror paket tidak dapat diakses). Sangat disarankan smoke-test di
+  staging: cek tab Finance (matrix due 15/30 & WA reminder), modal Generate
+  Laporan (print & WA ke owner), dan bandingkan angka cash-basis vs accrual
+  dengan data riil sebelum promosi ke production.
