@@ -1,0 +1,88 @@
+INKAMNET CONTROL CENTER — Revision patch v1.19.3 (cumulative on top of v1.19.0)
+================================================================================
+Ini adalah patch KUMULATIF: berisi semua perubahan dari v1.19.1 (modul MikroTik
+PPPoE) + v1.19.2 (rebuild logika Analitik) DITAMBAH perbaikan sesi ini (restyle
+UI Analitik supaya 100% konsisten dengan tampilan existing aplikasi). Cukup
+terapkan patch ini sekali saja.
+
+CARA PAKAI (GitHub Desktop)
+----------------------------
+1. Salin seluruh isi folder ini ke root repository lokal inkamnet-control-center,
+   pilih Replace saat ditanya.
+2. npm install (jika belum) lalu jalankan: npm run validate:v119
+3. Commit & push dari GitHub Desktop.
+4. Restart aplikasi — migrasi tabel pppoe_hourly_samples otomatis via
+   ensureV28Schema() saat startup.
+
+==================================================================
+BAGIAN BARU SESI INI — PERBAIKAN STYLE UI MODUL ANALITIK
+==================================================================
+Masalah yang dilaporkan: revisi modul Analitik sebelumnya (v1.19.2) "tidak
+berjalan" / tampilannya tidak sesuai aplikasi. Root cause & perbaikan:
+
+1. views/analytics/index.ejs — REBUILD ULANG TANPA TAILWIND
+   Versi v1.19.2 memuat Tailwind CSS via CDN terpisah untuk halaman ini saja.
+   Ini membuat tampilan Analitik terlihat berbeda sendiri dari sisa aplikasi
+   (yang memakai Bootstrap + design system CSS var kustom di public/css/app.css)
+   dan menambah dependensi CDN eksternal yang tidak dipakai halaman lain.
+   Halaman ini sekarang ditulis ulang 100% memakai kelas/komponen yang SUDAH
+   ADA di aplikasi: module-head, analytics-v119 (analytics-tabs, analytics-pane,
+   analytics-kpi-grid, analytics-advisory-card, analytics-chart-card,
+   analytics-aging-card, analytics-psb-grid, analytics-funnel-card,
+   analytics-sla-card, odp-heatmap), app-table, status-badge, cell-main/cell-sub,
+   approval-button (dipakai ulang utk tombol WA Reminder), btn-tech, serta modal
+   Bootstrap native (data-bs-toggle/data-bs-dismiss) — pola yang sama persis
+   dengan modal-modal lain di aplikasi (proofUploadModal, cashRejectModal, dst).
+   Semua fitur baru dari v1.19.2 tetap dipertahankan: Dual-Matrix Cash/Accrual,
+   Matrix Jatuh Tempo 15 vs 30 + rekonsiliasi overlap tgl 6-7, Smart Advisory
+   Engine 3-rule, filter cepat Aging Piutang (Semua/H-3/H+3~30/>30/Siap Isolir),
+   tombol WA Reminder per pelanggan, ODP Capacity Heatmap dengan badge, dan
+   modal "Generate Laporan Analitik" (fetch /analytics/export-report, tombol
+   Cetak/PDF via window.print(), Kirim ke Owner via WhatsApp, Unduh JSON).
+   Hanya tampilannya yang dikembalikan ke bahasa desain aplikasi asli.
+
+2. public/css/app.css — PERBAIKAN BUG VARIABEL CSS (root cause tampilan patah)
+   Ditemukan: blok CSS .analytics-v119 / .infra-v119 / .cash-approval-* (semua
+   fitur "v1.19") memakai var(--border) dan var(--card) di banyak tempat, TAPI
+   kedua custom property ini TIDAK PERNAH didefinisikan di :root atau di blok
+   tema (yang ada hanya --line dan --panel dengan nama berbeda). Akibatnya
+   border & background kartu-kartu di modul Analitik, Infrastructure Hub, dan
+   Cash Approval berpotensi tidak tampil (invisible) karena browser menganggap
+   var(--border)/var(--card) yang tidak terdefinisi sebagai nilai tidak valid.
+   Perbaikan: menambahkan alias --border:var(--line) dan --card:var(--panel)
+   pada kedua blok tema (html[data-theme="dark"] dan html[data-theme="light"]),
+   sehingga SEMUA komponen v1.19 (bukan cuma Analitik) sekarang benar-benar
+   tampil dengan border & latar kartu sesuai desain aslinya di kedua tema.
+   Juga ditambahkan sedikit CSS baru yang dipakai halaman Analitik: chip filter
+   Aging Piutang (.aging-filters) dan kartu mini-stat (.analytics-mini-stats)
+   untuk panel rekonsiliasi & modal laporan — ditulis mengikuti bahasa desain
+   yang sama (var(--border), var(--card), var(--muted), border-radius, dsb).
+
+3. scripts/validate-v119.js
+   Assertion 'analytics module' dikembalikan untuk mencocokkan teks asli
+   (SMART ADVISORY ENGINE / CASHFLOW STREAM / PSB CONVERSION FUNNEL / ODP
+   CAPACITY HEATMAP dalam huruf kapital, sesuai konvensi aplikasi), ditambah
+   pengecekan eksplisit BAHWA halaman ini TIDAK lagi memuat Tailwind CDN, dan
+   pengecekan baru bahwa alias --border/--card sudah ada di app.css.
+
+CATATAN PENGUJIAN SESI INI
+---------------------------
+- node --check pada routes/analytics.js & services/analyticsService.js: OK
+  (kedua file ini logikanya tidak diubah sesi ini, hanya view & CSS).
+- npm run validate (syntax + EJS/CSRF/modal static check): OK, 39 EJS file.
+- npm run validate:v119 (assertion diperbarui) + 3 script test v119 lainnya:
+  OK, tanpa regresi (dashboard cleanup, analytics module, infrastructure hub,
+  cash approval workflow, login ticker schema, pending cash excluded, schema
+  bootstrap, version, style markers — 9 grup semua lulus).
+- Direct EJS render test (paket `ejs`, bukan hanya static check) dengan data
+  dummy penuh: berhasil render ~26 KB HTML, tidak ada "undefined"/"NaN" bocor
+  ke output, tag <div> dan <article> seimbang, tidak ada referensi ke
+  cdn.tailwindcss.com, kelas analytics-v119 terkonfirmasi ada.
+- Verifikasi CSS: brace balance 0 (tidak ada kurung kurawal yang tidak
+  tertutup), alias --border/--card terkonfirmasi ada di app.css.
+- Live smoke-test terhadap MySQL sungguhan TIDAK dilakukan (tidak ada akses
+  database di environment build ini). Sangat disarankan smoke-test di
+  staging sebelum promosi ke production: buka /analytics, pastikan seluruh
+  3 tab tampil dengan border/kartu yang konsisten dengan Dashboard, coba
+  filter Aging Piutang, tombol WA Reminder, dan modal Generate Laporan
+  (cetak & kirim WA ke owner).
