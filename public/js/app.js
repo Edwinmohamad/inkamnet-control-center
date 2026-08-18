@@ -287,6 +287,71 @@
     });
     document.body.appendChild(form);form.submit();
   };
+  // v1.21.1 — "Hapus Paksa" (Force Delete, Master Admin only). Confirm button stays disabled until the
+  // typed text exactly matches data-force-delete-match (the record's own code/number) — deliberately
+  // slower than a plain confirm() so a destructive override can never fire from one misclick.
+  const forceDeleteModalEl=document.getElementById('forceDeleteModal');
+  const forceDeleteModal=forceDeleteModalEl&&window.bootstrap?bootstrap.Modal.getOrCreateInstance(forceDeleteModalEl):null;
+  const forceDeleteForm=document.getElementById('forceDeleteForm');
+  const forceDeleteInput=document.getElementById('forceDeleteInput');
+  const forceDeleteConfirmBtn=document.getElementById('forceDeleteConfirmBtn');
+  const forceDeleteMatchLabel=document.getElementById('forceDeleteMatchLabel');
+  const forceDeleteWarningEl=document.getElementById('forceDeleteWarning');
+  let forceDeleteMatchValue='';
+  let forceDeleteBulkHandler=null;
+  document.addEventListener('click',event=>{
+    const trigger=event.target.closest('[data-force-delete]');
+    if(!trigger||!forceDeleteModal)return;
+    event.preventDefault();
+    closeActionPopover();
+    forceDeleteBulkHandler=null;
+    const url=trigger.dataset.forceDelete||'';
+    const label=trigger.dataset.entityLabel||'data ini';
+    const matchValue=trigger.dataset.forceDeleteMatch||'';
+    const warning=trigger.dataset.forceDeleteWarning||'Tindakan ini tidak dapat dibatalkan.';
+    forceDeleteMatchValue=matchValue;
+    const targetEl=document.getElementById('forceDeleteTarget');if(targetEl)targetEl.textContent=label;
+    if(forceDeleteMatchLabel)forceDeleteMatchLabel.textContent=matchValue||'-';
+    if(forceDeleteWarningEl)forceDeleteWarningEl.innerHTML=`<i class="bi bi-exclamation-octagon-fill me-2"></i>${escapeHtml(warning)}`;
+    if(forceDeleteInput)forceDeleteInput.value='';
+    if(forceDeleteConfirmBtn)forceDeleteConfirmBtn.disabled=true;
+    if(forceDeleteForm)forceDeleteForm.action=url||'#';
+    forceDeleteModal.show();
+    setTimeout(()=>forceDeleteInput?.focus(),200);
+  });
+  forceDeleteInput?.addEventListener('input',()=>{
+    if(forceDeleteConfirmBtn)forceDeleteConfirmBtn.disabled=forceDeleteInput.value.trim()!==forceDeleteMatchValue.trim()||!forceDeleteMatchValue;
+  });
+  forceDeleteConfirmBtn?.addEventListener('click',()=>{
+    if(forceDeleteBulkHandler){forceDeleteBulkHandler();forceDeleteModal?.hide();return;}
+    if(!forceDeleteForm?.action||forceDeleteForm.action.endsWith('#'))return;
+    forceDeleteForm.submit();
+  });
+  // Bulk variant: [data-force-delete-bulk] buttons — the typed confirmation text is a fixed literal
+  // (data-force-delete-match, e.g. "HAPUS PAKSA") since there's no single record code to retype for a batch.
+  document.querySelectorAll('[data-force-delete-bulk]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const scopeEl=document.querySelector(`[data-bulk-scope="${btn.dataset.bulkScopeId}"]`);
+      const ids=scopeEl?._bulkSelectedIds?.()||[];
+      if(!ids.length||!forceDeleteModal)return;
+      const idField=btn.dataset.bulkIdField||'ids[]';
+      const actionField=btn.dataset.bulkActionField||'action';
+      const actionValue=btn.dataset.bulkActionValue||'force_delete';
+      const url=btn.dataset.bulkUrl;
+      const matchValue=btn.dataset.forceDeleteMatch||'HAPUS PAKSA';
+      forceDeleteMatchValue=matchValue;
+      const label=btn.dataset.entityLabelPlural?`${ids.length} ${btn.dataset.entityLabelPlural} terpilih`:`${ids.length} data terpilih`;
+      const targetEl=document.getElementById('forceDeleteTarget');if(targetEl)targetEl.textContent=label;
+      if(forceDeleteMatchLabel)forceDeleteMatchLabel.textContent=matchValue;
+      if(forceDeleteWarningEl)forceDeleteWarningEl.innerHTML=`<i class="bi bi-exclamation-octagon-fill me-2"></i>${escapeHtml(btn.dataset.forceDeleteWarning||'Tindakan ini tidak dapat dibatalkan, termasuk untuk data yang masih memiliki riwayat/keterikatan.')}`;
+      if(forceDeleteInput)forceDeleteInput.value='';
+      if(forceDeleteConfirmBtn)forceDeleteConfirmBtn.disabled=true;
+      forceDeleteBulkHandler=()=>submitBulkForm(url,{[actionField]:actionValue,[idField]:ids});
+      forceDeleteModal.show();
+      setTimeout(()=>forceDeleteInput?.focus(),200);
+    });
+  });
+
   // Generic opener for [data-simple-delete-bulk] bulk buttons: reads its data-bulk-scope-id target's
   // selected ids, then posts them to data-bulk-url with data-bulk-action-field=data-bulk-action-value.
   document.querySelectorAll('[data-simple-delete-bulk]').forEach(btn=>{

@@ -127,7 +127,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.21.0</span>
+        <span class="version-pill">CONTROL CENTER v1.21.1</span>
       </div>
     </aside>
 
@@ -227,6 +227,28 @@
         </div>
         <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button type="button" class="btn-tech danger" id="simpleDeleteConfirmBtn"><i class="bi bi-trash3-fill"></i>Ya, Hapus</button></div>
         <form method="post" id="simpleDeleteForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
+      </div>
+    </div>
+  </div>
+
+  <!-- v1.21.1 — "Hapus Paksa" (Force Delete), Master Admin only. Every normal delete guard in this app
+       (tagihan yang sudah punya pembayaran, pelanggan yang sudah punya riwayat tagihan, transaksi kas yang
+       sudah APPROVED) exists specifically to stop financial history from disappearing by accident. Rather
+       than removing those guards outright, this gives Master Admin an explicit, deliberately-slower escape
+       hatch: the confirm button stays disabled until the exact code/number of the record being deleted is
+       retyped into the box below — the same "type the name to confirm" pattern used by GitHub/GitLab for
+       irreversible actions — so a force-delete can never happen from a single accidental click. -->
+  <div class="modal fade" id="forceDeleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content nms-modal">
+        <div class="modal-header"><div><div class="module-kicker text-danger">MASTER ADMIN · HAPUS PAKSA</div><h5 class="modal-title">Hapus Paksa Permanen?</h5><small class="text-secondary" id="forceDeleteTarget">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div class="alert alert-danger alert-modern mb-2" id="forceDeleteWarning"><i class="bi bi-exclamation-octagon-fill me-2"></i>Tindakan ini tidak dapat dibatalkan.</div>
+          <label class="form-label">Ketik ulang <b id="forceDeleteMatchLabel">-</b> untuk konfirmasi:</label>
+          <input class="form-control" type="text" id="forceDeleteInput" autocomplete="off" placeholder="Ketik di sini...">
+        </div>
+        <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button type="button" class="btn-tech danger" id="forceDeleteConfirmBtn" disabled><i class="bi bi-trash3-fill"></i>Hapus Paksa</button></div>
+        <form method="post" id="forceDeleteForm" hidden><input type="hidden" name="_csrf" value="<%= csrfToken %>"></form>
       </div>
     </div>
   </div>

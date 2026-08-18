@@ -54,6 +54,7 @@
                 <button class="btn-tech compact danger" type="button" data-delete-choice data-archive-url="/customers/<%= c.id %>/delete" <% if(!Number(c.has_invoice_count||0)){ %>data-hard-delete-url="/customers/<%= c.id %>/hard-delete"<% } %> data-entity-label="<%= c.name %> (<%= c.customer_code %>)" title="Hapus"><i class="bi bi-trash3"></i></button>
               <% } %>
             <% } %>
+            <% if(isMasterAdmin && Number(c.has_invoice_count||0)>0){ %><button class="btn-tech compact danger" type="button" data-force-delete="/customers/<%= c.id %>/force-delete<%= archived?'?return_status=archived':'' %>" data-entity-label="<%= c.name %> (<%= c.customer_code %>)" data-force-delete-match="<%= c.customer_code %>" data-force-delete-warning="Pelanggan ini sudah memiliki riwayat tagihan. Hapus Paksa akan menghapus pelanggan INI beserta SELURUH tagihan dan riwayat pembayarannya secara permanen, dan TIDAK dapat dibatalkan." title="Hapus Paksa (Master Admin)"><i class="bi bi-exclamation-octagon-fill"></i></button><% } %>
             <button class="action-menu" type="button" data-action-popover-target="customerAction<%= c.id %>" aria-label="Buka tindakan pelanggan <%= c.name %>"><i class="bi bi-three-dots-vertical"></i></button>
           </div>
           <div class="ink-action-popover" id="customerAction<%= c.id %>" hidden>
@@ -72,6 +73,7 @@
                   <% if(!Number(c.has_invoice_count||0)){ %><button class="ink-action-item compact danger" type="button" data-hard-delete-danger="/customers/<%= c.id %>/hard-delete" data-entity-label="<%= c.name %> (<%= c.customer_code %>)"><i class="bi bi-trash3-fill"></i><span><b>Hapus Permanen</b><small>Tindakan tidak dapat dibatalkan</small></span></button><% } %>
                 <% }else{ %><button class="ink-action-item compact danger" type="button" data-delete-choice data-archive-url="/customers/<%= c.id %>/delete" <% if(!Number(c.has_invoice_count||0)){ %>data-hard-delete-url="/customers/<%= c.id %>/hard-delete"<% } %> data-entity-label="<%= c.name %> (<%= c.customer_code %>)"><i class="bi bi-trash3"></i><span><b>Hapus</b><small>Pilih arsip atau hapus permanen</small></span></button><% } %>
               <% } %>
+              <% if(isMasterAdmin && Number(c.has_invoice_count||0)>0){ %><button class="ink-action-item compact danger" type="button" data-force-delete="/customers/<%= c.id %>/force-delete<%= archived?'?return_status=archived':'' %>" data-entity-label="<%= c.name %> (<%= c.customer_code %>)" data-force-delete-match="<%= c.customer_code %>" data-force-delete-warning="Pelanggan ini sudah memiliki riwayat tagihan. Hapus Paksa akan menghapus pelanggan INI beserta SELURUH tagihan dan riwayat pembayarannya secara permanen, dan TIDAK dapat dibatalkan."><i class="bi bi-exclamation-octagon-fill"></i><span><b>Hapus Paksa</b><small>Master Admin · hapus beserta tagihan & pembayaran</small></span></button><% } %>
             </div>
           </div>
         </td>
@@ -95,6 +97,7 @@
       <% }else{ %>
       <button type="button" id="customerBulkHardDelete" class="danger"><i class="bi bi-trash3-fill"></i>Hapus Permanen Massal</button>
       <% } %>
+      <% if(isMasterAdmin){ %><button type="button" class="danger" data-force-delete-bulk data-bulk-scope-id="customerBulkBar" data-bulk-url="/customers/bulk<%= isArchivedView?'?return_status=archived':'' %>" data-bulk-action-field="action" data-bulk-action-value="force_delete" data-bulk-id-field="customer_ids[]" data-entity-label-plural="pelanggan" data-force-delete-match="HAPUS PAKSA" data-force-delete-warning="Hapus Paksa akan menghapus SEMUA pelanggan terpilih beserta SELURUH tagihan dan riwayat pembayarannya secara permanen — dan TIDAK dapat dibatalkan."><i class="bi bi-exclamation-octagon-fill"></i>Hapus Paksa Massal</button><% } %>
       <button type="button" class="ghost" data-bulk-clear><i class="bi bi-x-lg"></i>Batal</button>
     </div>
   </div>

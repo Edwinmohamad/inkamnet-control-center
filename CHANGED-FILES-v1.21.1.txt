@@ -1,0 +1,107 @@
+INKAMNET CONTROL CENTER — PATCH v1.21.1
+==========================================
+Fitur: "Hapus Paksa" (Force Delete) khusus Master Admin
+
+LATAR BELAKANG
+--------------
+Setelah patch v1.21.0, ditemukan bahwa fitur hapus di beberapa menu (terutama
+Tagihan/Invoice yang sudah LUNAS) menampilkan pesan:
+"Semua tagihan terpilih sudah memiliki pembayaran dan tidak boleh dihapus
+permanen."
+Ini BUKAN bug — ini adalah pengaman (guard) yang sengaja dibuat agar riwayat
+keuangan tidak hilang begitu saja. Setelah dikonfirmasi, permintaan berikutnya
+adalah: "saya ingin semua menu fitur nya bisa dihapus" — yaitu, tetap bisa
+menghapus data walau sudah memiliki riwayat transaksi, TAPI dengan kontrol
+yang ketat agar tidak terjadi kehilangan data secara tidak sengaja.
+
+Solusi yang diterapkan (sesuai pilihan yang direkomendasikan): menambahkan
+tombol "Hapus Paksa" yang HANYA bisa digunakan oleh Master Admin, dengan
+konfirmasi mengetik ulang kode/nomor data sebelum tombol hapus aktif. Guard
+default untuk Admin biasa TETAP seperti semula (tidak berubah).
+
+APA YANG BARU
+-------------
+1. Modal konfirmasi baru "Hapus Paksa" (di semua halaman, via layout.ejs):
+   - Menampilkan peringatan bahaya + label data yang akan dihapus.
+   - Tombol "Hapus Paksa" tetap NONAKTIF sampai user mengetik ulang kode
+     data tersebut dengan PERSIS sama (misal nomor faktur / kode pelanggan).
+   - Untuk aksi massal, teks konfirmasi adalah "HAPUS PAKSA" (karena tidak
+     ada satu kode tunggal untuk banyak data sekaligus).
+   - Hanya muncul untuk sesi Master Admin — Admin biasa tidak melihat
+     tombol ini sama sekali.
+
+2. Tagihan / Invoice:
+   - Tombol "Hapus Paksa" per baris muncul HANYA jika tagihan sudah punya
+     riwayat pembayaran (yang sebelumnya diblokir oleh guard biasa).
+   - Menghapus tagihan tersebut BESERTA seluruh riwayat pembayarannya,
+     permanen, dalam satu transaksi database (aman dari race condition).
+   - Tersedia juga "Hapus Paksa Massal" di action bar bulk-delete.
+
+3. Pelanggan:
+   - Tombol "Hapus Paksa" (ikon merah) muncul HANYA untuk pelanggan yang
+     sudah memiliki riwayat tagihan (baik di tab Data Aktif maupun Data
+     Diarsip).
+   - Menghapus pelanggan tersebut BESERTA seluruh tagihan dan riwayat
+     pembayarannya, permanen, dalam satu transaksi database.
+   - Tersedia juga "Hapus Paksa Massal" di floating bulk bar.
+
+4. Kas (Data Kas):
+   - Tombol "Hapus Paksa" muncul HANYA untuk transaksi manual yang
+     berstatus APPROVED (sudah menjadi bagian jurnal kas resmi, sehingga
+     tadinya tidak bisa dihapus sama sekali).
+   - Transaksi OTOMATIS dari pembayaran pelanggan TETAP tidak bisa dihapus
+     paksa dari menu ini — itu harus tetap sinkron dengan pembayaran
+     aslinya, bukan dihapus sepihak dari Data Kas.
+
+PENGECUALIAN YANG DISENGAJA — Paket Internet, Site/POP, Router
+----------------------------------------------------------------
+Fitur "Hapus Paksa" SENGAJA TIDAK ditambahkan untuk Paket Internet, Site,
+dan Router. Alasannya berbeda dari kasus Tagihan/Pelanggan/Kas di atas:
+
+- Guard pada Tagihan/Pelanggan/Kas melindungi RIWAYAT/DOKUMEN milik data itu
+  SENDIRI (tagihan lama, riwayat pembayaran sendiri). Menghapusnya secara
+  permanen berarti kehilangan dokumen historis — sudah cukup aman untuk
+  dipaksa oleh Master Admin dengan konfirmasi ketat.
+
+- Guard pada Paket/Site/Router melindungi data pelanggan LAIN yang masih
+  AKTIF menggunakan paket/site/router tersebut. Jika dipaksa dihapus, field
+  seperti package_id/site_id/router_id pada akun pelanggan lain yang masih
+  aktif akan menjadi "menggantung" (dangling reference) — dan berdasarkan
+  pengecekan kode, banyak query di aplikasi ini (data pelanggan, tagihan,
+  dashboard) menggunakan INNER JOIN ke tabel Paket/Site/Router. Artinya
+  pelanggan yang masih aktif itu bisa mendadak hilang dari daftar, gagal
+  ditagih, atau error saat dibuka — jauh lebih berbahaya daripada sekadar
+  kehilangan dokumen riwayat.
+
+  Untuk Paket/Site/Router, solusi yang tetap tersedia adalah: nonaktifkan
+  (Arsip Paket / toggle Aktif-Nonaktif) alih-alih menghapus permanen,
+  selama masih dipakai pelanggan aktif.
+
+FILE YANG DIUBAH
+-----------------
+- views/partials/layout.ejs   (modal #forceDeleteModal baru; versi bumped ke v1.21.1)
+- public/js/app.js            (wiring JS untuk data-force-delete / data-force-delete-bulk)
+- routes/invoices.js          (POST /:id/force-delete, action force_delete di POST /bulk)
+- routes/customers.js         (POST /:id/force-delete, action force_delete di POST /bulk)
+- routes/finance.js           (POST /cash/:id/force-delete)
+- views/invoices/index.ejs    (tombol Hapus Paksa per baris + massal)
+- views/customers/index.ejs   (tombol Hapus Paksa per baris + massal)
+- views/finance/cash.ejs      (tombol Hapus Paksa untuk transaksi APPROVED)
+- package.json                (version -> 1.21.1)
+- scripts/validate-v119.js    (version assertion -> 1.21.1, sinkron dengan layout.ejs)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi & database seperti biasa.
+2. Timpa (overwrite) 10 file di atas sesuai struktur folder pada patch ini.
+3. Restart aplikasi Node.js (pm2 restart / systemctl restart, dst).
+4. Hard-refresh browser (Ctrl+Shift+R) agar file JS/CSS baru termuat.
+5. Login sebagai Master Admin untuk melihat tombol "Hapus Paksa". Login
+   sebagai Admin biasa untuk memastikan tombol ini TIDAK muncul di sana.
+
+CATATAN KEAMANAN
+-----------------
+- Hapus Paksa TIDAK BISA DIBATALKAN. Setiap penggunaannya tercatat di log
+  audit sistem (Log Aktivitas) dengan action "force_delete" / "bulk_force_delete".
+- Disarankan tetap melakukan backup database rutin sebelum melakukan Hapus
+  Paksa pada data yang jumlahnya besar.

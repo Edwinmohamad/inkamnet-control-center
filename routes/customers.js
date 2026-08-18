@@ -2,7 +2,7 @@ const express = require('express');
 const ExcelJS = require('exceljs');
 const db = require('../config/db');
 const { audit } = require('../services/auditService');
-const { requireAdmin } = require('../middleware/auth');
+const { requireAdmin, requireMasterAdmin, isMasterAdminRole } = require('../middleware/auth');
 const { validateWhatsapp } = require('../services/whatsappService');
 const router = express.Router();
 
@@ -457,6 +457,37 @@ router.post('/bulk',requireAdmin,async(req,res)=>{
     req.session.flash={type:'success',message:`Paket ${pkg.name} diterapkan ke ${eligible.length} pelanggan.${skipped?` ${skipped} pelanggan dilewati karena site tidak cocok dengan paket.`:''}`};
     return res.redirect('/customers');
   }
+  // v1.21.1 — bulk "Hapus Paksa". Gated a second time on isMasterAdminRole (the route itself is only
+  // gated at requireAdmin one level below) since this bypasses the invoice-history guard entirely.
+  if(action==='force_delete'){
+    if(!isMasterAdminRole(req.session.user.role)){
+      req.session.flash={type:'danger',message:'Hapus Paksa hanya dapat dilakukan oleh Master Admin.'};
+      return res.redirect('/customers');
+    }
+    // return_status may arrive as a query string (?return_status=archived on the bulk-bar's action URL)
+    // since the generic force-delete-bulk JS handler only posts action + id fields, not extra context.
+    const returnTarget=String(req.body.return_status||req.query.return_status||'').trim()==='archived'?'/customers?status=archived':'/customers';
+    const [rows]=await db.execute(`SELECT id,customer_code,name FROM customers WHERE id IN (${placeholders})`,ids);
+    if(!rows.length){req.session.flash={type:'warning',message:'Pelanggan terpilih tidak ditemukan.'};return res.redirect(returnTarget);}
+    const done=[];
+    for(const c of rows){
+      const conn=await db.getConnection();
+      try{
+        await conn.beginTransaction();
+        const [[locked]]=await conn.execute(`SELECT id,customer_code,name FROM customers WHERE id=? LIMIT 1 FOR UPDATE`,[c.id]);
+        if(!locked){await conn.rollback();continue;}
+        await conn.execute(`DELETE p FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.customer_id=?`,[locked.id]);
+        await conn.execute(`DELETE FROM invoices WHERE customer_id=?`,[locked.id]);
+        await conn.execute(`DELETE FROM customers WHERE id=?`,[locked.id]);
+        await conn.commit();
+        done.push(locked);
+      }catch(e){await conn.rollback();}finally{conn.release();}
+    }
+    if(!done.length){req.session.flash={type:'warning',message:'Pelanggan terpilih tidak ditemukan.'};return res.redirect(returnTarget);}
+    await audit({userId:req.session.user.id,action:'bulk_force_delete',entityType:'customer',entityId:null,description:`HAPUS PAKSA massal ${done.length} pelanggan beserta seluruh tagihan dan riwayat pembayarannya (Master Admin override): ${done.map(r=>r.customer_code).slice(0,20).join(', ')}${done.length>20?', ...':''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${done.length} pelanggan dihapus paksa beserta seluruh tagihan dan riwayat pembayarannya.`};
+    return res.redirect(returnTarget);
+  }
   req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
   res.redirect('/customers');
 });
@@ -508,6 +539,31 @@ router.post('/:id/hard-delete',requireAdmin,async(req,res)=>{
   await audit({userId:req.session.user.id,action:'hard_delete',entityType:'customer',entityId:c.id,description:`Hapus permanen pelanggan ${c.customer_code} - ${c.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan ${c.name} dihapus permanen.`};
   res.redirect('/customers');
+});
+// v1.21.1 — "Hapus Paksa" (Force Delete), Master Admin only. Unlike /:id/hard-delete (which blocks
+// when the customer has any invoice history), this cascades: delete the customer's payments, then
+// their invoices, then the customer row itself, all inside one transaction. This is deliberately NOT
+// exposed to regular Admins — only a Master Admin who explicitly retypes the customer code can trigger it.
+router.post('/:id/force-delete',requireMasterAdmin,async(req,res)=>{
+  // Triggered from the generic #forceDeleteModal, whose hidden form only carries the CSRF token — so
+  // the archived-tab context is passed via the action URL's query string, not a body field.
+  const returnTarget=String(req.body.return_status||req.query.return_status||'').trim()==='archived'?'/customers?status=archived':'/customers';
+  const conn=await db.getConnection();
+  let customer=null;
+  try{
+    await conn.beginTransaction();
+    const [rows]=await conn.execute(`SELECT id,customer_code,name FROM customers WHERE id=? LIMIT 1 FOR UPDATE`,[req.params.id]);
+    if(!rows.length){await conn.rollback();req.session.flash={type:'warning',message:'Pelanggan tidak ditemukan.'};return res.redirect(returnTarget);}
+    customer=rows[0];
+    const [[invCount]]=await conn.execute(`SELECT COUNT(*) n FROM invoices WHERE customer_id=?`,[customer.id]);
+    await conn.execute(`DELETE p FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.customer_id=?`,[customer.id]);
+    await conn.execute(`DELETE FROM invoices WHERE customer_id=?`,[customer.id]);
+    await conn.execute(`DELETE FROM customers WHERE id=?`,[customer.id]);
+    await conn.commit();
+    await audit({userId:req.session.user.id,action:'force_delete',entityType:'customer',entityId:customer.id,description:`HAPUS PAKSA pelanggan ${customer.customer_code} - ${customer.name} beserta ${invCount.n} tagihan dan seluruh riwayat pembayarannya (Master Admin override).`,ip:req.ip});
+    req.session.flash={type:'success',message:`Pelanggan ${customer.name} beserta seluruh tagihan dan riwayat pembayarannya dihapus permanen (Hapus Paksa).`};
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+  res.redirect(returnTarget);
 });
 router.post('/:id/whatsapp-status',requireAdmin,async(req,res)=>{
   const [[customer]]=await db.execute(`SELECT id,name,phone FROM customers WHERE id=?`,[req.params.id]);

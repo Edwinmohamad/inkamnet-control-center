@@ -3,7 +3,7 @@ const fs=require('fs');
 const path=require('path');
 const crypto=require('crypto');
 const db=require('../config/db');
-const { requireAdmin, requireMasterAdmin, requirePermission }=require('../middleware/auth');
+const { requireAdmin, requireMasterAdmin, requirePermission, isMasterAdminRole }=require('../middleware/auth');
 const { assignCashTransactionCode,normalizeCategoryCode,approveCashTransaction,rejectCashTransaction }=require('../services/cashService');
 const { audit }=require('../services/auditService');
 const router=express.Router();
@@ -131,6 +131,23 @@ router.post('/cash/:id/delete',requireAdmin,async(req,res)=>{
   if(result.affectedRows&&rows[0]?.proof_path)await removeCashProof(rows[0].proof_path);
   req.session.flash={type:result.affectedRows?'success':'warning',message:result.affectedRows?'Data kas berhasil dihapus.':'Transaksi tidak dapat dihapus.'};
   res.redirect(cashReturn(req.body));
+});
+
+// v1.21.1 — "Hapus Paksa" (Force Delete), Master Admin only. Bypasses ONLY the APPROVED-status guard
+// above; the source_type restriction stays in place, since auto/payment-derived cash rows must stay in
+// sync with their source payment record and are never independently (force-)deletable from this menu.
+router.post('/cash/:id/force-delete',requireMasterAdmin,async(req,res)=>{
+  // Triggered from the generic #forceDeleteModal, whose hidden form only carries the CSRF token — so
+  // the return-filter context is passed via the action URL's query string, not body fields.
+  const returnCtx=cashReturn(Object.keys(req.query).length?req.query:req.body);
+  const [rows]=await db.execute(`SELECT proof_path,name,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual') LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'warning',message:'Transaksi otomatis dari pembayaran tidak dapat dihapus dari menu kas.'};return res.redirect(returnCtx);}
+  const tx=rows[0];
+  const [result]=await db.execute(`DELETE FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual')`,[req.params.id]);
+  if(result.affectedRows&&tx.proof_path)await removeCashProof(tx.proof_path);
+  if(result.affectedRows)await audit({userId:req.session.user.id,action:'force_delete',entityType:'cash_transaction',entityId:req.params.id,description:`HAPUS PAKSA transaksi kas ${tx.name} (status sebelumnya: ${tx.approval_status}, Master Admin override).`,ip:req.ip});
+  req.session.flash={type:result.affectedRows?'success':'warning',message:result.affectedRows?`Transaksi kas ${tx.name} dihapus paksa permanen.`:'Transaksi tidak dapat dihapus.'};
+  res.redirect(returnCtx);
 });
 
 router.post('/cash/delete-all',requireAdmin,async(req,res)=>{const now=new Date();const month=intInRange(req.body.month,1,12,now.getMonth()+1),year=intInRange(req.body.year,2020,2100,now.getFullYear()),site=String(req.body.site||'').trim();let where=`MONTH(ct.transaction_date)=? AND YEAR(ct.transaction_date)=? AND (ct.source_type IS NULL OR ct.source_type='manual') AND COALESCE(ct.approval_status,'APPROVED')<>'APPROVED'`;const params=[month,year];if(site){where+=` AND s.code=?`;params.push(site);}const [[skippedRow]]=await db.execute(`SELECT COUNT(*) n FROM cash_transactions ct LEFT JOIN sites s ON s.id=ct.site_id WHERE MONTH(ct.transaction_date)=? AND YEAR(ct.transaction_date)=? AND (ct.source_type IS NULL OR ct.source_type='manual') AND COALESCE(ct.approval_status,'APPROVED')='APPROVED'${site?` AND s.code=?`:''}`,[month,year,...(site?[site]:[])]);const [proofs]=await db.execute(`SELECT ct.proof_path FROM cash_transactions ct LEFT JOIN sites s ON s.id=ct.site_id WHERE ${where}`,params);const [result]=await db.execute(`DELETE ct FROM cash_transactions ct LEFT JOIN sites s ON s.id=ct.site_id WHERE ${where}`,params);for(const p of proofs)if(p.proof_path)await removeCashProof(p.proof_path);const skipped=Number(skippedRow?.n||0);req.session.flash={type:'success',message:`${result.affectedRows} transaksi kas manual periode terpilih dihapus.${skipped?` ${skipped} transaksi APPROVED dilewati karena sudah menjadi jurnal resmi.`:''} Transaksi otomatis pembayaran tetap aman.`};res.redirect(`/cash?month=${month}&year=${year}${site?`&site=${encodeURIComponent(site)}`:''}`);});

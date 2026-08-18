@@ -3,7 +3,7 @@ const fs=require('fs');
 const path=require('path');
 const db=require('../config/db');
 const { generateMonthlyInvoices }=require('../services/invoiceService');
-const { requireAdmin }=require('../middleware/auth');
+const { requireAdmin, requireMasterAdmin, isMasterAdminRole }=require('../middleware/auth');
 const { createCorporateInvoicePdf }=require('../services/reportPdf');
 const { audit }=require('../services/auditService');
 const router=express.Router();
@@ -250,6 +250,29 @@ router.post('/:id/delete',requireAdmin,async(req,res)=>{
   res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
 });
 
+// v1.21.1 — "Hapus Paksa" (Force Delete), Master Admin only. Bypasses the normal guard (blocked while any
+// payment exists) by deleting the invoice's payments first, then the invoice, inside one transaction — the
+// exact "delete the dependent financial documents too" behavior requested. Confirmation is enforced
+// client-side (retype the invoice number, see views/partials/layout.ejs #forceDeleteModal) and the route
+// itself re-checks nothing except that the invoice exists, since the whole point is to bypass the guard.
+router.post('/:id/force-delete',requireMasterAdmin,async(req,res)=>{
+  const conn=await db.getConnection();
+  let invoice=null;
+  try{
+    await conn.beginTransaction();
+    const [rows]=await conn.execute(`SELECT id,invoice_number,period_year,period_month FROM invoices WHERE id=? LIMIT 1 FOR UPDATE`,[req.params.id]);
+    if(!rows.length){await conn.rollback();req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
+    invoice=rows[0];
+    const [[payCount]]=await conn.execute(`SELECT COUNT(*) n FROM payments WHERE invoice_id=?`,[invoice.id]);
+    await conn.execute(`DELETE FROM payments WHERE invoice_id=?`,[invoice.id]);
+    await conn.execute(`DELETE FROM invoices WHERE id=?`,[invoice.id]);
+    await conn.commit();
+    await audit({userId:req.session.user.id,action:'force_delete',entityType:'invoice',entityId:invoice.id,description:`HAPUS PAKSA tagihan ${invoice.invoice_number} beserta ${payCount.n} riwayat pembayarannya (Master Admin override).`,ip:req.ip});
+    req.session.flash={type:'success',message:`Tagihan ${invoice.invoice_number} dan ${payCount.n} riwayat pembayarannya dihapus permanen (Hapus Paksa).`};
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+  res.redirect(localReturn(req.body.return_to,`/invoices?month=${invoice.period_month}&year=${invoice.period_year}`));
+});
+
 // v1.21.0 — Section 4 (global delete-button audit): Tagihan already had fully transaction-safe individual
 // cancel/delete (see above). This adds the bulk counterpart the checkbox column (data-invoice-table-check)
 // was still missing — reusing the EXACT same per-row guard/locking pattern in a loop (one `SELECT ... FOR
@@ -301,6 +324,33 @@ router.post('/bulk',requireAdmin,async(req,res)=>{
     if(!done.length){req.session.flash={type:'danger',message:'Semua tagihan terpilih sudah memiliki pembayaran dan tidak boleh dihapus permanen.'};return res.redirect(returnTo);}
     await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'invoice',entityId:null,description:`Hapus massal ${done.length} tagihan tanpa histori pembayaran: ${done.map(r=>r.invoice_number).slice(0,20).join(', ')}${done.length>20?', ...':''}${skipped.length?` (${skipped.length} dilewati karena sudah memiliki pembayaran)`:''}`,ip:req.ip});
     req.session.flash={type:'success',message:`${done.length} tagihan dihapus permanen.${skipped.length?` ${skipped.length} tagihan dilewati karena sudah memiliki pembayaran.`:''}`};
+    return res.redirect(returnTo);
+  }
+  // v1.21.1 — "Hapus Paksa" massal, Master Admin only (checked here explicitly since this whole route
+  // is otherwise gated at `requireAdmin`, one level below Master Admin). Deletes payments + invoice for
+  // every selected row unconditionally, same cascade as the single-row /force-delete above.
+  if(action==='force_delete'){
+    if(!isMasterAdminRole(req.session.user.role)){
+      req.session.flash={type:'danger',message:'Hapus Paksa hanya dapat dilakukan oleh Master Admin.'};
+      return res.redirect(returnTo);
+    }
+    const done=[];
+    for(const id of ids){
+      const conn=await db.getConnection();
+      try{
+        await conn.beginTransaction();
+        const [rows]=await conn.execute(`SELECT id,invoice_number FROM invoices WHERE id=? LIMIT 1 FOR UPDATE`,[id]);
+        if(!rows.length){await conn.rollback();continue;}
+        const invoice=rows[0];
+        await conn.execute(`DELETE FROM payments WHERE invoice_id=?`,[invoice.id]);
+        await conn.execute(`DELETE FROM invoices WHERE id=?`,[invoice.id]);
+        await conn.commit();
+        done.push(invoice);
+      }catch(e){await conn.rollback();}finally{conn.release();}
+    }
+    if(!done.length){req.session.flash={type:'warning',message:'Tagihan terpilih tidak ditemukan.'};return res.redirect(returnTo);}
+    await audit({userId:req.session.user.id,action:'bulk_force_delete',entityType:'invoice',entityId:null,description:`HAPUS PAKSA massal ${done.length} tagihan beserta seluruh riwayat pembayarannya (Master Admin override): ${done.map(r=>r.invoice_number).slice(0,20).join(', ')}${done.length>20?', ...':''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${done.length} tagihan dihapus paksa beserta seluruh riwayat pembayarannya.`};
     return res.redirect(returnTo);
   }
   req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};
