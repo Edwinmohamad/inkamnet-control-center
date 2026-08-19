@@ -8,7 +8,8 @@ const { requireAdmin, requireMasterAdmin, PERMISSIONS, normalizePermissions, nor
 const { audit }=require('../services/auditService');
 const router=express.Router();
 
-const tabs=new Set(['company','invoice','application','accounts','employees','departments','positions','banks','gateways','roles']);
+const tabs=new Set(['company','invoice','application','accounts','employees','departments','positions','banks','gateways','roles','reset']);
+const testDataResetTables=['payments','invoices','custom_invoices','cash_transactions','customers'];
 const uiPalettes=new Set(['nebula','ocean','emerald','sunset','rose','ice']);
 const clean=(v)=>String(v||'').trim();
 const nullable=(v)=>clean(v)||null;
@@ -200,6 +201,36 @@ router.post('/users/:id/password',requireAdmin,async(req,res)=>{
   const hash=await bcrypt.hash(password,12);await db.execute(`UPDATE users SET password_hash=? WHERE id=?`,[hash,id]);
   await audit({userId:req.session.user.id,action:'update',entityType:'user',entityId:id,description:`Password akun ${rows[0].username} direset`,ip:req.ip});
   req.session.flash={type:'success',message:'Password berhasil direset.'};res.redirect('/settings?tab=accounts');
+});
+
+// v1.24.4 — "Bersihkan Data Uji Coba": one-click in-app equivalent of BERSIHKAN-DATA-UJICOBA.sql,
+// scoped ONLY to payments/invoices/custom_invoices/cash_transactions/customers so the currently-logged-in
+// Master Admin's own account (and settings/packages/sites/routers/etc.) can never disappear mid-request.
+// Master Admin only, and gated behind the app's existing retype-to-confirm Force Delete modal.
+router.post('/reset-test-data',requireMasterAdmin,async(req,res)=>{
+  const conn=await db.getConnection();
+  const results=[];
+  try{
+    await conn.query(`SET FOREIGN_KEY_CHECKS=0`);
+    for(const tbl of testDataResetTables){
+      const [[info]]=await conn.query(`SELECT COUNT(*) total FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?`,[tbl]);
+      if(Number(info.total)>0){
+        await conn.query(`TRUNCATE TABLE \`${tbl}\``);
+        results.push(`${tbl}: dikosongkan`);
+      }else{
+        results.push(`${tbl}: tabel tidak ditemukan, dilewati`);
+      }
+    }
+    await conn.query(`SET FOREIGN_KEY_CHECKS=1`);
+    await audit({userId:req.session.user.id,action:'delete',entityType:'reset_test_data',entityId:null,description:`Reset data uji coba: ${results.join('; ')}`,ip:req.ip});
+    req.session.flash={type:'success',message:'Data uji coba (Pelanggan, Tagihan, Pembayaran, dan Data Kas terkait) berhasil dibersihkan. Akun login, Pengaturan, Paket, Site, Router, dan Cluster/ODP TIDAK berubah.'};
+  }catch(err){
+    console.error('Gagal reset data uji coba:',err.message);
+    req.session.flash={type:'danger',message:'Gagal membersihkan data uji coba: '+err.message};
+  }finally{
+    conn.release();
+  }
+  res.redirect('/settings?tab=reset');
 });
 
 module.exports=router;

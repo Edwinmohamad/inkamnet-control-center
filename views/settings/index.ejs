@@ -2,7 +2,7 @@
   <div class="module-head"><div><div class="module-kicker">SYSTEM CONFIGURATION</div><h1><%= language==='en'?'Settings':'Pengaturan' %></h1><p><%= language==='en'?'Company, application, employees, payments and access management.':'Perusahaan, aplikasi, karyawan, pembayaran, dan pengelolaan akses.' %></p></div></div>
   <div class="settings-layout">
     <aside class="settings-nav-card">
-      <% const menus=[['company','Perusahaan','bi-buildings'],['invoice','Identitas Invoice','bi-receipt-cutoff'],['application','Tampilan & Aplikasi','bi-palette2'],['accounts','Config Akun','bi-person-gear'],['roles','Role & Permission','bi-shield-lock'],['employees','Karyawan','bi-people'],['departments','Departemen','bi-diagram-3'],['positions','Posisi','bi-person-badge'],['banks','Bank','bi-bank'],['gateways','Payment Gateway','bi-credit-card']]; %>
+      <% const menus=[['company','Perusahaan','bi-buildings'],['invoice','Identitas Invoice','bi-receipt-cutoff'],['application','Tampilan & Aplikasi','bi-palette2'],['accounts','Config Akun','bi-person-gear'],['roles','Role & Permission','bi-shield-lock'],['employees','Karyawan','bi-people'],['departments','Departemen','bi-diagram-3'],['positions','Posisi','bi-person-badge'],['banks','Bank','bi-bank'],['gateways','Payment Gateway','bi-credit-card']]; if(isMasterAdmin){ menus.push(['reset','Reset Data Uji Coba','bi-exclamation-diamond']); } %>
       <% menus.forEach(m=>{ %><a class="settings-nav-link <%= tab===m[0]?'active':'' %>" href="/settings?tab=<%= m[0] %>"><i class="bi <%= m[2] %>"></i><span><%= m[1] %></span></a><% }) %>
     </aside>
     <div class="settings-content">
@@ -95,6 +95,14 @@
           </form>
         <% }) %></div>
         <div class="secure-file-note mt-3"><i class="bi bi-shield-lock"></i><span>Dashboard selalu aktif sebagai jalur masuk aman. Master Admin selalu memiliki semua akses dan tidak dapat dikurangi permission-nya.</span></div>
+      </div></div>
+      <% } %>
+
+      <% if(tab==='reset' && isMasterAdmin){ %>
+      <div class="data-card mb-3"><div class="data-card-head"><div><h3>Reset Data Uji Coba</h3><small>Untuk instalasi baru yang masih tahap uji coba — bersihkan data contoh sebelum input data pelanggan asli.</small></div><span class="status-badge orange"><i class="bi bi-exclamation-diamond"></i> MASTER ADMIN ONLY</span></div><div class="data-card-body">
+        <div class="secure-file-note mb-3"><i class="bi bi-info-circle"></i><span>Tombol ini mengosongkan data <b>Pelanggan, Tagihan, Pembayaran, dan Data Kas</b> (termasuk baris "AUTO BILLING" yang bergembok). Akun login, Pengaturan perusahaan, Paket Internet, Site, Router, Cluster/ODP, Kategori Kas, dan Karyawan <b>TIDAK ikut dihapus</b>.</span></div>
+        <div class="alert alert-danger alert-modern mb-3"><i class="bi bi-exclamation-octagon-fill me-2"></i>Tindakan ini permanen dan tidak dapat dibatalkan. Pastikan ini benar instalasi/uji coba, bukan data pelanggan asli yang sedang berjalan. Sebaiknya backup database terlebih dahulu sebelum melanjutkan.</div>
+        <button type="button" class="btn-tech danger" data-force-delete="/settings/reset-test-data" data-entity-label="Data Uji Coba (Pelanggan, Tagihan, Pembayaran, Data Kas)" data-force-delete-match="BERSIHKAN DATA UJI COBA" data-force-delete-warning="Semua data Pelanggan, Tagihan, Pembayaran, dan Data Kas (termasuk transaksi AUTO BILLING) akan dihapus permanen. Akun login, Pengaturan, Paket, Site, Router, Cluster/ODP, dan Kategori Kas tidak berubah."><i class="bi bi-trash3-fill"></i>Bersihkan Data Uji Coba</button>
       </div></div>
       <% } %>
     </div>

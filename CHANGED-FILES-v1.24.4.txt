@@ -1,0 +1,89 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.4
+==========================================
+Fitur baru: Tombol "Bersihkan Data Uji Coba" langsung di dalam aplikasi
+(Master Admin), tidak perlu lagi menjalankan file SQL manual di terminal.
+
+===========================================================
+LATAR BELAKANG
+===========================================================
+Sebelumnya, cara membersihkan data uji coba (Pelanggan/Tagihan/Pembayaran/
+Data Kas contoh, termasuk baris "AUTO BILLING" yang bergembok) adalah lewat
+file BERSIHKAN-DATA-UJICOBA.sql yang harus dijalankan manual di terminal
+server. Banyak pengguna tidak terbiasa dengan terminal/SQL, jadi sekarang
+fitur ini dipindahkan menjadi SATU TOMBOL di dalam aplikasi — cukup klik,
+ketik konfirmasi, selesai.
+
+===========================================================
+CARA MEMAKAI (SETELAH PATCH INI TERPASANG)
+===========================================================
+1. Login sebagai MASTER ADMIN (menu ini hanya tampil untuk Master Admin).
+2. Buka menu Pengaturan (Settings).
+3. Di sidebar kiri, klik menu baru "Reset Data Uji Coba" (ikon segitiga
+   peringatan, paling bawah).
+4. Baca penjelasan di halaman itu, lalu klik tombol merah
+   "Bersihkan Data Uji Coba".
+5. Akan muncul jendela konfirmasi — ketik ulang persis:
+       BERSIHKAN DATA UJI COBA
+   pada kolom yang tersedia, baru tombol konfirmasi aktif.
+6. Klik "Hapus Paksa" pada jendela tersebut untuk menjalankan.
+
+APA YANG DIHAPUS:
+  - Data Pelanggan
+  - Tagihan (invoices & custom invoices)
+  - Pembayaran
+  - Data Kas (termasuk transaksi "AUTO BILLING" yang bergembok)
+
+APA YANG TIDAK DIHAPUS (aman, tidak berubah):
+  - Akun login (semua user, termasuk akun yang sedang Anda pakai)
+  - Pengaturan perusahaan/invoice/tampilan
+  - Paket Internet, Site, Router, Cluster/ODP
+  - Kategori Kas, Bank, Payment Gateway
+  - Data Karyawan/Departemen/Posisi
+
+Persis sama scope-nya dengan file BERSIHKAN-DATA-UJICOBA.sql yang pernah
+dikirim sebelumnya — bedanya sekarang tinggal klik dari browser, tidak perlu
+buka terminal/SQL sama sekali. File SQL tersebut masih bisa dipakai juga
+kalau Anda lebih nyaman lewat terminal, tapi tidak wajib lagi.
+
+PENTING:
+  - Tindakan ini PERMANEN dan TIDAK BISA DIBATALKAN. Sebaiknya backup
+    database dulu sebelum klik (via hosting/database provider Anda, atau
+    minta admin server melakukan mysqldump).
+  - Kalau Anda SUDAH punya data pelanggan ASLI yang sedang berjalan,
+    JANGAN klik tombol ini — tombol ini akan ikut menghapus data pelanggan
+    asli juga, bukan cuma data contoh. Tombol ini hanya untuk tahap uji
+    coba/instalasi baru.
+  - Kalau yang Anda mau adalah reset TOTAL (termasuk akun login, Paket,
+    Site, Router, dll — benar-benar kembali seperti baru install), itu
+    TETAP harus lewat RESET-TOTAL-inkamnet.sql yang sudah dikirim
+    sebelumnya (bukan tombol ini) — supaya akun Master Admin yang sedang
+    Anda pakai untuk login tidak ikut terhapus di tengah proses.
+
+===========================================================
+CATATAN TEKNIS
+===========================================================
+Fitur ini menggunakan mekanisme "Hapus Paksa" (retype-to-confirm) yang
+sudah ada di aplikasi, sama seperti tombol Hapus Paksa di Data Kas — jadi
+tidak ada JavaScript baru yang perlu ditambahkan, cukup pasang 5 file di
+bawah ini.
+
+FILE YANG DIUBAH
+-------------------
+- routes/settings.js               (route baru POST /settings/reset-test-data,
+                                     khusus Master Admin, tabel yang dikosongkan
+                                     persis sama dengan BERSIHKAN-DATA-UJICOBA.sql)
+- views/settings/index.ejs         (menu & halaman baru "Reset Data Uji Coba")
+- views/partials/layout.ejs        (versi -> v1.24.4)
+- package.json                     (versi -> 1.24.4)
+- scripts/validate-v119.js         (assertion versi -> 1.24.4)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan struktur
+   database — fitur ini memakai tabel yang sudah ada).
+2. Timpa (overwrite) 5 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Login sebagai Master Admin, buka Pengaturan, coba lihat menu baru
+   "Reset Data Uji Coba" di sidebar kiri (paling bawah).
