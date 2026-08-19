@@ -51,8 +51,20 @@ router.post('/cash/categories',async(req,res)=>{
   let code=normalizeCategoryCode(b.code||name,type==='income'?'INC':'EXP');
   const [dup]=await db.execute(`SELECT id FROM cash_categories WHERE code=? LIMIT 1`,[code]);
   if(dup.length)code=`${code.slice(0,7)}${String(Date.now()).slice(-3)}`;
-  await db.execute(`INSERT INTO cash_categories(code,name,type,site_id,description,is_active,is_system) VALUES(?,?,?,?,?,1,0)`,[code,name,type,b.site_id||null,b.description||null]);
+  const isMandatory=b.is_recurring_mandatory?1:0;
+  await db.execute(`INSERT INTO cash_categories(code,name,type,site_id,description,is_active,is_system,is_recurring_mandatory) VALUES(?,?,?,?,?,1,0,?)`,[code,name,type,b.site_id||null,b.description||null,isMandatory]);
   req.session.flash={type:'success',message:`Kategori kas ${name} ditambahkan dengan kode ${code}.`};
+  res.redirect('/cash/categories');
+});
+router.post('/cash/categories/:id/edit',requireAdmin,async(req,res)=>{
+  const b=req.body;const name=String(b.name||'').trim();const type=['income','expense'].includes(b.type)?b.type:'expense';
+  const [rows]=await db.execute(`SELECT id,COALESCE(is_system,0) is_system FROM cash_categories WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'warning',message:'Kategori kas tidak ditemukan.'};return res.redirect('/cash/categories');}
+  if(Number(rows[0].is_system)===1){req.session.flash={type:'warning',message:'Kategori internal sistem tidak dapat diedit dari menu manual.'};return res.redirect('/cash/categories');}
+  if(!name){req.session.flash={type:'danger',message:'Nama kategori wajib diisi.'};return res.redirect('/cash/categories');}
+  const isMandatory=b.is_recurring_mandatory?1:0;
+  await db.execute(`UPDATE cash_categories SET name=?,type=?,site_id=?,description=?,is_recurring_mandatory=? WHERE id=?`,[name,type,b.site_id||null,b.description||null,isMandatory,req.params.id]);
+  req.session.flash={type:'success',message:`Kategori ${name} diperbarui.`};
   res.redirect('/cash/categories');
 });
 router.post('/cash/categories/:id/delete',requireAdmin,async(req,res)=>{
@@ -92,7 +104,33 @@ router.get('/cash',async(req,res)=>{
   dailyChartRows.forEach(row=>{const i=Number(row.day_no)-1;daily.income[i]=Number(row.income||0);daily.expense[i]=Number(row.expense||0);});
   const cashCharts={categories:categoryChartRows.map(row=>({label:row.label,amount:Number(row.amount||0)})),daily};
   const [[approvalSummary]]=await db.execute(`SELECT SUM(COALESCE(ct.approval_status,'APPROVED')='PENDING_APPROVAL') pending_count,COALESCE(SUM(CASE WHEN ct.approval_status='PENDING_APPROVAL' THEN ct.amount ELSE 0 END),0) pending_total FROM cash_transactions ct LEFT JOIN sites s ON s.id=ct.site_id WHERE MONTH(ct.transaction_date)=? AND YEAR(ct.transaction_date)=?${site?` AND s.code=?`:''}`,[month,year,...(site?[site]:[])]);
-  res.render('finance/cash',{title:'Data Kas',transactions,categories,sites,summary,collection:collection||{},approvalSummary:approvalSummary||{},cashCharts,filters:{month,year,site,q}});
+
+  // v1.24.8 — "Checklist Pengeluaran Wajib Bulan Ini": cross-reference every active site against every
+  // category flagged is_recurring_mandatory (Sewa/Listrik/Bandwidth-type recurring bills), so staff can
+  // see at a glance which mandatory bills still haven't been logged for the selected month/site filter,
+  // instead of relying on memory. A category counts as "recorded" if any non-REJECTED transaction exists
+  // for that exact category+site+month — PENDING_APPROVAL still counts (it means someone already logged
+  // it, even if Master Admin hasn't approved yet).
+  const mandatorySites=site?sites.filter(s=>s.code===site):sites;
+  const [mandatoryCategories]=await db.query(`SELECT id,code,name FROM cash_categories WHERE is_active=1 AND COALESCE(is_system,0)=0 AND COALESCE(is_recurring_mandatory,0)=1 ORDER BY name`);
+  let mandatoryChecklist=[];
+  if(mandatoryCategories.length&&mandatorySites.length){
+    const catPlaceholders=mandatoryCategories.map(()=>'?').join(',');
+    const [recorded]=await db.query(`SELECT ct.category_id,ct.site_id,SUM(ct.amount) total
+      FROM cash_transactions ct
+      WHERE MONTH(ct.transaction_date)=? AND YEAR(ct.transaction_date)=? AND COALESCE(ct.approval_status,'APPROVED')<>'REJECTED'
+        AND ct.category_id IN (${catPlaceholders}) AND ct.site_id IS NOT NULL
+      GROUP BY ct.category_id,ct.site_id`,[month,year,...mandatoryCategories.map(c=>c.id)]);
+    const recordedMap=new Map(recorded.map(r=>[`${r.category_id}:${r.site_id}`,Number(r.total||0)]));
+    for(const cat of mandatoryCategories){
+      for(const s of mandatorySites){
+        const total=recordedMap.get(`${cat.id}:${s.id}`);
+        mandatoryChecklist.push({category_id:cat.id,category_name:cat.name,site_id:s.id,site_code:s.code,recorded:total!==undefined,total:total||0});
+      }
+    }
+  }
+
+  res.render('finance/cash',{title:'Data Kas',transactions,categories,sites,summary,collection:collection||{},approvalSummary:approvalSummary||{},cashCharts,mandatoryChecklist,filters:{month,year,site,q}});
 });
 
 router.get('/cash/:id/proof',async(req,res)=>{const [rows]=await db.execute(`SELECT proof_path,proof_original_name,proof_mime FROM cash_transactions WHERE id=? LIMIT 1`,[req.params.id]);const t=rows[0];if(!t?.proof_path)return res.status(404).send('Bukti pengeluaran tidak ditemukan.');const full=path.join(CASH_PROOF_DIR,path.basename(t.proof_path));if(!fs.existsSync(full))return res.status(404).send('File bukti pengeluaran tidak ditemukan di storage.');res.type(t.proof_mime||'application/octet-stream');res.setHeader('Content-Disposition',`inline; filename="${String(t.proof_original_name||path.basename(t.proof_path)).replace(/[\r\n"]/g,'_')}"`);res.setHeader('Cache-Control','private, max-age=300');res.setHeader('X-Content-Type-Options','nosniff');res.sendFile(full);});

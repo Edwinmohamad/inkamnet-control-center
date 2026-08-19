@@ -421,4 +421,29 @@ async function ensureV30Schema() {
   await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS wa_auto_reminder_template TEXT NULL AFTER wa_auto_reminder_last_run_date`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema, ensureV30Schema };
+async function ensureV31Schema() {
+  // v1.24.8 — "Wajib Bulanan" flag on cash_categories, requested after reviewing the user's real cash
+  // flow export from their old billing system (WifiNetBill). That export showed a clear pattern: Sewa
+  // (kontrakan), Listrik & Utilitas, and Operasional Jaringan (bandwidth/ISP) recur every month at
+  // roughly the same amount per site, while everything else (Petty Cash, Maintenance, Transportasi,
+  // Vendor, dll) is ad-hoc/variable. This column powers the "Checklist Pengeluaran Wajib Bulan Ini"
+  // panel on the Data Kas page (views/finance/cash.ejs) — no separate template/due-date table needed,
+  // it just cross-references active sites x mandatory categories against this month's cash_transactions.
+  await db.query(`ALTER TABLE cash_categories ADD COLUMN IF NOT EXISTS is_recurring_mandatory TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active`);
+  // Auto-flag the three categories that matched the recurring pattern in the user's real data, but only
+  // if they already exist with these exact names (categories in this app are user-created, not seeded —
+  // see the "Contoh kategori" guide on the Kategori Kas page, which suggests these same names). Existing
+  // installs get a sensible default; anything named differently can still be flagged manually via Edit.
+  await db.query(`UPDATE cash_categories SET is_recurring_mandatory=1
+    WHERE COALESCE(is_system,0)=0 AND type='expense'
+      AND name IN ('Sewa','Listrik & Utilitas','Operasional Jaringan','Bandwidth / ISP')`);
+
+  // "Kasbon Karyawan" showed up as its own distinct category in the user's old system (cash advances to
+  // staff, e.g. "KSB_Ali_Juli") with no equivalent in the suggested category list here — added as a real
+  // (non-mandatory, ad-hoc) expense category so it doesn't get lumped into Petty Cash.
+  await db.query(`INSERT INTO cash_categories(code,name,type,description,is_active,is_system,is_recurring_mandatory)
+    SELECT 'KASBON','Kasbon Karyawan','expense','Uang muka / pinjaman ke karyawan, dipotong dari gaji atau fee berikutnya',1,0,0
+    WHERE NOT EXISTS (SELECT 1 FROM cash_categories WHERE code='KASBON' OR LOWER(name)='kasbon karyawan')`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema, ensureV30Schema, ensureV31Schema };

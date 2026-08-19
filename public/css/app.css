@@ -926,6 +926,26 @@ form[data-auto-filter].is-auto-submitting{opacity:.7;pointer-events:none}.cash-c
 [data-theme="light"] .infra-workspace{background:#eef2f8}
 .cash-pending-note{display:flex;align-items:center;gap:11px;margin-top:10px;padding:11px 13px;border:1px solid rgba(255,189,91,.18);border-radius:13px;background:rgba(255,189,91,.055)}.cash-pending-note>i{color:#ffbd5b;font-size:18px}.cash-pending-note span{min-width:0;flex:1}.cash-pending-note strong,.cash-pending-note small{display:block}.cash-pending-note strong{font-size:10px}.cash-pending-note small{font-size:8px;color:var(--muted)}.cash-pending-note>a{font-size:9px;font-weight:750;color:#8c7eff;text-decoration:none;white-space:nowrap}@media(max-width:600px){.cash-pending-note{align-items:flex-start;flex-wrap:wrap}.cash-pending-note>a{width:100%;padding-left:29px}}
 
+/* v1.24.8 — Checklist Pengeluaran Wajib Bulan Ini (Data Kas) */
+.cash-mandatory-checklist{margin:14px 0;padding:14px;border:1px solid rgba(var(--brand-rgb),.18);border-radius:16px;background:rgba(var(--brand-rgb),.03)}
+.cash-mandatory-head{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.cash-mandatory-head>i{width:32px;height:32px;border-radius:9px;background:rgba(var(--brand-rgb),.1);color:#a891ff;display:grid;place-items:center;font-size:.85rem;flex:none}
+.cash-mandatory-head strong{display:block;font-size:.6rem}
+.cash-mandatory-head small{display:block;margin-top:2px;color:var(--muted);font-size:.44rem}
+.cash-mandatory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:8px}
+.cash-mandatory-item{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+.cash-mandatory-item.pending{border-color:rgba(255,187,85,.28);background:rgba(255,187,85,.045)}
+.cash-mandatory-item>i{font-size:.85rem;flex:none}
+.cash-mandatory-item.done>i{color:var(--success)}
+.cash-mandatory-item.pending>i{color:var(--warning)}
+.cash-mandatory-item>div{flex:1;min-width:0}
+.cash-mandatory-item b{display:block;font-size:.53rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cash-mandatory-item small{display:block;margin-top:2px;color:var(--muted);font-size:.42rem}
+.cash-mandatory-amount{color:var(--success);font-size:.48rem;font-weight:800;white-space:nowrap;flex:none}
+.cash-mandatory-cta{border:1px solid rgba(var(--brand-rgb),.32);border-radius:8px;background:rgba(var(--brand-rgb),.09);color:#a891ff;font-size:.44rem;font-weight:800;padding:7px 9px;white-space:nowrap;cursor:pointer;flex:none}
+.cash-mandatory-cta:hover{background:rgba(var(--brand-rgb),.16)}
+@media(max-width:600px){.cash-mandatory-grid{grid-template-columns:1fr}}
+
 /* v1.20 — MikroTik NMS consolidated into a single tabbed module (Router Monitoring / PPPoE
    Config & Active / Sync & Audit) after removing the heavy Live Traffic Interface widget. */
 .nms-content-tabs{display:flex;gap:7px;margin-bottom:12px;padding:6px;border:1px solid var(--line);border-radius:16px;background:var(--panel-2);overflow-x:auto}

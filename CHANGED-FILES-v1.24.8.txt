@@ -1,0 +1,92 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.8
+==========================================
+Dua perubahan berdasarkan permintaan Anda dan review laporan pengeluaran
+dari billing lama (WifiNetBill) yang Anda kirim:
+
+1. Tampilan Kategori Kas dirapikan.
+2. Fitur baru: Checklist Pengeluaran Wajib Bulan Ini, supaya Sewa,
+   Listrik, dan Bandwidth/Operasional Jaringan per site tidak lupa
+   dicatat setiap bulan.
+
+===========================================================
+1. KATEGORI KAS — DIRAPIKAN
+===========================================================
+- Subteks "Kategori manual" yang berulang di setiap baris (kolom Nama)
+  dihapus — tidak menambah informasi, sudah dijelaskan sekali di
+  deskripsi halaman.
+- Kolom "Dipakai" digabung jadi satu baris teks pendek ("0 transaksi")
+  dari sebelumnya dua baris terpisah.
+- Sekarang ada tombol "Edit" di samping "Hapus" — sebelumnya kategori
+  yang sudah dibuat tidak bisa diedit sama sekali (cuma bisa
+  tambah/hapus). Bisa ubah Nama, Jenis, Site, Deskripsi, dan status
+  "Wajib Bulanan". Kode kategori TIDAK bisa diubah karena sudah jadi
+  prefix nomor transaksi yang sudah berjalan.
+
+===========================================================
+2. CHECKLIST PENGELUARAN WAJIB BULAN INI (BARU)
+===========================================================
+Dari laporan pengeluaran lama Anda, terlihat jelas Sewa/Kontrakan,
+Listrik, dan Bandwidth/ISP muncul tiap bulan dengan nominal yang mirip
+per site — beda dengan Petty Cash yang sifatnya harian/ad-hoc dan
+memang wajar berubah-ubah.
+
+- Kategori Kas sekarang punya centang "Wajib dicatat setiap bulan" di
+  form Tambah/Edit. Untuk instalasi yang sudah berjalan, kategori
+  bernama persis "Sewa", "Listrik & Utilitas", atau "Operasional
+  Jaringan" (dan "Bandwidth / ISP" kalau ada) OTOMATIS ditandai wajib
+  bulanan — tidak perlu Anda set manual satu-satu. Kalau nama kategori
+  Anda beda, tinggal centang manual lewat tombol Edit yang baru.
+- Ditambahkan kategori baru "Kasbon Karyawan" (Pengeluaran, tidak wajib
+  bulanan) — di data lama Anda ini kategori tersendiri (KASBON), bukan
+  bagian dari Petty Cash, jadi sekarang punya kategori sendiri di
+  sistem baru juga.
+- Halaman Data Kas sekarang menampilkan panel "Checklist Pengeluaran
+  Wajib Bulan Ini": daftar setiap site aktif x setiap kategori wajib
+  bulanan, hijau kalau sudah ada transaksinya bulan ini (dengan
+  nominalnya), oranye + tombol "Catat Sekarang" kalau belum — tombol
+  itu langsung membuka form Tambah Data Kas dengan kategori & site
+  sudah terisi otomatis.
+
+PENTING — supaya checklist ini akurat per site: saat mencatat transaksi
+kategori wajib (Sewa/Listrik/Operasional Jaringan), pastikan kolom
+"Site" diisi (KRW/CLM/KBG dst), jangan dibiarkan Global. Transaksi
+tanpa Site tidak bisa dicocokkan ke site manapun di checklist.
+
+Ini MURNI penambahan fitur — tidak ada data lama yang dihapus atau
+berubah. Kategori yang sudah ada tetap sama persis, cuma dapat kolom
+baru (default tidak wajib, kecuali 3 nama yang cocok di atas).
+
+===========================================================
+FILE YANG DIUBAH
+===========================================================
+- app.js                            (daftarkan migrasi skema baru)
+- services/schemaService.js         (kolom is_recurring_mandatory +
+                                     auto-flag 3 kategori + kategori
+                                     baru Kasbon Karyawan)
+- routes/finance.js                 (route edit kategori + query
+                                     checklist wajib bulanan)
+- views/finance/cash-categories.ejs (tampilan dirapikan, tombol Edit,
+                                     badge Wajib Bulanan, form edit)
+- views/finance/cash.ejs             (panel Checklist + prefill tombol
+                                     "Catat Sekarang")
+- public/css/app.css                 (gaya panel checklist)
+- views/partials/layout.ejs          (versi -> v1.24.8)
+- package.json                       (versi -> 1.24.8)
+- scripts/validate-v119.js           (assertion versi -> 1.24.8)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi DAN database — patch ini menambah kolom baru
+   ke tabel cash_categories (otomatis lewat migrasi saat aplikasi
+   restart, tidak perlu dijalankan manual).
+2. Timpa (overwrite) 9 file di atas sesuai struktur folder pada patch
+   ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js — migrasi kolom & kategori baru berjalan
+   otomatis saat startup (aman dijalankan berkali-kali).
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Cek menu Kategori Kas — pastikan Sewa/Listrik & Utilitas/Operasional
+   Jaringan (kalau nama persis sama) sudah bertanda "Wajib Bulanan", dan
+   kategori "Kasbon Karyawan" sudah muncul.
+7. Cek halaman Data Kas — panel "Checklist Pengeluaran Wajib Bulan Ini"
+   harus muncul di atas grafik.

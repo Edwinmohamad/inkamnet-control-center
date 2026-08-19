@@ -22,6 +22,26 @@
   </div>
   <div class="cash-pending-note"><i class="bi bi-shield-exclamation"></i><span><strong><%= Number(approvalSummary.pending_count||0) %> transaksi menunggu approval · <%= formatRupiah(approvalSummary.pending_total||0) %></strong><small>Pending / rejected tidak memengaruhi Pendapatan, Pengeluaran, Saldo, chart, maupun Laporan Keuangan Real.</small></span><a href="/payments#cash-approval">Approval & Transaksi <i class="bi bi-arrow-right"></i></a></div>
 
+  <!-- v1.24.8 — Checklist Pengeluaran Wajib Bulan Ini: cross-references active sites x categories flagged
+       "wajib bulanan" (lihat Kategori Kas) against this month's transactions, supaya Sewa/Listrik/
+       Bandwidth per site tidak kelewat dicatat. "Catat Sekarang" membuka modal Tambah Data Kas dengan
+       kategori & site sudah terisi otomatis (lihat script di bawah). -->
+  <% if(mandatoryChecklist && mandatoryChecklist.length){ %>
+  <div class="cash-mandatory-checklist">
+    <div class="cash-mandatory-head"><i class="bi bi-calendar2-check-fill"></i><div><strong>Checklist Pengeluaran Wajib Bulan Ini</strong><small><%= monthNames[filters.month-1] %> <%= filters.year %><%= filters.site?` · ${filters.site}`:'' %></small></div></div>
+    <div class="cash-mandatory-grid">
+      <% mandatoryChecklist.forEach(item=>{ %>
+      <div class="cash-mandatory-item <%= item.recorded?'done':'pending' %>">
+        <i class="bi <%= item.recorded?'bi-check-circle-fill':'bi-exclamation-circle-fill' %>"></i>
+        <div><b><%= item.category_name %></b><small><%= item.site_code %></small></div>
+        <% if(item.recorded){ %><span class="cash-mandatory-amount"><%= formatRupiah(item.total) %></span>
+        <% } else { %><button type="button" class="cash-mandatory-cta" data-bs-toggle="modal" data-bs-target="#cashModal" data-prefill-category="<%= item.category_id %>" data-prefill-site="<%= item.site_id %>">Catat Sekarang</button><% } %>
+      </div>
+      <% }) %>
+    </div>
+  </div>
+  <% } %>
+
   <div class="cash-chart-grid">
     <article class="data-card cash-chart-card"><div class="data-card-head"><div><h3>Komposisi Pengeluaran</h3><small>Distribusi biaya per kategori pada periode terpilih</small></div><i class="bi bi-pie-chart-fill"></i></div><div class="cash-chart-body"><canvas id="cashExpenseChart"></canvas><div class="cash-chart-empty" id="cashExpenseEmpty" hidden>Belum ada pengeluaran.</div></div></article>
     <article class="data-card cash-chart-card"><div class="data-card-head"><div><h3>Arus Kas Harian</h3><small>Pemasukan dibanding pengeluaran setiap hari</small></div><i class="bi bi-graph-up-arrow"></i></div><div class="cash-chart-body"><canvas id="cashDailyChart"></canvas></div></article>
@@ -94,6 +114,17 @@
     const category=addForm.querySelector('select[name="category_id"]'),proof=addForm.querySelector('[name="proof_file"]'),submit=addForm.querySelector('.modal-footer .btn-tech.primary');
     const syncType=()=>{const type=addForm.querySelector('input[name="entry_type"]:checked')?.value||'expense';[...category.options].forEach(option=>{const match=option.dataset.type===type;option.hidden=!match;option.disabled=!match});if(category.selectedOptions[0]?.disabled)category.value=[...category.options].find(option=>!option.disabled)?.value||'';proof.closest('.col-12')?.classList.toggle('d-none',type!=='expense');proof.disabled=type!=='expense';const isVendor=category.selectedOptions[0]?.dataset.vendor==='1'&&type==='expense';toggleFields(addForm,isVendor,'[data-vendor-field]','[data-purchase-field]');if(submit)submit.innerHTML=`<i class="bi bi-check2"></i>Simpan ${type==='expense'?'Pengeluaran':'Pemasukan'}`;};
     addForm.querySelectorAll('input[name="entry_type"]').forEach(input=>input.addEventListener('change',syncType));category.addEventListener('change',syncType);syncType();
+    // v1.24.8 — "Catat Sekarang" tombol dari Checklist Pengeluaran Wajib mengisi otomatis kategori + site
+    // supaya staf tidak perlu cari manual lagi dari dropdown kategori/site yang panjang.
+    const addModal=document.getElementById('cashModal');
+    addModal?.addEventListener('show.bs.modal',event=>{
+      const b=event.relatedTarget;const catId=b?.dataset.prefillCategory,siteId=b?.dataset.prefillSite;
+      if(!catId)return;
+      const option=[...category.options].find(o=>o.value===catId);if(!option)return;
+      const type=option.dataset.type||'expense';const radio=addForm.querySelector(`input[name="entry_type"][value="${type}"]`);if(radio)radio.checked=true;
+      syncType();category.value=catId;syncType();
+      const siteSelect=addForm.querySelector('select[name="site_id"]');if(siteSelect&&siteId)siteSelect.value=siteId;
+    });
   }
   const editForm=document.getElementById('cashEditForm'),editCategory=document.getElementById('cashEditCategory');
   const syncEditVendor=()=>toggleFields(editForm,editCategory?.selectedOptions[0]?.dataset.vendor==='1','[data-edit-vendor-field]','[data-edit-purchase-field]');
