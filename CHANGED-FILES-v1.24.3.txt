@@ -1,0 +1,84 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.3
+==========================================
+1. Perbaikan: Data Kas "belum bisa dihapus"
+2. Fitur baru: tombol Hapus di menu Cluster & ODP
+
+===========================================================
+BAGIAN 1 — DATA KAS "BELUM BISA DIHAPUS"
+===========================================================
+PENYEBAB SEBENARNYA
+----------------------
+Setelah ditelusuri lebih lanjut, tombol Hapus di Data Kas SUDAH tampil
+(sejak patch v1.24.1), tapi untuk transaksi yang statusnya sudah APPROVED
+(ini status NORMAL untuk transaksi yang sudah disetujui Master Admin —
+kemungkinan besar mayoritas transaksi Anda), sistem memang MEMBLOKIR tombol
+Hapus biasa itu — klik Hapus akan selalu gagal dengan pesan "sudah APPROVED
+dan menjadi bagian dari jurnal kas resmi". ​Ini aturan yang sengaja dibuat
+sejak v1.20 supaya Saldo Kas dan Laporan Keuangan tidak diam-diam berubah
+kalau ada yang menghapus transaksi yang sudah masuk pembukuan resmi.
+
+Masalahnya: tombol Hapus tadinya tetap MUNCUL untuk transaksi APPROVED,
+jadi kelihatan seperti "bisa dihapus" padahal ujung-ujungnya selalu gagal —
+sangat membingungkan. Untuk transaksi APPROVED, cara menghapusnya yang
+benar adalah pakai "Hapus Paksa" (Master Admin only), BUKAN "Hapus" biasa.
+
+PERBAIKAN
+-----------
+Sekarang kolom Aksi Data Kas jadi jelas sesuai status transaksi & role:
+- Transaksi BELUM di-approve (Pending/Rejected): tombol "Hapus" biasa
+  tetap tampil dan berfungsi seperti biasa, untuk siapapun Admin/Master
+  Admin.
+- Transaksi APPROVED + Anda login sebagai Master Admin: tombol berubah
+  jadi "Hapus Paksa" (yang memang satu-satunya cara sah menghapus
+  transaksi APPROVED).
+- Transaksi APPROVED + Anda login sebagai Admin biasa (bukan Master
+  Admin): tombol Hapus yang membingungkan tadi DIHILANGKAN, diganti
+  catatan jelas: "Transaksi ini sudah APPROVED dan menjadi jurnal kas
+  resmi. Hanya Master Admin yang dapat menghapusnya (Hapus Paksa)."
+
+KESIMPULAN PRAKTIS UNTUK ANDA
+-------------------------------
+Kalau transaksi kas yang mau dihapus statusnya APPROVED, login sebagai
+MASTER ADMIN lalu pakai tombol "Hapus Paksa" di menu Aksi baris tersebut
+(atau centang banyak baris lalu "Hapus Paksa Massal"). Tombol "Hapus"
+biasa memang tidak akan pernah berhasil untuk transaksi APPROVED, oleh
+siapapun — itu bukan bug, itu perlindungan supaya jurnal kas resmi tidak
+diam-diam berubah.
+
+===========================================================
+BAGIAN 2 — MENU CLUSTER & ODP: TOMBOL HAPUS (BARU)
+===========================================================
+Sebelumnya menu Cluster & ODP (/clusters) memang TIDAK punya tombol apapun
+di setiap baris — bukan cuma Hapus, bahkan tidak ada tombol Edit sama
+sekali (rute backend untuk hapus sebenarnya sudah ada dari versi lama,
+tapi tidak pernah ditampilkan tombolnya di halaman).
+
+Sekarang setiap baris cluster/ODP punya kolom Aksi (untuk Admin/Master
+Admin) dengan tombol Hapus:
+- Cluster/ODP yang MASIH ada pelanggan terpasang: tombol Hapus diganti
+  ikon gembok (tidak bisa dihapus dulu — sama seperti aturan Paket
+  Internet, supaya data pelanggan tidak jadi rusak/nyasar). Pindahkan
+  dulu pelanggannya ke cluster lain baru bisa dihapus.
+- Cluster/ODP yang sudah kosong (0 pelanggan): tombol Hapus aktif dan
+  langsung menghapus permanen (dengan konfirmasi).
+
+Catatan: sesuai keputusan desain yang sama dengan menu Paket/Site/Router,
+menu ini SENGAJA tidak diberi "Hapus Paksa" — cluster/ODP adalah data
+infrastruktur, bukan data finansial/pelanggan, jadi cukup satu jenis Hapus
+dengan proteksi "masih dipakai" saja.
+
+FILE YANG DIUBAH
+-------------------
+- views/finance/cash.ejs           (kejelasan tombol Hapus vs Hapus Paksa)
+- views/clusters/index.ejs         (tombol Hapus baru per cluster/ODP)
+- views/partials/layout.ejs        (versi -> v1.24.3)
+- package.json                     (versi -> 1.24.3)
+- scripts/validate-v119.js         (assertion versi -> 1.24.3)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan database).
+2. Timpa (overwrite) 5 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
