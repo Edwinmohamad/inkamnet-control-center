@@ -998,6 +998,10 @@ form[data-auto-filter].is-auto-submitting{opacity:.7;pointer-events:none}.cash-c
 .customer-view-tabs a .customer-view-tab-count{padding:2px 6px;border-radius:999px;background:rgba(var(--brand-rgb),.12);color:var(--accent-text);font-size:.5rem;font-weight:900}
 .customer-check-col{width:34px;text-align:center}
 .customer-archived-pill{margin-top:4px}
+.invoice-check-col{width:34px;text-align:center}
+.billing-due-range{display:flex;align-items:center;gap:6px}
+.billing-due-range input{min-width:0;flex:1}
+.billing-due-sep{color:var(--muted-2);font-size:.55rem;font-weight:700;white-space:nowrap}
 .customer-row-buttons{display:inline-flex;align-items:center;gap:5px}
 .customer-bulk-bar{position:sticky;bottom:14px;z-index:20;margin-top:14px;padding:11px 15px;border:1px solid rgba(var(--brand-rgb),.3);border-radius:14px;background:color-mix(in srgb,var(--panel) 92%,transparent);box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .customer-bulk-bar>span{color:var(--muted);font-size:.55rem}

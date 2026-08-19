@@ -1,0 +1,176 @@
+INKAMNET CONTROL CENTER — PATCH v1.25.4
+==========================================
+Patch ini menjawab 6 revisi susulan khusus untuk Menu Tagihan (Daftar
+Tagihan), sesuai laporan:
+1. Desain checkbox disamakan persis dengan checkbox milik Menu Pelanggan.
+2. Nomor faktur di bawah nama pelanggan dihapus, kolom Pelanggan hanya
+   menampilkan nama (+ kode pelanggan).
+3. Kolom Status disederhanakan menjadi satu badge saja per baris.
+4. Filter Jatuh Tempo yang tadinya dua kotak terpisah digabung jadi satu
+   filter.
+5. Filter Status ditambah opsi "Menunggu Approval", dan tagihan yang
+   menunggu approval TIDAK LAGI ikut ketika filter Belum Lunas/Sebagian/
+   Terlambat dipakai.
+6. Fitur Export XLSX ditambahkan untuk Daftar Tagihan.
+
+===========================================================
+1) DESAIN CHECKBOX DISAMAKAN DENGAN MENU PELANGGAN
+===========================================================
+Checkbox "pilih semua" (header) dan checkbox per baris di Daftar Tagihan
+sekarang memakai class="form-check-input" — persis pola yang sudah dipakai
+di Menu Pelanggan — dan dibungkus kolom berlebar tetap (34px, rata tengah)
+yang sama seperti kolom checkbox Pelanggan. Sebelumnya kedua checkbox ini
+hanya mengandalkan styling global (accent-color) tanpa class/kolom yang
+sama persis dengan Pelanggan; sekarang benar-benar identik.
+(views/invoices/index.ejs, public/css/app.css)
+
+===========================================================
+2) NOMOR FAKTUR DI BAWAH NAMA PELANGGAN DIHAPUS
+===========================================================
+Kolom Pelanggan sekarang hanya menampilkan nama pelanggan dan kode
+pelanggan (serta status "Diarsipkan" bila relevan) — tautan nomor faktur
+kecil yang sebelumnya tampil di bawah nama sudah dihapus. Tautan ke PDF
+faktur TIDAK hilang: tetap bisa diakses dari menu Tindakan (ikon titik
+tiga) tiap baris, lewat "Lihat Faktur PDF" dan "Unduh PDF" yang memang
+sudah ada di sana sebelumnya.
+(views/invoices/index.ejs)
+
+===========================================================
+3) KOLOM STATUS DISEDERHANAKAN (SATU BADGE SAJA)
+===========================================================
+Sebelumnya satu baris tagihan yang menunggu approval pembayaran bisa
+menampilkan DUA badge bertumpuk (status utama + "menunggu approval"
+terpisah di bawahnya). Sekarang hanya ADA SATU badge per baris: jika
+tagihan sedang menunggu approval pembayaran, badge oranye "Menunggu
+Approval" tampil sendirian (menggantikan badge status biasa); jika tidak,
+badge status seperti biasa (LUNAS/TERLAMBAT/SEBAGIAN/BELUM LUNAS/
+DIBATALKAN) tetap tampil seperti sebelumnya.
+(views/invoices/index.ejs)
+
+===========================================================
+4) FILTER JATUH TEMPO DIGABUNG JADI SATU FILTER
+===========================================================
+Filter "Jatuh Tempo Dari" dan "Jatuh Tempo Sampai" yang sebelumnya adalah
+dua kotak filter terpisah kini digabung menjadi SATU kelompok filter
+berlabel "Jatuh Tempo" berisi dua kotak tanggal bersebelahan (dipisah
+"s/d"). Kemampuan filter rentang tanggal (dari — sampai) TIDAK dikurangi;
+hanya tampilannya yang dirapikan menjadi satu unit filter, bukan dua.
+(views/invoices/index.ejs, public/css/app.css)
+
+===========================================================
+5) FILTER STATUS: TAMBAH "MENUNGGU APPROVAL" + PEMISAHAN DARI
+   BELUM LUNAS/SEBAGIAN/TERLAMBAT
+===========================================================
+Filter Status di Daftar Tagihan sekarang punya opsi baru "Menunggu
+Approval", yang HANYA menampilkan tagihan yang punya pembayaran berstatus
+menunggu approval. Sebagai pasangannya, memilih filter "Belum Lunas
+(Semua)", "Belum Lunas", "Sebagian", atau "Terlambat" SEKARANG TIDAK LAGI
+ikut menampilkan tagihan yang sedang menunggu approval — supaya kedua
+kondisi ini benar-benar terpisah dan tidak membingungkan (sebelumnya,
+tagihan menunggu approval tetap muncul tercampur di filter Belum Lunas,
+hanya dibedakan lewat badge kecil). Filter Lunas/Dibatalkan/Refund tidak
+diubah sama sekali karena approval pembayaran tidak relevan untuk status
+tersebut.
+(routes/invoices.js)
+
+===========================================================
+6) FITUR EXPORT XLSX UNTUK DAFTAR TAGIHAN
+===========================================================
+Tombol baru "Export XLSX" ditambahkan di halaman Daftar Tagihan (di
+sebelah tombol Faktur & Pembayaran). Export ini mengikuti filter yang
+sedang aktif di layar (bulan/tahun, status, site, cluster, pencarian,
+rentang jatuh tempo) — persis data yang sedang ditampilkan, tidak lebih
+tidak kurang — sehingga admin bisa dengan mudah mencatat/menginput data
+tagihan yang sudah masuk tanpa menyalin manual satu per satu dari layar.
+Kolom yang diexport: No. Faktur, Kode Pelanggan, Nama Pelanggan, Site,
+Cluster, Periode, Status (termasuk "MENUNGGU APPROVAL" bila relevan),
+Paket, Tagihan, Terbayar, Sisa Tagihan, Tanggal Faktur, dan Jatuh Tempo.
+File Excel yang dihasilkan sudah memakai header berwarna, baris header
+"dibekukan" (freeze pane), dan filter otomatis (AutoFilter) — konsisten
+dengan pola export yang sudah dipakai di Menu Pelanggan dan Menu Cluster.
+(routes/invoices.js, views/invoices/index.ejs)
+
+===========================================================
+FILE YANG DIUBAH (6 file)
+===========================================================
+- views/invoices/index.ejs
+- public/css/app.css
+- routes/invoices.js
+- package.json (versi -> 1.25.4)
+- views/partials/layout.ejs (versi -> v1.25.4)
+- scripts/validate-v119.js (assertion versi -> 1.25.4)
+
+===========================================================
+PENGUJIAN YANG SUDAH DILAKUKAN
+===========================================================
+- node --check pada seluruh file route/service aplikasi (npm run check):
+  OK, tidak ada error sintaks.
+- Seluruh 39 file EJS aplikasi dikompilasi ulang: semua lulus tanpa error.
+- npm run validate:v119 (validasi statis + kontrak versi/fitur + tes proxy
+  infrastruktur + tes approval kas + tes CSS responsif): SEMUA LULUS.
+- Render test (server Express sungguhan + fetch HTTP, dengan 3 baris data
+  tiruan — termasuk satu baris menunggu approval dan satu pelanggan
+  diarsipkan) untuk views/invoices/index.ejs, memverifikasi secara
+  terprogram (14 pemeriksaan, semua PASS):
+  a) Checkbox header & baris memakai class="form-check-input" dan kolom
+     invoice-check-col, sama seperti Menu Pelanggan (poin 1)
+  b) Tautan nomor faktur di kolom Pelanggan sudah tidak ada lagi, nama &
+     kode pelanggan tetap tampil, dan "Lihat Faktur PDF" tetap tersedia
+     lewat menu Tindakan (poin 2)
+  c) Tidak ada lagi badge status ganda; baris menunggu approval hanya
+     menampilkan badge "Menunggu Approval", baris biasa hanya menampilkan
+     satu badge status (poin 3)
+  d) Filter Jatuh Tempo hanya satu filter-group ("billing-filter-due"),
+     label lama yang terpisah sudah tidak ada, dan kedua input dari/sampai
+     tetap berfungsi dalam satu grup (poin 4)
+  e) Opsi "Menunggu Approval" (value="pending_approval") ada di dropdown
+     filter Status (poin 5)
+  f) Tombol "Export XLSX" ada dan mengarah ke /invoices/export.xlsx
+     dengan query filter yang sedang aktif (poin 6)
+- Unit test khusus (tanpa database sungguhan, memakai koneksi database
+  tiruan) untuk fungsi pembangun query/filter bersama di
+  routes/invoices.js, mencakup SEMUA kombinasi filter status (Belum Lunas
+  Semua, Belum Lunas, Sebagian, Terlambat, Menunggu Approval, Lunas,
+  Dibatalkan, kosong/Semua Status) — 21 pemeriksaan, semua PASS. Memastikan
+  secara konkret bahwa: filter Belum Lunas/Sebagian/Terlambat/Belum Lunas
+  Semua selalu menyertakan klausa SQL "NOT EXISTS (...pembayaran
+  pending...)", filter Menunggu Approval selalu menyertakan klausa SQL
+  "EXISTS (...pembayaran pending...)" TANPA "NOT", dan filter Lunas/
+  Dibatalkan/kosong sama sekali tidak menyentuh klausa tersebut (poin 5).
+- Tes fungsional rute /invoices/export.xlsx (server Express sungguhan +
+  fetch HTTP + database tiruan berisi 1 tagihan biasa & 1 tagihan menunggu
+  approval): file .xlsx yang dihasilkan dibuka ulang dan diverifikasi
+  baris-per-baris — kolom Status baris menunggu approval otomatis berisi
+  "MENUNGGU APPROVAL", baris biasa tetap menampilkan status aslinya (poin
+  6, konsisten dengan poin 3 & 5).
+- Ditinjau manual: CSS .invoice-number-link.standalone yang sebelumnya
+  dipakai juga oleh Menu Pembayaran (views/payments/index.ejs) TIDAK
+  dihapus dari app.css, hanya penggunaannya di Daftar Tagihan yang
+  dilepas — dipastikan Menu Pembayaran tidak terpengaruh.
+
+===========================================================
+CARA PASANG
+===========================================================
+1. Backup folder aplikasi terlebih dahulu. TIDAK ADA migrasi database pada
+   patch ini (kolom pending_payment_count dihitung on-the-fly lewat
+   subquery, bukan kolom baru di tabel).
+2. Timpa (overwrite) 6 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install" (memakai dependency exceljs yang sudah
+   terpasang sejak sebelumnya).
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R) agar CSS/JS terbaru termuat.
+6. Cek cepat di Menu Tagihan:
+   a. Checkbox header & per-baris tampil identik dengan checkbox di Menu
+      Pelanggan.
+   b. Kolom Pelanggan hanya menampilkan nama + kode pelanggan, tanpa
+      nomor faktur di bawahnya. Nomor faktur & PDF tetap bisa diakses
+      lewat menu Tindakan (ikon titik tiga) tiap baris.
+   c. Kolom Status hanya menampilkan satu badge per baris.
+   d. Filter Jatuh Tempo sekarang satu kotak filter berisi dua tanggal
+      (dari — sampai).
+   e. Filter Status punya opsi baru "Menunggu Approval"; coba pilih
+      "Belum Lunas" dan pastikan tagihan yang sedang menunggu approval
+      TIDAK ikut muncul (harus dicari lewat filter "Menunggu Approval"
+      secara terpisah).
+   f. Klik tombol "Export XLSX" di kanan atas — pastikan file Excel
+      terunduh berisi data yang sesuai dengan filter yang sedang aktif.

@@ -1,6 +1,7 @@
 const express=require('express');
 const fs=require('fs');
 const path=require('path');
+const ExcelJS=require('exceljs');
 const db=require('../config/db');
 const { generateMonthlyInvoices, applyInvoiceDiscount }=require('../services/invoiceService');
 const { requireAdmin, requireMasterAdmin, isMasterAdminRole }=require('../middleware/auth');
@@ -30,6 +31,75 @@ function periodQuery(filters){
   if(filters.dueTo) p.set('due_to',filters.dueTo);
   return p.toString();
 }
+const STATUS_LABELS={paid:'LUNAS',overdue:'TERLAMBAT',partial:'SEBAGIAN',cancelled:'DIBATALKAN',refunded:'REFUND',unpaid:'BELUM LUNAS'};
+
+// v1.25.4 — filter/query builder dipakai bersama oleh daftar tagihan (GET '/') dan export
+// (GET '/export.xlsx') supaya keduanya TIDAK PERNAH berbeda hasil (baris yang tampil di layar harus
+// selalu identik dengan baris yang diexport untuk kombinasi filter yang sama).
+//
+// "Menunggu Approval" (ada pembayaran berstatus 'pending' untuk tagihan tsb.) sekarang dipisah dari
+// filter status biasa: memilih status "pending_approval" HANYA menampilkan tagihan yang menunggu
+// approval, sedangkan memilih "open"/"unpaid"/"partial"/"overdue" TIDAK LAGI ikut menampilkan tagihan
+// yang menunggu approval (supaya user tidak salah kira tagihan itu "belum dibayar sama sekali").
+// Status paid/cancelled/refunded tidak diubah — approval pembayaran tidak relevan untuk status itu.
+async function queryInvoiceList(req){
+  const now=new Date();
+  const month=intInRange(req.query.month,1,12,now.getMonth()+1);
+  const year=intInRange(req.query.year,2020,2100,now.getFullYear());
+  const status=['open','unpaid','partial','paid','overdue','cancelled','refunded','pending_approval'].includes(req.query.status)?req.query.status:'';
+  const site=String(req.query.site||'').trim();
+  const cluster=String(req.query.cluster||'').trim();
+  const customer=String(req.query.customer||'').trim();
+  const q=String(req.query.q||'').trim();
+  const dueFrom=isoDate(req.query.due_from);
+  const dueTo=isoDate(req.query.due_to);
+
+  const commonWhere=['i.period_year=?','i.period_month=?'];
+  const commonParams=[year,month];
+  if(site){commonWhere.push('s.code=?');commonParams.push(site);}
+  if(cluster){commonWhere.push('c.cluster_id=?');commonParams.push(Number(cluster));}
+  if(customer){commonWhere.push('c.id=?');commonParams.push(Number(customer));}
+
+  const listWhere=[...commonWhere];
+  const listParams=[...commonParams];
+  const pendingClause="EXISTS (SELECT 1 FROM payments pd WHERE pd.invoice_id=i.id AND pd.status='pending')";
+  if(status==='pending_approval'){
+    listWhere.push(pendingClause);
+  }else if(status==='open'){
+    listWhere.push("i.status IN ('unpaid','partial','overdue')");
+    listWhere.push(`NOT ${pendingClause}`);
+  }else if(status==='unpaid'||status==='partial'||status==='overdue'){
+    listWhere.push('i.status=?');listParams.push(status);
+    listWhere.push(`NOT ${pendingClause}`);
+  }else if(status){
+    listWhere.push('i.status=?');listParams.push(status);
+  }
+  if(q){listWhere.push('(c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');const like=`%${q}%`;listParams.push(like,like,like,like,like);}
+  if(dueFrom){listWhere.push('i.due_date>=?');listParams.push(dueFrom);}
+  if(dueTo){listWhere.push('i.due_date<=?');listParams.push(dueTo);}
+
+  // v1.20.2: c.archived_at exposed so the view can flag "Pelanggan diarsipkan" next to the invoice —
+  // by design invoices from an archived (soft-deleted) customer stay visible here forever (financial
+  // history is never removed by archiving), but that was confusing without any on-screen indicator.
+  const [invoices]=await db.execute(`SELECT i.*,DATE_FORMAT(i.invoice_date,'%Y-%m-%d') invoice_date_key,DATE_FORMAT(i.due_date,'%Y-%m-%d') due_date_key,GREATEST(DATEDIFF(CURDATE(),i.due_date),0) days_overdue,c.customer_code,c.name customer_name,c.phone,c.whatsapp_status,c.due_day,c.archived_at customer_archived_at,p.name package_name,s.code site_code,cl.name cluster_name,
+      (SELECT COUNT(*) FROM payments px WHERE px.invoice_id=i.id) payment_count,
+      (SELECT COUNT(*) FROM payments pa WHERE pa.invoice_id=i.id AND pa.status IN ('confirmed','pending')) active_payment_count,
+      (SELECT COUNT(*) FROM payments pd WHERE pd.invoice_id=i.id AND pd.status='pending') pending_payment_count
+    FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN packages p ON p.id=c.package_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
+    WHERE ${listWhere.join(' AND ')} ORDER BY i.due_date ASC,c.name ASC`,listParams);
+
+  const filters={month,year,status,site,cluster,customer,q,dueFrom,dueTo};
+  return {invoices,filters,commonWhere,commonParams};
+}
+
+function styleInvoiceWorkbook(ws){
+  ws.views=[{state:'frozen',ySplit:1}];
+  ws.autoFilter={from:'A1',to:ws.getRow(1).getCell(ws.columnCount).address};
+  const headerRow=ws.getRow(1);headerRow.height=25;
+  headerRow.eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF6030E0'}};cell.alignment={vertical:'middle'};cell.border={bottom:{style:'thin',color:{argb:'FFF04030'}}};});
+  ws.eachRow((r,n)=>{if(n>1)r.alignment={vertical:'middle'};});
+}
+
 async function loadInvoiceBranding(){
   const [[s]]=await db.query(`SELECT company_name,company_address,company_phone,company_email,company_website,company_tagline,invoice_company_name,invoice_address,invoice_phone,invoice_email,invoice_website,invoice_tax_id,invoice_footer,invoice_logo_path FROM settings WHERE id=1`);
   const configuredCompany=String(s?.invoice_company_name||s?.company_name||'PT INKAMNET NEXERA TECHNOLOGY').trim();
@@ -45,42 +115,8 @@ async function loadInvoiceBranding(){
 
 router.get('/',async(req,res)=>{
   await db.query(`UPDATE invoices SET status='overdue' WHERE status IN ('unpaid','partial') AND due_date < CURDATE()`);
-  const now=new Date();
-  const month=intInRange(req.query.month,1,12,now.getMonth()+1);
-  const year=intInRange(req.query.year,2020,2100,now.getFullYear());
-  const status=['open','unpaid','partial','paid','overdue','cancelled','refunded'].includes(req.query.status)?req.query.status:'';
-  const site=String(req.query.site||'').trim();
-  const cluster=String(req.query.cluster||'').trim();
-  const customer=String(req.query.customer||'').trim();
-  const q=String(req.query.q||'').trim();
-  // v1.25.2 — filter tanggal jatuh tempo (due_date), independen dari filter Bulan/Tahun periode
-  // penerbitan tagihan di atas. Opsional: kalau dikosongkan, tidak membatasi apa pun (perilaku sama
-  // seperti sebelum filter ini ada).
-  const dueFrom=isoDate(req.query.due_from);
-  const dueTo=isoDate(req.query.due_to);
-
-  const commonWhere=['i.period_year=?','i.period_month=?'];
-  const commonParams=[year,month];
-  if(site){commonWhere.push('s.code=?');commonParams.push(site);}
-  if(cluster){commonWhere.push('c.cluster_id=?');commonParams.push(Number(cluster));}
-  if(customer){commonWhere.push('c.id=?');commonParams.push(Number(customer));}
-
-  const listWhere=[...commonWhere];
-  const listParams=[...commonParams];
-  if(status==='open') listWhere.push("i.status IN ('unpaid','partial','overdue')");
-  else if(status){listWhere.push('i.status=?');listParams.push(status);}
-  if(q){listWhere.push('(c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');const like=`%${q}%`;listParams.push(like,like,like,like,like);}
-  if(dueFrom){listWhere.push('i.due_date>=?');listParams.push(dueFrom);}
-  if(dueTo){listWhere.push('i.due_date<=?');listParams.push(dueTo);}
-
-  // v1.20.2: c.archived_at exposed so the view can flag "Pelanggan diarsipkan" next to the invoice —
-  // by design invoices from an archived (soft-deleted) customer stay visible here forever (financial
-  // history is never removed by archiving), but that was confusing without any on-screen indicator.
-  const [invoices]=await db.execute(`SELECT i.*,DATE_FORMAT(i.invoice_date,'%Y-%m-%d') invoice_date_key,DATE_FORMAT(i.due_date,'%Y-%m-%d') due_date_key,GREATEST(DATEDIFF(CURDATE(),i.due_date),0) days_overdue,c.customer_code,c.name customer_name,c.phone,c.whatsapp_status,c.due_day,c.archived_at customer_archived_at,p.name package_name,s.code site_code,cl.name cluster_name,
-      (SELECT COUNT(*) FROM payments px WHERE px.invoice_id=i.id) payment_count,
-      (SELECT COUNT(*) FROM payments pa WHERE pa.invoice_id=i.id AND pa.status IN ('confirmed','pending')) active_payment_count
-    FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN packages p ON p.id=c.package_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
-    WHERE ${listWhere.join(' AND ')} ORDER BY i.due_date ASC,c.name ASC`,listParams);
+  const {invoices,filters,commonWhere,commonParams}=await queryInvoiceList(req);
+  const {month,year,site,cluster,customer,dueFrom,dueTo}=filters;
 
   const [[invoiceSummary]]=await db.execute(`SELECT
       COUNT(*) total_invoices,
@@ -118,8 +154,48 @@ router.get('/',async(req,res)=>{
     WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND NOT EXISTS (SELECT 1 FROM payments pp WHERE pp.invoice_id=i.id AND pp.status='pending') ORDER BY s.code,cl.name,c.name,i.due_date`);
   const [staff]=await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);
   const [banks]=await db.query(`SELECT id,bank_name,account_name,account_number,type FROM banks WHERE is_active=1 AND type IN ('bank_transfer','virtual_account','other') ORDER BY bank_name,account_number`);
-  const filters={month,year,status,site,cluster,customer,q,dueFrom,dueTo};
   res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,clusters,openInvoices,staff,banks,filters,monthNames:MONTH_NAMES,periodQueryString:periodQuery(filters)});
+});
+
+// v1.25.4 — export Daftar Tagihan (sesuai filter yang sedang aktif) ke Excel, supaya admin bisa
+// gampang mencatat/menginput data tagihan yang sudah masuk tanpa harus menyalin manual dari layar.
+router.get('/export.xlsx',requireAdmin,async(req,res)=>{
+  const {invoices,filters}=await queryInvoiceList(req);
+  const wb=new ExcelJS.Workbook();
+  wb.creator='INKAMNET Control Center';
+  const ws=wb.addWorksheet('TAGIHAN');
+  ws.columns=[
+    ['No. Faktur',20],['Kode Pelanggan',16],['Nama Pelanggan',26],['Site',10],['Cluster',18],
+    ['Periode',16],['Status',18],['Paket',20],['Tagihan',16],['Terbayar',16],['Sisa Tagihan',16],
+    ['Tanggal Faktur',14],['Jatuh Tempo',14]
+  ].map(([header,width])=>({header,key:header,width}));
+  invoices.forEach(i=>{
+    const hasPending=Number(i.pending_payment_count||0)>0;
+    const statusLabel=hasPending?'MENUNGGU APPROVAL':(STATUS_LABELS[i.status]||String(i.status||'').toUpperCase());
+    ws.addRow({
+      'No. Faktur':i.invoice_number,
+      'Kode Pelanggan':i.customer_code,
+      'Nama Pelanggan':i.customer_name,
+      'Site':i.site_code,
+      'Cluster':i.cluster_name||'-',
+      'Periode':`${MONTH_NAMES[i.period_month-1]} ${i.period_year}`,
+      'Status':statusLabel,
+      'Paket':i.package_name,
+      'Tagihan':Number(i.total),
+      'Terbayar':Number(i.paid_amount),
+      'Sisa Tagihan':Number(i.outstanding),
+      'Tanggal Faktur':i.invoice_date_key,
+      'Jatuh Tempo':i.due_date_key
+    });
+  });
+  styleInvoiceWorkbook(ws);
+  ['Tagihan','Terbayar','Sisa Tagihan'].forEach(key=>{ws.getColumn(key).numFmt='#,##0';});
+  ['Tanggal Faktur','Jatuh Tempo'].forEach(key=>{ws.getColumn(key).numFmt='yyyy-mm-dd';});
+  const filename=`tagihan-INKAMNET-${filters.year}-${String(filters.month).padStart(2,'0')}${filters.site?'-'+filters.site:''}-${new Date().toISOString().slice(0,10)}.xlsx`;
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);
+  await wb.xlsx.write(res);
+  res.end();
 });
 
 router.post('/generate',async(req,res)=>{
