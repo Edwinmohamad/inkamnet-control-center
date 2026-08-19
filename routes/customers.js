@@ -15,6 +15,18 @@ async function options() {
   return { sites, packages, routers, clusters, sales };
 }
 
+// v1.25 audit: mirrors the same 1-28 / 0-30 range validation already enforced on the Excel-import path
+// (see importCustomersFromExcel below) so a direct POST to Create/Edit can't slip in an out-of-range
+// due_day/grace_days that would push the isolir cutoff (networkService.js) before the due date itself.
+function validDueGrace(body) {
+  const dueRaw=body.due_day, graceRaw=body.grace_days;
+  const due=(dueRaw===undefined||dueRaw===null||dueRaw==='')?null:Number(dueRaw);
+  const grace=(graceRaw===undefined||graceRaw===null||graceRaw==='')?null:Number(graceRaw);
+  if(due!==null&&(!Number.isInteger(due)||due<1||due>28))return 'Jatuh tempo (due day) harus berupa angka 1-28.';
+  if(grace!==null&&(!Number.isInteger(grace)||grace<0||grace>30))return 'Grace period harus berupa angka 0-30.';
+  return null;
+}
+
 function customerFilter(req) {
   return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', sales:req.query.sales||'', status:req.query.status||'', network:req.query.network||'' };
 }
@@ -392,6 +404,8 @@ router.post('/', async (req, res) => {
   if(!packageRows.length || (packageRows[0].site_id!==null && Number(packageRows[0].site_id)!==siteId)){
     req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect('/customers/new');
   }
+  const dueGraceError=validDueGrace(b);
+  if(dueGraceError){req.session.flash={type:'danger',message:dueGraceError};return res.redirect('/customers/new');}
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
   const wa=validateWhatsapp(b.phone);
   const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,NOW(),?,?,?,?,NULL,?,?,NULL,?,?,?,?,?,'offline',NOW(),?,?)`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid',b.prorata_enabled?1:0,b.notes||null]);
@@ -501,6 +515,8 @@ router.post('/:id',async(req,res)=>{
   if(!packageRows.length || (packageRows[0].site_id!==null && Number(packageRows[0].site_id)!==siteId)){
     req.session.flash={type:'danger',message:'Paket internet tidak sesuai dengan Site pelanggan. Pilih paket untuk Site yang benar.'};return res.redirect(`/customers/${req.params.id}/edit`);
   }
+  const dueGraceError=validDueGrace(b);
+  if(dueGraceError){req.session.flash={type:'danger',message:dueGraceError};return res.redirect(`/customers/${req.params.id}/edit`);}
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
   const wa=validateWhatsapp(b.phone);
   await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,cluster_id=?,package_id=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);

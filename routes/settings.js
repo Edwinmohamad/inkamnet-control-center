@@ -43,12 +43,12 @@ router.get('/',async(req,res)=>{
   res.render('settings/index',{title:'Pengaturan',settings,sites,users,departments,positions,employees,banks,gateways,roles,tab,permissionCatalog:PERMISSIONS.map(key=>({key,label:permissionLabels[key]||key}))});
 });
 
-router.post('/',async(req,res)=>{
+router.post('/',requireMasterAdmin,async(req,res)=>{
   const b=req.body;
   await db.execute(`UPDATE settings SET company_name=?,company_address=?,company_phone=?,company_email=?,company_website=?,company_tagline=? WHERE id=1`,[b.company_name,b.company_address||null,b.company_phone||null,b.company_email||null,b.company_website||null,b.company_tagline||'From the Village, Online Everywhere']);
   req.session.flash={type:'success',message:'Data perusahaan disimpan.'};res.redirect('/settings?tab=company');
 });
-router.post('/invoice-branding',async(req,res)=>{
+router.post('/invoice-branding',requireMasterAdmin,async(req,res)=>{
   const b=req.body;
   const companyName=clean(b.invoice_company_name);
   if(!companyName){req.session.flash={type:'danger',message:'Nama PT / perusahaan wajib diisi.'};return res.redirect('/settings?tab=invoice');}
@@ -71,7 +71,7 @@ router.post('/invoice-branding',async(req,res)=>{
   req.session.flash={type:'success',message:'Identitas invoice berhasil disimpan dan langsung dipakai pada invoice cetak/PDF.'};
   res.redirect('/settings?tab=invoice');
 });
-router.post('/application',async(req,res)=>{
+router.post('/application',requireMasterAdmin,async(req,res)=>{
   const theme=['dark','light','system'].includes(req.body.default_theme)?req.body.default_theme:'dark';
   const palette=uiPalettes.has(req.body.ui_palette)?req.body.ui_palette:'nebula';
   await db.execute(`UPDATE settings SET default_due_day=?,default_grace_days=?,invoice_generate_days=?,auto_isolate=?,default_theme=?,ui_palette=?,default_language=? WHERE id=1`,[req.body.default_due_day,req.body.default_grace_days,req.body.invoice_generate_days,req.body.auto_isolate?1:0,theme,palette,req.body.default_language==='en'?'en':'id']);
@@ -79,28 +79,32 @@ router.post('/application',async(req,res)=>{
   req.session.uiTheme=theme;req.session.uiPalette=palette;
   req.session.flash={type:'success',message:'Preferensi aplikasi disimpan.'};res.redirect('/settings?tab=application');
 });
-router.post('/sites/:id',async(req,res)=>{const b=req.body;await db.execute(`UPDATE sites SET name=?,default_due_day=?,default_grace_days=?,invoice_generate_days=? WHERE id=?`,[b.name,b.default_due_day||null,b.default_grace_days||null,b.invoice_generate_days||null,req.params.id]);req.session.flash={type:'success',message:'Default site diperbarui.'};res.redirect('/settings?tab=application');});
+router.post('/sites/:id',requireMasterAdmin,async(req,res)=>{const b=req.body;await db.execute(`UPDATE sites SET name=?,default_due_day=?,default_grace_days=?,invoice_generate_days=? WHERE id=?`,[b.name,b.default_due_day||null,b.default_grace_days||null,b.invoice_generate_days||null,req.params.id]);req.session.flash={type:'success',message:'Default site diperbarui.'};res.redirect('/settings?tab=application');});
 
-router.post('/employees',async(req,res)=>{
+router.post('/employees',requireMasterAdmin,async(req,res)=>{
   const b=req.body;let code=clean(b.employee_code).toUpperCase();
   if(!code){const [[r]]=await db.query(`SELECT COALESCE(MAX(id),0)+1 seq FROM employees`);code=`EMP-${String(r.seq).padStart(4,'0')}`;}
   await db.execute(`INSERT INTO employees(employee_code,name,email,phone,department_id,position_id,user_id,joined_at,is_active,notes) VALUES(?,?,?,?,?,?,?,?,1,?)`,[code,clean(b.name),nullable(b.email),nullable(b.phone),b.department_id||null,b.position_id||null,b.user_id||null,b.joined_at||null,nullable(b.notes)]);
   req.session.flash={type:'success',message:`Karyawan ${b.name} ditambahkan.`};res.redirect('/settings?tab=employees');
 });
-router.post('/employees/:id',async(req,res)=>{const b=req.body;await db.execute(`UPDATE employees SET employee_code=?,name=?,email=?,phone=?,department_id=?,position_id=?,user_id=?,joined_at=?,notes=? WHERE id=?`,[clean(b.employee_code).toUpperCase(),clean(b.name),nullable(b.email),nullable(b.phone),b.department_id||null,b.position_id||null,b.user_id||null,b.joined_at||null,nullable(b.notes),req.params.id]);req.session.flash={type:'success',message:'Data karyawan diperbarui.'};res.redirect('/settings?tab=employees');});
-router.post('/employees/:id/toggle',async(req,res)=>{await db.execute(`UPDATE employees SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=employees');});
+router.post('/employees/:id',requireMasterAdmin,async(req,res)=>{const b=req.body;await db.execute(`UPDATE employees SET employee_code=?,name=?,email=?,phone=?,department_id=?,position_id=?,user_id=?,joined_at=?,notes=? WHERE id=?`,[clean(b.employee_code).toUpperCase(),clean(b.name),nullable(b.email),nullable(b.phone),b.department_id||null,b.position_id||null,b.user_id||null,b.joined_at||null,nullable(b.notes),req.params.id]);req.session.flash={type:'success',message:'Data karyawan diperbarui.'};res.redirect('/settings?tab=employees');});
+router.post('/employees/:id/toggle',requireMasterAdmin,async(req,res)=>{await db.execute(`UPDATE employees SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=employees');});
 
-router.post('/departments',async(req,res)=>{await db.execute(`INSERT INTO departments(code,name,description,is_active) VALUES(?,?,?,1)`,[clean(req.body.code).toUpperCase(),clean(req.body.name),nullable(req.body.description)]);req.session.flash={type:'success',message:'Departemen ditambahkan.'};res.redirect('/settings?tab=departments');});
-router.post('/departments/:id/toggle',async(req,res)=>{await db.execute(`UPDATE departments SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=departments');});
+router.post('/departments',requireMasterAdmin,async(req,res)=>{await db.execute(`INSERT INTO departments(code,name,description,is_active) VALUES(?,?,?,1)`,[clean(req.body.code).toUpperCase(),clean(req.body.name),nullable(req.body.description)]);req.session.flash={type:'success',message:'Departemen ditambahkan.'};res.redirect('/settings?tab=departments');});
+router.post('/departments/:id',requireMasterAdmin,async(req,res)=>{const b=req.body;const code=clean(b.code).toUpperCase(),name=clean(b.name);if(!code||!name){req.session.flash={type:'danger',message:'Kode dan nama departemen wajib diisi.'};return res.redirect('/settings?tab=departments');}await db.execute(`UPDATE departments SET code=?,name=?,description=? WHERE id=?`,[code,name,nullable(b.description),req.params.id]);req.session.flash={type:'success',message:'Departemen diperbarui.'};res.redirect('/settings?tab=departments');});
+router.post('/departments/:id/toggle',requireMasterAdmin,async(req,res)=>{await db.execute(`UPDATE departments SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=departments');});
 
-router.post('/positions',async(req,res)=>{const allowed=new Set(['sales','technical','admin','management','finance','other']);const category=allowed.has(req.body.category)?req.body.category:'other';await db.execute(`INSERT INTO positions(department_id,code,name,category,description,is_active) VALUES(?,?,?,?,?,1)`,[req.body.department_id||null,clean(req.body.code).toUpperCase(),clean(req.body.name),category,nullable(req.body.description)]);req.session.flash={type:'success',message:'Posisi ditambahkan.'};res.redirect('/settings?tab=positions');});
-router.post('/positions/:id/toggle',async(req,res)=>{await db.execute(`UPDATE positions SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=positions');});
+router.post('/positions',requireMasterAdmin,async(req,res)=>{const allowed=new Set(['sales','technical','admin','management','finance','other']);const category=allowed.has(req.body.category)?req.body.category:'other';await db.execute(`INSERT INTO positions(department_id,code,name,category,description,is_active) VALUES(?,?,?,?,?,1)`,[req.body.department_id||null,clean(req.body.code).toUpperCase(),clean(req.body.name),category,nullable(req.body.description)]);req.session.flash={type:'success',message:'Posisi ditambahkan.'};res.redirect('/settings?tab=positions');});
+router.post('/positions/:id',requireMasterAdmin,async(req,res)=>{const b=req.body;const allowed=new Set(['sales','technical','admin','management','finance','other']);const category=allowed.has(b.category)?b.category:'other';const code=clean(b.code).toUpperCase(),name=clean(b.name);if(!code||!name){req.session.flash={type:'danger',message:'Kode dan nama posisi wajib diisi.'};return res.redirect('/settings?tab=positions');}await db.execute(`UPDATE positions SET department_id=?,code=?,name=?,category=?,description=? WHERE id=?`,[b.department_id||null,code,name,category,nullable(b.description),req.params.id]);req.session.flash={type:'success',message:'Posisi diperbarui.'};res.redirect('/settings?tab=positions');});
+router.post('/positions/:id/toggle',requireMasterAdmin,async(req,res)=>{await db.execute(`UPDATE positions SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=positions');});
 
-router.post('/banks',async(req,res)=>{const allowed=new Set(['bank_transfer','cash','virtual_account','other']);await db.execute(`INSERT INTO banks(bank_name,account_name,account_number,type,is_active,notes) VALUES(?,?,?,?,1,?)`,[clean(req.body.bank_name),clean(req.body.account_name),clean(req.body.account_number),allowed.has(req.body.type)?req.body.type:'bank_transfer',nullable(req.body.notes)]);req.session.flash={type:'success',message:'Rekening bank ditambahkan.'};res.redirect('/settings?tab=banks');});
-router.post('/banks/:id/toggle',async(req,res)=>{await db.execute(`UPDATE banks SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=banks');});
+router.post('/banks',requireMasterAdmin,async(req,res)=>{const allowed=new Set(['bank_transfer','cash','virtual_account','other']);await db.execute(`INSERT INTO banks(bank_name,account_name,account_number,type,is_active,notes) VALUES(?,?,?,?,1,?)`,[clean(req.body.bank_name),clean(req.body.account_name),clean(req.body.account_number),allowed.has(req.body.type)?req.body.type:'bank_transfer',nullable(req.body.notes)]);req.session.flash={type:'success',message:'Rekening bank ditambahkan.'};res.redirect('/settings?tab=banks');});
+router.post('/banks/:id',requireMasterAdmin,async(req,res)=>{const b=req.body;const allowed=new Set(['bank_transfer','cash','virtual_account','other']);const bankName=clean(b.bank_name),accountName=clean(b.account_name),accountNumber=clean(b.account_number);if(!bankName||!accountName||!accountNumber){req.session.flash={type:'danger',message:'Nama bank, nama rekening, dan nomor rekening wajib diisi.'};return res.redirect('/settings?tab=banks');}await db.execute(`UPDATE banks SET bank_name=?,account_name=?,account_number=?,type=?,notes=? WHERE id=?`,[bankName,accountName,accountNumber,allowed.has(b.type)?b.type:'bank_transfer',nullable(b.notes),req.params.id]);req.session.flash={type:'success',message:'Rekening bank diperbarui.'};res.redirect('/settings?tab=banks');});
+router.post('/banks/:id/toggle',requireMasterAdmin,async(req,res)=>{await db.execute(`UPDATE banks SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=banks');});
 
-router.post('/gateways',async(req,res)=>{const allowed=new Set(['active','inactive','testing']);await db.execute(`INSERT INTO payment_gateways(name,provider,channel,status,notes) VALUES(?,?,?,?,?)`,[clean(req.body.name),nullable(req.body.provider),nullable(req.body.channel),allowed.has(req.body.status)?req.body.status:'inactive',nullable(req.body.notes)]);req.session.flash={type:'success',message:'Payment gateway ditambahkan.'};res.redirect('/settings?tab=gateways');});
-router.post('/gateways/:id/toggle',async(req,res)=>{await db.execute(`UPDATE payment_gateways SET status=IF(status='active','inactive','active') WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=gateways');});
+router.post('/gateways',requireMasterAdmin,async(req,res)=>{const allowed=new Set(['active','inactive','testing']);await db.execute(`INSERT INTO payment_gateways(name,provider,channel,status,notes) VALUES(?,?,?,?,?)`,[clean(req.body.name),nullable(req.body.provider),nullable(req.body.channel),allowed.has(req.body.status)?req.body.status:'inactive',nullable(req.body.notes)]);req.session.flash={type:'success',message:'Payment gateway ditambahkan.'};res.redirect('/settings?tab=gateways');});
+router.post('/gateways/:id',requireMasterAdmin,async(req,res)=>{const b=req.body;const allowed=new Set(['active','inactive','testing']);const name=clean(b.name);if(!name){req.session.flash={type:'danger',message:'Nama payment gateway wajib diisi.'};return res.redirect('/settings?tab=gateways');}await db.execute(`UPDATE payment_gateways SET name=?,provider=?,channel=?,status=?,notes=? WHERE id=?`,[name,nullable(b.provider),nullable(b.channel),allowed.has(b.status)?b.status:'inactive',nullable(b.notes),req.params.id]);req.session.flash={type:'success',message:'Payment gateway diperbarui.'};res.redirect('/settings?tab=gateways');});
+router.post('/gateways/:id/toggle',requireMasterAdmin,async(req,res)=>{await db.execute(`UPDATE payment_gateways SET status=IF(status='active','inactive','active') WHERE id=?`,[req.params.id]);res.redirect('/settings?tab=gateways');});
 
 router.post('/roles',requireMasterAdmin,async(req,res)=>{
   const roleKey=normalizeRole(req.body.role_key);

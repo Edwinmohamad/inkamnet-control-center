@@ -8,10 +8,20 @@ const {
 } = require('../services/whatsappGatewayService');
 const router = express.Router();
 
+// v1.25 audit: /send and /blast used to be reachable by ANY authenticated user (even one whose only
+// permission is 'dashboard'), letting them relay arbitrary messages through the company's connected
+// WhatsApp number. Restricted to staff who actually work with customers/billing — same permissions that
+// already gate the Tagihan/Pelanggan pages these buttons live on.
+function requireWaSendPermission(req, res, next) {
+  if (!req.session.user) return res.redirect('/login');
+  const perms = req.permissions || [];
+  if (perms.includes('billing') || perms.includes('support') || perms.includes('customers')) return next();
+  return res.status(403).json({ ok: false, message: 'Anda tidak memiliki izin untuk mengirim pesan WhatsApp.' });
+}
+
 // The connection-management page (QR code, connect/disconnect, auto-reminder settings) is gated behind
 // the 'settings' permission — same tier as the Payment Gateways settings tab — since it links a real
-// personal WhatsApp number to the app. Sending a message (/send, /blast below) stays available to any
-// authenticated user, matching the manual wa.me link they could already click from Tagihan/Pelanggan.
+// personal WhatsApp number to the app.
 router.get('/', requirePermission('settings'), async (req, res) => {
   const [[settingsRow]] = await db.query(
     `SELECT wa_auto_reminder_enabled,wa_auto_reminder_hour,wa_auto_reminder_offsets,wa_auto_reminder_template FROM settings WHERE id=1 LIMIT 1`
@@ -72,7 +82,7 @@ router.post('/settings', requireMasterAdmin, async (req, res) => {
 
 // AJAX manual send — used by the "Kirim Pengingat" button on Tagihan/Pelanggan. Falls back to wa.me
 // deep-links on the client side automatically when the gateway isn't connected (see public/js/app.js).
-router.post('/send', async (req, res) => {
+router.post('/send', requireWaSendPermission, async (req, res) => {
   const status = getGatewayStatus();
   if (status.state !== 'connected') {
     return res.status(409).json({ ok: false, reason: 'not_connected', message: 'WA Gateway belum terhubung.' });
@@ -93,7 +103,7 @@ router.post('/send', async (req, res) => {
 // AJAX bulk blast — used by the "WA Blast Massal" bulk action on Tagihan/Pelanggan. Enqueues one
 // message per selected customer's most relevant open invoice (skips customers without a valid/open
 // invoice or invalid WhatsApp number, and reports the skip count back to the caller).
-router.post('/blast', async (req, res) => {
+router.post('/blast', requireWaSendPermission, async (req, res) => {
   const status = getGatewayStatus();
   if (status.state !== 'connected') {
     return res.status(409).json({ ok: false, reason: 'not_connected', message: 'WA Gateway belum terhubung.' });

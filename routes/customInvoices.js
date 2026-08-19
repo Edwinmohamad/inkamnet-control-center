@@ -45,4 +45,20 @@ router.post('/',async(req,res)=>{
   conn.release();
   req.session.flash={type:'success',message:`Faktur custom ${invoiceNumber} berhasil dibuat.`};res.redirect('/custom-invoices');
 });
+
+// v1.25 audit: Faktur Custom previously had Create + List + PDF only — no way to fix a wrong
+// description/total/date or move it out of draft once entered. invoice_number stays immutable (it's the
+// printed/shared reference); everything else is editable.
+router.post('/:id/edit',async(req,res)=>{
+  const b=req.body;
+  const [[invoice]]=await db.execute(`SELECT id FROM custom_invoices WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!invoice){req.session.flash={type:'warning',message:'Faktur custom tidak ditemukan.'};return res.redirect('/custom-invoices');}
+  let customerName=b.customer_name||'';
+  if(b.customer_id){const [c]=await db.execute(`SELECT name FROM customers WHERE id=?`,[b.customer_id]);if(c[0])customerName=c[0].name;}
+  const allowedStatus=new Set(['draft','sent','paid','cancelled']);
+  await db.execute(`UPDATE custom_invoices SET customer_id=?,customer_name=?,invoice_date=?,due_date=?,description=?,total=?,status=? WHERE id=?`,
+    [b.customer_id||null,customerName,b.invoice_date||new Date().toISOString().slice(0,10),b.due_date||null,b.description||null,b.total||0,allowedStatus.has(b.status)?b.status:'draft',req.params.id]);
+  req.session.flash={type:'success',message:'Faktur custom berhasil diperbarui.'};
+  res.redirect('/custom-invoices');
+});
 module.exports=router;

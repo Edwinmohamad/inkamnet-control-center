@@ -11,6 +11,22 @@ router.get('/',async(req,res)=>{
   res.render('inventory/index',{title:'Stock Barang',items,sites,suppliers,summary:summary||{},site});
 });
 router.post('/',async(req,res)=>{const b=req.body;const [r]=await db.execute(`INSERT INTO inventory_items(item_code,name,category,site_id,supplier_id,qty,unit,min_stock,purchase_price,location,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,[b.item_code||null,b.name,b.category||null,b.site_id||null,b.supplier_id||null,b.qty||0,b.unit||'pcs',b.min_stock||0,b.purchase_price||0,b.location||null,b.notes||null]);await audit({userId:req.session.user.id,action:'create',entityType:'inventory',entityId:r.insertId,description:`Tambah stock ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Item gudang ditambahkan.'};res.redirect('/inventory');});
+// v1.25 audit: item name/category/min_stock/purchase_price/location/supplier had no edit at all —
+// deliberately does NOT touch `qty` here, since quantity is only ever changed through /:id/adjust so
+// every change stays reconciled against an inventory_movements row (editing qty directly here would
+// silently desync the running total from the movement history/audit trail).
+router.post('/:id/edit',async(req,res)=>{
+  const b=req.body;
+  const [[item]]=await db.execute(`SELECT id,name FROM inventory_items WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!item){req.session.flash={type:'warning',message:'Item gudang tidak ditemukan.'};return res.redirect('/inventory');}
+  const name=String(b.name||'').trim();
+  if(!name){req.session.flash={type:'danger',message:'Nama item wajib diisi.'};return res.redirect('/inventory');}
+  await db.execute(`UPDATE inventory_items SET item_code=?,name=?,category=?,site_id=?,supplier_id=?,unit=?,min_stock=?,purchase_price=?,location=?,notes=? WHERE id=?`,
+    [b.item_code||null,name,b.category||null,b.site_id||null,b.supplier_id||null,b.unit||'pcs',b.min_stock||0,b.purchase_price||0,b.location||null,b.notes||null,req.params.id]);
+  await audit({userId:req.session.user.id,action:'update',entityType:'inventory',entityId:req.params.id,description:`Update item ${name}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Item ${name} berhasil diperbarui.`};
+  res.redirect('/inventory');
+});
 router.post('/:id/adjust',async(req,res)=>{const qty=Number(req.body.qty||0);const type=req.body.movement_type||'adjustment';const signed=type==='out'?-Math.abs(qty):Math.abs(qty);const conn=await db.getConnection();try{await conn.beginTransaction();await conn.execute(`UPDATE inventory_items SET qty=GREATEST(0,qty+?) WHERE id=?`,[signed,req.params.id]);await conn.execute(`INSERT INTO inventory_movements(item_id,movement_type,qty,reference,notes,user_id) VALUES(?,?,?,?,?,?)`,[req.params.id,type,Math.abs(qty),req.body.reference||null,req.body.notes||null,req.session.user.id]);await conn.commit();req.session.flash={type:'success',message:'Stock berhasil diperbarui.'};}catch(e){await conn.rollback();throw e;}finally{conn.release();}res.redirect('/inventory');});
 
 router.get('/movements',async(req,res)=>{
@@ -41,5 +57,7 @@ router.post('/usage',async(req,res)=>{
 
 router.get('/suppliers',async(req,res)=>{const [suppliers]=await db.query(`SELECT sp.*,COUNT(i.id) item_count FROM suppliers sp LEFT JOIN inventory_items i ON i.supplier_id=sp.id AND i.is_active=1 GROUP BY sp.id ORDER BY sp.is_active DESC,sp.name`);res.render('inventory/suppliers',{title:'Supplier',suppliers});});
 router.post('/suppliers',async(req,res)=>{const b=req.body;await db.execute(`INSERT INTO suppliers(name,phone,email,address,notes,is_active) VALUES(?,?,?,?,?,1)`,[b.name,b.phone||null,b.email||null,b.address||null,b.notes||null]);req.session.flash={type:'success',message:'Supplier ditambahkan.'};res.redirect('/inventory/suppliers');});
+router.post('/suppliers/:id/edit',async(req,res)=>{const b=req.body;const name=String(b.name||'').trim();if(!name){req.session.flash={type:'danger',message:'Nama supplier wajib diisi.'};return res.redirect('/inventory/suppliers');}await db.execute(`UPDATE suppliers SET name=?,phone=?,email=?,address=?,notes=? WHERE id=?`,[name,b.phone||null,b.email||null,b.address||null,b.notes||null,req.params.id]);req.session.flash={type:'success',message:'Supplier berhasil diperbarui.'};res.redirect('/inventory/suppliers');});
+router.post('/suppliers/:id/toggle',async(req,res)=>{await db.execute(`UPDATE suppliers SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/inventory/suppliers');});
 
 module.exports=router;

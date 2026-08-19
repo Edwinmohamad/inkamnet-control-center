@@ -944,6 +944,7 @@ form[data-auto-filter].is-auto-submitting{opacity:.7;pointer-events:none}.cash-c
 .cash-mandatory-amount{color:var(--success);font-size:.48rem;font-weight:800;white-space:nowrap;flex:none}
 .cash-mandatory-cta{border:1px solid rgba(var(--brand-rgb),.32);border-radius:8px;background:rgba(var(--brand-rgb),.09);color:#a891ff;font-size:.44rem;font-weight:800;padding:7px 9px;white-space:nowrap;cursor:pointer;flex:none}
 .cash-mandatory-cta:hover{background:rgba(var(--brand-rgb),.16)}
+.field-locked{background:rgba(148,163,184,.12)!important;cursor:not-allowed!important;opacity:.75}
 @media(max-width:600px){.cash-mandatory-grid{grid-template-columns:1fr}}
 
 /* v1.20 — MikroTik NMS consolidated into a single tabbed module (Router Monitoring / PPPoE

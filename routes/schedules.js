@@ -15,5 +15,21 @@ router.get('/',async(req,res)=>{
   res.render('schedules/index',{title:'Jadwal Teknisi',date,q,site,cluster,schedules,staff,customers,tickets,sites,clusters});
 });
 router.post('/',async(req,res)=>{const b=req.body;const [rows]=await db.execute(`SELECT id,user_id FROM employees WHERE id=? AND is_active=1 LIMIT 1`,[b.technician_employee_id]);if(!rows.length){req.session.flash={type:'danger',message:'Pilih teknisi dari data karyawan.'};return res.redirect(`/schedules?date=${encodeURIComponent(b.schedule_date)}`);}const emp=rows[0];await db.execute(`INSERT INTO technician_schedules(schedule_date,schedule_time,technician_id,technician_employee_id,customer_id,ticket_id,site_id,title,status,notes,created_by) VALUES(?,?,?,?,?,?,?,?,'scheduled',?,?)`,[b.schedule_date,b.schedule_time||null,emp.user_id||null,emp.id,b.customer_id||null,b.ticket_id||null,b.site_id||null,b.title,b.notes||null,req.session.user.id]);req.session.flash={type:'success',message:'Jadwal teknisi ditambahkan.'};res.redirect(`/schedules?date=${encodeURIComponent(b.schedule_date)}`);});
-router.post('/:id/status',async(req,res)=>{await db.execute(`UPDATE technician_schedules SET status=? WHERE id=?`,[req.body.status,req.params.id]);res.redirect(`/schedules?date=${encodeURIComponent(req.body.date)}${req.body.q?`&q=${encodeURIComponent(req.body.q)}`:''}`);});
+// v1.25 audit: previously a mis-scheduled job (wrong date/time/technician/title) had no way to be
+// corrected other than deleting and re-creating it — but there wasn't even a delete route, so a typo was
+// permanent. Added a genuine Edit alongside the existing status-only update.
+router.post('/:id/edit',async(req,res)=>{
+  const b=req.body;
+  const [rows]=await db.execute(`SELECT id,user_id FROM employees WHERE id=? AND is_active=1 LIMIT 1`,[b.technician_employee_id]);
+  if(!rows.length){req.session.flash={type:'danger',message:'Pilih teknisi dari data karyawan.'};return res.redirect(`/schedules?date=${encodeURIComponent(b.schedule_date)}`);}
+  const emp=rows[0];
+  await db.execute(`UPDATE technician_schedules SET schedule_date=?,schedule_time=?,technician_id=?,technician_employee_id=?,customer_id=?,ticket_id=?,site_id=?,title=?,notes=? WHERE id=?`,
+    [b.schedule_date,b.schedule_time||null,emp.user_id||null,emp.id,b.customer_id||null,b.ticket_id||null,b.site_id||null,b.title,b.notes||null,req.params.id]);
+  req.session.flash={type:'success',message:'Jadwal teknisi diperbarui.'};
+  res.redirect(`/schedules?date=${encodeURIComponent(b.schedule_date)}`);
+});
+const SCHEDULE_STATUSES=new Set(['scheduled','on_the_way','working','done','cancelled']);
+router.post('/:id/status',async(req,res)=>{
+  if(!SCHEDULE_STATUSES.has(req.body.status)){req.session.flash={type:'danger',message:'Status jadwal tidak valid.'};return res.redirect(`/schedules?date=${encodeURIComponent(req.body.date)}${req.body.q?`&q=${encodeURIComponent(req.body.q)}`:''}`);}
+  await db.execute(`UPDATE technician_schedules SET status=? WHERE id=?`,[req.body.status,req.params.id]);res.redirect(`/schedules?date=${encodeURIComponent(req.body.date)}${req.body.q?`&q=${encodeURIComponent(req.body.q)}`:''}`);});
 module.exports=router;

@@ -31,10 +31,12 @@ function vendorMeta(category,body){
 
 router.get('/discounts',async(req,res)=>{const [discounts]=await db.query(`SELECT * FROM discounts ORDER BY is_active DESC,id DESC`);res.render('finance/discounts',{title:'Diskon',discounts});});
 router.post('/discounts',async(req,res)=>{const b=req.body;await db.execute(`INSERT INTO discounts(name,type,amount,description,is_active) VALUES(?,?,?,?,1)`,[b.name,b.type||'flat',b.amount||0,b.description||null]);req.session.flash={type:'success',message:'Diskon ditambahkan.'};res.redirect('/discounts');});
+router.post('/discounts/:id/edit',async(req,res)=>{const b=req.body;const name=String(b.name||'').trim();if(!name){req.session.flash={type:'danger',message:'Nama diskon wajib diisi.'};return res.redirect('/discounts');}const type=['flat','percent'].includes(b.type)?b.type:'flat';await db.execute(`UPDATE discounts SET name=?,type=?,amount=?,description=? WHERE id=?`,[name,type,b.amount||0,b.description||null,req.params.id]);req.session.flash={type:'success',message:'Diskon berhasil diperbarui.'};res.redirect('/discounts');});
 router.post('/discounts/:id/toggle',async(req,res)=>{await db.execute(`UPDATE discounts SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/discounts');});
 
 router.get('/charges',async(req,res)=>{const [charges]=await db.query(`SELECT * FROM additional_charges ORDER BY is_active DESC,id DESC`);res.render('finance/charges',{title:'Biaya Tambahan',charges});});
 router.post('/charges',async(req,res)=>{const b=req.body;await db.execute(`INSERT INTO additional_charges(name,amount,description,is_active) VALUES(?,?,?,1)`,[b.name,b.amount||0,b.description||null]);req.session.flash={type:'success',message:'Biaya tambahan ditambahkan.'};res.redirect('/charges');});
+router.post('/charges/:id/edit',async(req,res)=>{const b=req.body;const name=String(b.name||'').trim();if(!name){req.session.flash={type:'danger',message:'Nama biaya tambahan wajib diisi.'};return res.redirect('/charges');}await db.execute(`UPDATE additional_charges SET name=?,amount=?,description=? WHERE id=?`,[name,b.amount||0,b.description||null,req.params.id]);req.session.flash={type:'success',message:'Biaya tambahan berhasil diperbarui.'};res.redirect('/charges');});
 router.post('/charges/:id/toggle',async(req,res)=>{await db.execute(`UPDATE additional_charges SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/charges');});
 
 router.get('/cash/categories',async(req,res)=>{
@@ -58,10 +60,19 @@ router.post('/cash/categories',async(req,res)=>{
 });
 router.post('/cash/categories/:id/edit',requireAdmin,async(req,res)=>{
   const b=req.body;const name=String(b.name||'').trim();const type=['income','expense'].includes(b.type)?b.type:'expense';
-  const [rows]=await db.execute(`SELECT id,COALESCE(is_system,0) is_system FROM cash_categories WHERE id=? LIMIT 1`,[req.params.id]);
+  const [rows]=await db.execute(`SELECT cc.id,COALESCE(cc.is_system,0) is_system,cc.type current_type,COUNT(ct.id) usage_count FROM cash_categories cc LEFT JOIN cash_transactions ct ON ct.category_id=cc.id WHERE cc.id=? GROUP BY cc.id LIMIT 1`,[req.params.id]);
   if(!rows.length){req.session.flash={type:'warning',message:'Kategori kas tidak ditemukan.'};return res.redirect('/cash/categories');}
   if(Number(rows[0].is_system)===1){req.session.flash={type:'warning',message:'Kategori internal sistem tidak dapat diedit dari menu manual.'};return res.redirect('/cash/categories');}
   if(!name){req.session.flash={type:'danger',message:'Nama kategori wajib diisi.'};return res.redirect('/cash/categories');}
+  // v1.25 audit: cash_transactions/reports/analytics all derive income-vs-expense LIVE from
+  // cash_categories.type (no snapshot on the transaction row), so changing type on a category that
+  // already has transactions would silently reclassify every historical row's sign in Data Kas, the
+  // charts, and Laporan. Block it — same "usage_count>0 blocks a structural change" rule already used
+  // for delete — and point the admin to make a new category instead.
+  if(type!==rows[0].current_type && Number(rows[0].usage_count)>0){
+    req.session.flash={type:'danger',message:`Kategori ${name} sudah dipakai pada ${rows[0].usage_count} transaksi. Jenis (income/expense) tidak dapat diubah lagi karena akan mengubah histori laporan. Buat kategori baru bila memang perlu jenis berbeda.`};
+    return res.redirect('/cash/categories');
+  }
   const isMandatory=b.is_recurring_mandatory?1:0;
   await db.execute(`UPDATE cash_categories SET name=?,type=?,site_id=?,description=?,is_recurring_mandatory=? WHERE id=?`,[name,type,b.site_id||null,b.description||null,isMandatory,req.params.id]);
   req.session.flash={type:'success',message:`Kategori ${name} diperbarui.`};
@@ -112,7 +123,12 @@ router.get('/cash',async(req,res)=>{
   // for that exact category+site+month — PENDING_APPROVAL still counts (it means someone already logged
   // it, even if Master Admin hasn't approved yet).
   const mandatorySites=site?sites.filter(s=>s.code===site):sites;
-  const [mandatoryCategories]=await db.query(`SELECT id,code,name FROM cash_categories WHERE is_active=1 AND COALESCE(is_system,0)=0 AND COALESCE(is_recurring_mandatory,0)=1 ORDER BY name`);
+  // v1.25 audit fix: a mandatory category can itself be scoped to one specific site (site_id set via the
+  // Kategori Kas Tambah/Edit form). The checklist below used to ignore that and cross-join every
+  // mandatory category against every active site regardless, so a category scoped to Site A would still
+  // nag as "belum dicatat" for every other site. Now select site_id and, when set, only cross-reference
+  // that one site.
+  const [mandatoryCategories]=await db.query(`SELECT id,code,name,site_id FROM cash_categories WHERE is_active=1 AND COALESCE(is_system,0)=0 AND COALESCE(is_recurring_mandatory,0)=1 ORDER BY name`);
   let mandatoryChecklist=[];
   if(mandatoryCategories.length&&mandatorySites.length){
     const catPlaceholders=mandatoryCategories.map(()=>'?').join(',');
@@ -123,7 +139,8 @@ router.get('/cash',async(req,res)=>{
       GROUP BY ct.category_id,ct.site_id`,[month,year,...mandatoryCategories.map(c=>c.id)]);
     const recordedMap=new Map(recorded.map(r=>[`${r.category_id}:${r.site_id}`,Number(r.total||0)]));
     for(const cat of mandatoryCategories){
-      for(const s of mandatorySites){
+      const targetSites=cat.site_id?mandatorySites.filter(s=>Number(s.id)===Number(cat.site_id)):mandatorySites;
+      for(const s of targetSites){
         const total=recordedMap.get(`${cat.id}:${s.id}`);
         mandatoryChecklist.push({category_id:cat.id,category_name:cat.name,site_id:s.id,site_code:s.code,recorded:total!==undefined,total:total||0});
       }
@@ -147,7 +164,21 @@ router.post('/cash/:id/update',requireAdmin,async(req,res)=>{
   // manual (belum terhubung payment gateway, jadi bookkeeping kas masih perlu bisa dikoreksi manual).
   // Edit tetap mengembalikan baris ke PENDING_APPROVAL supaya Master Admin meninjau ulang nilainya.
   const b=req.body;const amount=Number(b.amount);if(!Number.isFinite(amount)||amount<=0)throw new Error('Nominal transaksi harus lebih dari 0.');const conn=await db.getConnection();let saved=null,oldProof=null;
-  try{await conn.beginTransaction();const [rows]=await conn.execute(`SELECT * FROM cash_transactions WHERE id=? FOR UPDATE`,[req.params.id]);if(!rows.length){req.session.flash={type:'warning',message:'Transaksi kas tidak ditemukan.'};await conn.rollback();return res.redirect(cashReturn(b));}const [categoryRows]=await conn.execute(`SELECT id,name,type,code FROM cash_categories WHERE id=? AND is_active=1 LIMIT 1`,[b.category_id]);const category=categoryRows[0];if(!category)throw new Error('Kategori kas tidak ditemukan atau sudah tidak aktif.');const vendor=vendorMeta(category,b),purchaseChannel=category.type==='expense'&&!vendor.isVendor&&['online','offline'].includes(b.purchase_channel)?b.purchase_channel:null;oldProof=rows[0].proof_path;if(req.file)saved=await saveCashProof(req.file);await conn.execute(`UPDATE cash_transactions SET transaction_date=?,name=?,category_id=?,site_id=?,amount=?,notes=?,purchase_channel=?,purchase_shop_name=?,vendor_name=?,vendor_duration=?,vendor_duration_unit=?,proof_path=COALESCE(?,proof_path),proof_original_name=COALESCE(?,proof_original_name),proof_mime=COALESCE(?,proof_mime),proof_size=COALESCE(?,proof_size),proof_uploaded_by=CASE WHEN ? IS NULL THEN proof_uploaded_by ELSE ? END,proof_uploaded_at=CASE WHEN ? IS NULL THEN proof_uploaded_at ELSE NOW() END,approval_status='PENDING_APPROVAL',approval_reason=NULL,reviewed_by=NULL,reviewed_at=NULL WHERE id=?`,[b.transaction_date,b.name,b.category_id,b.site_id||null,amount,b.notes||null,purchaseChannel,purchaseChannel?String(b.purchase_shop_name||'').trim()||null:null,vendor.name,vendor.duration,vendor.unit,saved?.filename||null,saved?.originalName||null,saved?.mime||null,saved?.size||null,saved?.filename||null,req.session.user.id,saved?.filename||null,req.params.id]);await assignCashTransactionCode(conn,req.params.id,b.category_id,b.transaction_date);await conn.commit();if(saved&&oldProof)await removeCashProof(oldProof);req.session.flash={type:'success',message:'Data kas diperbarui dan dikembalikan ke PENDING_APPROVAL. Saldo real belum berubah sampai disetujui Master Admin.'};}catch(e){await conn.rollback();if(saved)await removeCashProof(saved.filename);throw e;}finally{conn.release();}
+  try{await conn.beginTransaction();const [rows]=await conn.execute(`SELECT * FROM cash_transactions WHERE id=? FOR UPDATE`,[req.params.id]);if(!rows.length){req.session.flash={type:'warning',message:'Transaksi kas tidak ditemukan.'};await conn.rollback();return res.redirect(cashReturn(b));}
+  // v1.25 audit: "AUTO BILLING" (source_type='payment') rows mirror a real confirmed payment/invoice.
+  // The v1.24.5 unlock let these be edited like manual rows, but nothing stopped category/amount from
+  // silently drifting away from the payment they represent (e.g. reassigning an income row to an expense
+  // category while payments.amount/invoices stay untouched). Cosmetic fields (date/notes/proof/vendor
+  // info) stay editable; category and amount are locked to the source payment — use
+  // /invoices/:id/reset-unpaid to actually correct those.
+  if(rows[0].source_type==='payment'){
+    if(Number(b.category_id)!==Number(rows[0].category_id)||Math.abs(amount-Number(rows[0].amount))>0.01){
+      await conn.rollback();
+      req.session.flash={type:'danger',message:'Baris AUTO BILLING terhubung ke pembayaran & invoice asli — kategori dan nominal tidak boleh diubah dari sini. Gunakan "Reset ke Belum Lunas" di menu Tagihan bila nominal/kategorinya memang salah.'};
+      return res.redirect(cashReturn(b));
+    }
+  }
+  const [categoryRows]=await conn.execute(`SELECT id,name,type,code FROM cash_categories WHERE id=? AND is_active=1 LIMIT 1`,[b.category_id]);const category=categoryRows[0];if(!category)throw new Error('Kategori kas tidak ditemukan atau sudah tidak aktif.');const vendor=vendorMeta(category,b),purchaseChannel=category.type==='expense'&&!vendor.isVendor&&['online','offline'].includes(b.purchase_channel)?b.purchase_channel:null;oldProof=rows[0].proof_path;if(req.file)saved=await saveCashProof(req.file);await conn.execute(`UPDATE cash_transactions SET transaction_date=?,name=?,category_id=?,site_id=?,amount=?,notes=?,purchase_channel=?,purchase_shop_name=?,vendor_name=?,vendor_duration=?,vendor_duration_unit=?,proof_path=COALESCE(?,proof_path),proof_original_name=COALESCE(?,proof_original_name),proof_mime=COALESCE(?,proof_mime),proof_size=COALESCE(?,proof_size),proof_uploaded_by=CASE WHEN ? IS NULL THEN proof_uploaded_by ELSE ? END,proof_uploaded_at=CASE WHEN ? IS NULL THEN proof_uploaded_at ELSE NOW() END,approval_status='PENDING_APPROVAL',approval_reason=NULL,reviewed_by=NULL,reviewed_at=NULL WHERE id=?`,[b.transaction_date,b.name,b.category_id,b.site_id||null,amount,b.notes||null,purchaseChannel,purchaseChannel?String(b.purchase_shop_name||'').trim()||null:null,vendor.name,vendor.duration,vendor.unit,saved?.filename||null,saved?.originalName||null,saved?.mime||null,saved?.size||null,saved?.filename||null,req.session.user.id,saved?.filename||null,req.params.id]);await assignCashTransactionCode(conn,req.params.id,b.category_id,b.transaction_date);await conn.commit();if(saved&&oldProof)await removeCashProof(oldProof);req.session.flash={type:'success',message:'Data kas diperbarui dan dikembalikan ke PENDING_APPROVAL. Saldo real belum berubah sampai disetujui Master Admin.'};}catch(e){await conn.rollback();if(saved)await removeCashProof(saved.filename);throw e;}finally{conn.release();}
   res.redirect(cashReturn(b));
 });
 

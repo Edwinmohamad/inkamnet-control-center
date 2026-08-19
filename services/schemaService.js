@@ -429,14 +429,25 @@ async function ensureV31Schema() {
   // Vendor, dll) is ad-hoc/variable. This column powers the "Checklist Pengeluaran Wajib Bulan Ini"
   // panel on the Data Kas page (views/finance/cash.ejs) — no separate template/due-date table needed,
   // it just cross-references active sites x mandatory categories against this month's cash_transactions.
+  // v1.25 audit fix: this whole function re-runs on EVERY app boot (app.js awaits every ensureVXXSchema
+  // in sequence with no "already migrated" gate), so the auto-flag UPDATE below used to silently re-flip
+  // is_recurring_mandatory back to 1 on every restart even after an admin deliberately unchecked "Wajib
+  // Bulanan" on one of these categories via Edit. Fix: only run the one-time auto-flag the very first
+  // time this migration adds the column (fresh install / first upgrade) — check information_schema
+  // BEFORE the ADD COLUMN IF NOT EXISTS so we know whether the column pre-existed. After that first run,
+  // is_recurring_mandatory is fully admin-owned via the Edit modal and this function never touches it again.
+  const [[colCheck]]=await db.query(`SELECT COUNT(*) cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='cash_categories' AND COLUMN_NAME='is_recurring_mandatory'`);
+  const columnAlreadyExisted=Number(colCheck.cnt)>0;
   await db.query(`ALTER TABLE cash_categories ADD COLUMN IF NOT EXISTS is_recurring_mandatory TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active`);
-  // Auto-flag the three categories that matched the recurring pattern in the user's real data, but only
-  // if they already exist with these exact names (categories in this app are user-created, not seeded —
-  // see the "Contoh kategori" guide on the Kategori Kas page, which suggests these same names). Existing
-  // installs get a sensible default; anything named differently can still be flagged manually via Edit.
-  await db.query(`UPDATE cash_categories SET is_recurring_mandatory=1
-    WHERE COALESCE(is_system,0)=0 AND type='expense'
-      AND name IN ('Sewa','Listrik & Utilitas','Operasional Jaringan','Bandwidth / ISP')`);
+  if(!columnAlreadyExisted){
+    // Auto-flag the three categories that matched the recurring pattern in the user's real data, but only
+    // if they already exist with these exact names (categories in this app are user-created, not seeded —
+    // see the "Contoh kategori" guide on the Kategori Kas page, which suggests these same names). Existing
+    // installs get a sensible default; anything named differently can still be flagged manually via Edit.
+    await db.query(`UPDATE cash_categories SET is_recurring_mandatory=1
+      WHERE COALESCE(is_system,0)=0 AND type='expense'
+        AND name IN ('Sewa','Listrik & Utilitas','Operasional Jaringan','Bandwidth / ISP')`);
+  }
 
   // "Kasbon Karyawan" showed up as its own distinct category in the user's old system (cash advances to
   // staff, e.g. "KSB_Ali_Juli") with no equivalent in the suggested category list here — added as a real

@@ -31,7 +31,7 @@ router.get('/', async(req,res)=>{
   res.render('packages/index',{title:'Paket Internet',packages,sites,siteStats,selectedSite:selectedSite||''});
 });
 
-router.post('/', async(req,res)=>{
+router.post('/', requireAdmin, async(req,res)=>{
   const b=req.body;
   const name=String(b.name||'').trim();
   const siteId=normalizeSiteId(b.site_id);
@@ -49,7 +49,7 @@ router.post('/', async(req,res)=>{
   res.redirect(`/packages?site=${siteId}`);
 });
 
-router.post('/:id/edit', async(req,res)=>{
+router.post('/:id/edit', requireAdmin, async(req,res)=>{
   const id=Number(req.params.id);
   const b=req.body;
   const name=String(b.name||'').trim();
@@ -78,7 +78,7 @@ router.post('/:id/edit', async(req,res)=>{
   res.redirect(`/packages?site=${siteId}`);
 });
 
-router.post('/:id/toggle', async(req,res)=>{
+router.post('/:id/toggle', requireAdmin, async(req,res)=>{
   await db.execute(`UPDATE packages SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);
   res.redirect('/packages');
 });

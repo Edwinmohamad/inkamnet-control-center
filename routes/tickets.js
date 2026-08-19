@@ -26,6 +26,23 @@ router.post('/',async(req,res)=>{
     await audit({userId:req.session.user.id,action:'create',entityType:'ticket',entityId:r.insertId,description:`Buat tiket ${code}${saved?' dengan lampiran':''}`,ip:req.ip});req.session.flash={type:'success',message:`Tiket ${code} berhasil dibuat${saved?' dengan lampiran foto':''}.`};return res.redirect(`/tickets/${r.insertId}`);
   }catch(e){if(saved)await removePhoto(TICKET_DIR,saved.filename);throw e;}
 });
+// v1.25 audit: subject/type/priority/description entered at ticket creation had no way to be corrected
+// afterward — only status, PIC assignment, and append-only progress updates were editable. Note: this is
+// deliberately separate from /:id/updates (the progress log below), which stays append-only as the
+// ticket's audit trail; this route only touches the ticket's own descriptive fields.
+router.post('/:id/edit',async(req,res)=>{
+  const b=req.body;
+  const [[ticket]]=await db.execute(`SELECT id,ticket_code FROM tickets WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!ticket){req.session.flash={type:'warning',message:'Tiket tidak ditemukan.'};return res.redirect('/tickets');}
+  const subject=String(b.subject||'').trim();
+  if(!subject){req.session.flash={type:'danger',message:'Subjek tiket wajib diisi.'};return res.redirect(`/tickets/${req.params.id}`);}
+  const allowedPriority=new Set(['low','medium','high','critical']);
+  await db.execute(`UPDATE tickets SET subject=?,type=?,priority=?,description=? WHERE id=?`,
+    [subject,b.type||'Gangguan Internet',allowedPriority.has(b.priority)?b.priority:'medium',b.description||null,req.params.id]);
+  await audit({userId:req.session.user.id,action:'update',entityType:'ticket',entityId:req.params.id,description:`Edit detail tiket ${ticket.ticket_code}`,ip:req.ip});
+  req.session.flash={type:'success',message:'Detail tiket berhasil diperbarui.'};
+  res.redirect(`/tickets/${req.params.id}`);
+});
 router.post('/:id/status',async(req,res)=>{const status=req.body.status;await db.execute(`UPDATE tickets SET status=?,closed_at=IF(?='closed',NOW(),NULL) WHERE id=?`,[status,status,req.params.id]);req.session.flash={type:'success',message:'Status tiket diperbarui.'};res.redirect(req.body.return_to||'/tickets');});
 router.post('/:id/assign',async(req,res)=>{let employee=null;if(req.body.assigned_employee_id){const [x]=await db.execute(`SELECT id,user_id FROM employees WHERE id=? AND is_active=1 LIMIT 1`,[req.body.assigned_employee_id]);employee=x[0]||null;}await db.execute(`UPDATE tickets SET assigned_employee_id=?,assigned_to=? WHERE id=?`,[employee?.id||null,employee?.user_id||null,req.params.id]);req.session.flash={type:'success',message:'PIC tiket diperbarui.'};res.redirect(`/tickets/${req.params.id}`);});
 router.post('/:id/updates',async(req,res)=>{

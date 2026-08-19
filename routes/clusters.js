@@ -42,6 +42,21 @@ router.post('/import',requireAdmin,async(req,res)=>{
 // v1.20.1: requireAdmin added to create/delete for consistency with /import (already admin-only) —
 // individual create/delete of infrastructure records shouldn't need a lower bar than bulk import.
 router.post('/',requireAdmin,async(req,res)=>{const b=req.body;const [r]=await db.execute(`INSERT INTO clusters(site_id,name,type,capacity_ports,used_ports,latitude,longitude,address,status) VALUES(?,?,?,?,?,?,?,?,?)`,[b.site_id,b.name,b.type||'FTTH',b.capacity_ports||null,b.used_ports||0,b.latitude||null,b.longitude||null,b.address||null,b.status||'active']);await audit({userId:req.session.user.id,action:'create',entityType:'cluster',entityId:r.insertId,description:`Tambah cluster ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Cluster/ODP berhasil ditambahkan.'};res.redirect('/clusters');});
+// v1.25 audit: Cluster/ODP previously had Create + Delete only — a typo'd name/address, wrong capacity,
+// or a site mistakenly picked at creation had no fix short of deleting (blocked entirely once any
+// customer is attached) and recreating. Edit added, admin-gated to match create/delete/import above.
+router.post('/:id/edit',requireAdmin,async(req,res)=>{
+  const b=req.body;
+  const [[cluster]]=await db.execute(`SELECT id,name FROM clusters WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!cluster){req.session.flash={type:'warning',message:'Cluster/ODP tidak ditemukan.'};return res.redirect('/clusters');}
+  const name=String(b.name||'').trim();
+  if(!name||!b.site_id){req.session.flash={type:'danger',message:'Site dan nama cluster/ODP wajib diisi.'};return res.redirect('/clusters');}
+  await db.execute(`UPDATE clusters SET site_id=?,name=?,type=?,capacity_ports=?,used_ports=?,latitude=?,longitude=?,address=?,status=? WHERE id=?`,
+    [b.site_id,name,b.type||'FTTH',b.capacity_ports||null,b.used_ports||0,b.latitude||null,b.longitude||null,b.address||null,b.status||'active',req.params.id]);
+  await audit({userId:req.session.user.id,action:'update',entityType:'cluster',entityId:req.params.id,description:`Update cluster ${name}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Cluster/ODP ${name} berhasil diperbarui.`};
+  res.redirect('/clusters');
+});
 // v1.20.1: guard against deleting a cluster/ODP that still has customers attached — previously this
 // unconditionally ran DELETE FROM clusters, which would silently orphan every customer.cluster_id
 // pointing at the deleted row (broken foreign key reference, cluster_name showing as null everywhere).

@@ -81,6 +81,28 @@ router.post('/', requireAdmin, async (req,res)=>{
   res.redirect(`/server-duty?week=${encodeURIComponent(b.duty_date)}`);
 });
 
+// v1.25 audit: a mis-scheduled duty (wrong date/shift/time/staff) previously had no fix short of
+// deleting (admin-only) and recreating. Edit added — open to whoever can create the schedule, matching
+// that route's own permission level.
+router.post('/:id/edit', async(req,res)=>{
+  const b=req.body;
+  const [[duty]]=await db.execute(`SELECT id FROM server_duty_schedules WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!duty){req.session.flash={type:'warning',message:'Jadwal piket tidak ditemukan.'};return res.redirect(`/server-duty?week=${encodeURIComponent(req.body.week||'')}`);}
+  const selectedEmployee=b.employee_id?Number(b.employee_id):null;
+  let selectedUser=null,staffName=(b.staff_name||'').trim();
+  if(selectedEmployee){
+    const [rows]=await db.execute(`SELECT id,name,user_id FROM employees WHERE id=? AND is_active=1`,[selectedEmployee]);
+    if(!rows.length){req.session.flash={type:'danger',message:'Data karyawan tidak ditemukan.'};return res.redirect(`/server-duty?week=${encodeURIComponent(req.body.week||'')}`);}
+    staffName=rows[0].name;selectedUser=rows[0].user_id||null;
+  }
+  if(!staffName){req.session.flash={type:'danger',message:'Nama petugas piket wajib diisi.'};return res.redirect(`/server-duty?week=${encodeURIComponent(req.body.week||'')}`);}
+  await db.execute(`UPDATE server_duty_schedules SET duty_date=?,shift_name=?,start_time=?,end_time=?,user_id=?,staff_name=?,site_id=?,notes=? WHERE id=?`,
+    [b.duty_date,b.shift_name||'Piket Server',b.start_time||null,b.end_time||null,selectedUser,staffName,b.site_id||null,b.notes||null,req.params.id]);
+  await audit({userId:req.session.user.id,action:'update',entityType:'server_duty',entityId:req.params.id,description:`Update piket ${staffName} ${b.duty_date}`,ip:req.ip});
+  req.session.flash={type:'success',message:'Jadwal piket berhasil diperbarui.'};
+  res.redirect(`/server-duty?week=${encodeURIComponent(b.duty_date||req.body.week||'')}`);
+});
+
 router.post('/:id/status', async(req,res)=>{
   const allowed=new Set(['scheduled','present','absent','swapped','cancelled']);
   const status=allowed.has(req.body.status)?req.body.status:'scheduled';
