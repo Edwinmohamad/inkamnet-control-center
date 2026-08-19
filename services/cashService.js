@@ -17,11 +17,14 @@ async function assignCashTransactionCode(conn, transactionId, categoryId, transa
   await conn.execute(`UPDATE cash_transactions SET transaction_code=? WHERE id=?`,[code,transactionId]);
   return code;
 }
+// v1.24.5 — the source_type='payment' ("AUTO BILLING") block was removed: since these rows can now be
+// edited from Data Kas like manual entries (routes/finance.js POST /cash/:id/update), an edit resets
+// them to PENDING_APPROVAL just like manual rows, so Master Admin must be able to approve/reject them
+// here too — otherwise an edited AUTO BILLING row would get stuck in PENDING_APPROVAL forever.
 async function approveCashTransaction(conn,transactionId,reviewerId){
   const [rows]=await conn.execute(`SELECT ct.id,ct.transaction_code,ct.name,ct.amount,ct.source_type,ct.approval_status,cc.type category_type FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id WHERE ct.id=? FOR UPDATE`,[transactionId]);
   const tx=rows[0];
   if(!tx)throw new Error('Transaksi kas tidak ditemukan.');
-  if(tx.source_type&&tx.source_type!=='manual')throw new Error('Transaksi otomatis tidak membutuhkan approval kas manual.');
   if(tx.approval_status!=='PENDING_APPROVAL')throw new Error('Hanya transaksi PENDING_APPROVAL yang dapat disetujui.');
   await conn.execute(`UPDATE cash_transactions SET approval_status='APPROVED',approval_reason=NULL,reviewed_by=?,reviewed_at=NOW() WHERE id=?`,[reviewerId,transactionId]);
   return tx;
@@ -32,7 +35,6 @@ async function rejectCashTransaction(conn,transactionId,reviewerId,reason){
   const [rows]=await conn.execute(`SELECT ct.id,ct.transaction_code,ct.name,ct.amount,ct.source_type,ct.approval_status,cc.type category_type FROM cash_transactions ct JOIN cash_categories cc ON cc.id=ct.category_id WHERE ct.id=? FOR UPDATE`,[transactionId]);
   const tx=rows[0];
   if(!tx)throw new Error('Transaksi kas tidak ditemukan.');
-  if(tx.source_type&&tx.source_type!=='manual')throw new Error('Transaksi otomatis tidak membutuhkan approval kas manual.');
   if(tx.approval_status!=='PENDING_APPROVAL')throw new Error('Hanya transaksi PENDING_APPROVAL yang dapat ditolak.');
   await conn.execute(`UPDATE cash_transactions SET approval_status='REJECTED',approval_reason=?,reviewed_by=?,reviewed_at=NOW() WHERE id=?`,[clean,reviewerId,transactionId]);
   return {...tx,approval_reason:clean};

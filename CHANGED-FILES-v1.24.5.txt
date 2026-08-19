@@ -1,0 +1,83 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.5
+==========================================
+Perubahan: baris "AUTO BILLING" di Data Kas (transaksi otomatis dari
+pembayaran pelanggan yang sudah diverifikasi) TIDAK LAGI DIKUNCI. Sekarang
+bisa di-edit, dihapus, atau direvisi manual seperti transaksi kas biasa.
+
+===========================================================
+LATAR BELAKANG
+===========================================================
+Sebelumnya, begitu pembayaran transfer/QRIS diverifikasi Master Admin,
+sistem otomatis membuat baris "AUTO BILLING" di Data Kas yang terkunci —
+satu-satunya cara "menghapusnya" adalah membatalkan pembayarannya lewat
+tagihan asal (reversal penuh: tagihan kembali belum lunas). Karena Anda
+belum terhubung ke payment gateway dan masih perlu keleluasaan mengoreksi
+pembukuan kas secara manual, gembok itu sekarang dilepas.
+
+===========================================================
+APA YANG BERUBAH
+===========================================================
+Baris AUTO BILLING sekarang diperlakukan PERSIS seperti transaksi kas
+manual:
+  - Bisa diedit kapan saja lewat "Perbarui Data" (nominal, kategori,
+    tanggal, catatan, dll). Setelah diedit, baris otomatis kembali ke
+    status PENDING_APPROVAL dan akan muncul di antrian approval Master
+    Admin (menu Approval & Transaksi), sama seperti transaksi manual.
+  - Bisa dihapus langsung lewat "Hapus" selama belum berstatus APPROVED.
+  - Kalau sudah APPROVED, Admin biasa tidak bisa hapus langsung (aturan
+    ini SAMA untuk semua transaksi kas, manual maupun otomatis) — Master
+    Admin bisa memakai "Hapus Paksa" untuk menghapusnya permanen.
+  - Ikut bisa dipilih untuk aksi massal (checkbox, Hapus Massal, Hapus
+    Paksa Massal).
+
+Kami tetap menyediakan tombol "Lihat Faktur Asal" dan "Batalkan
+Pembayaran" di popover Aksi baris ini sebagai jalur ALTERNATIF, untuk
+kasus Anda benar-benar ingin membatalkan pembayaran resminya (tagihan
+kembali belum lunas) — bukan cuma mengoreksi baris kasnya. Jadi sekarang
+ada dua pilihan sesuai kebutuhan: revisi cepat di kas saja (Edit/Hapus),
+atau reversal penuh lewat tagihan (Batalkan Pembayaran).
+
+===========================================================
+PENTING — DAMPAK YANG PERLU DIKETAHUI
+===========================================================
+Karena Anda belum pakai payment gateway, ini pilihan yang wajar untuk
+sekarang. Tapi mohon diperhatikan:
+  - Kalau baris kas dari sebuah pembayaran DIHAPUS (bukan lewat "Batalkan
+    Pembayaran"), datanya di Data Kas hilang, TAPI status pembayaran &
+    tagihan terkait TETAP LUNAS di menu Tagihan/Pembayaran. Jadi saldo
+    kas dan riwayat tagihan bisa saja beda kalau baris kas dihapus/diedit
+    tanpa membatalkan pembayarannya juga.
+  - Kalau memang mau tagihan ikut kembali belum lunas, selalu gunakan
+    tombol "Batalkan Pembayaran", bukan Hapus biasa.
+  - Fitur "Hapus Semua" per-periode di Data Kas (tombol di atas tabel)
+    TETAP HANYA menghapus transaksi manual — baris AUTO BILLING sengaja
+    tetap aman dari wipe massal itu, supaya tidak sengaja terhapus banyak
+    sekaligus. Hapus/edit baris AUTO BILLING satu per satu atau lewat
+    centang massal seperti biasa.
+
+===========================================================
+FILE YANG DIUBAH
+===========================================================
+- routes/finance.js                (lepas kunci source_type='payment' di
+                                     update/delete/force-delete/bulk)
+- routes/payments.js                (antrian approval kas ikut menampilkan
+                                     baris AUTO BILLING yang sudah diedit)
+- services/cashService.js           (approve/reject kas kini menerima
+                                     baris AUTO BILLING juga)
+- views/finance/cash.ejs             (Aksi: Edit/Hapus/Hapus Paksa penuh
+                                     untuk semua baris + tombol tambahan
+                                     Lihat Faktur Asal / Batalkan Pembayaran)
+- views/partials/layout.ejs          (versi -> v1.24.5)
+- package.json                       (versi -> 1.24.5)
+- scripts/validate-v119.js           (assertion versi -> 1.24.5)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan struktur
+   database).
+2. Timpa (overwrite) 7 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Buka Data Kas — baris "AUTO BILLING" sekarang punya tombol Aksi penuh
+   (bukan gembok lagi).

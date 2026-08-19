@@ -105,8 +105,11 @@ router.post('/cash',async(req,res)=>{
 });
 
 router.post('/cash/:id/update',requireAdmin,async(req,res)=>{
+  // v1.24.5 — baris "AUTO BILLING" (source_type='payment') kini boleh diedit sama seperti transaksi
+  // manual (belum terhubung payment gateway, jadi bookkeeping kas masih perlu bisa dikoreksi manual).
+  // Edit tetap mengembalikan baris ke PENDING_APPROVAL supaya Master Admin meninjau ulang nilainya.
   const b=req.body;const amount=Number(b.amount);if(!Number.isFinite(amount)||amount<=0)throw new Error('Nominal transaksi harus lebih dari 0.');const conn=await db.getConnection();let saved=null,oldProof=null;
-  try{await conn.beginTransaction();const [rows]=await conn.execute(`SELECT * FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual') FOR UPDATE`,[req.params.id]);if(!rows.length){req.session.flash={type:'warning',message:'Transaksi otomatis dari pembayaran tidak dapat diedit dari menu kas.'};await conn.rollback();return res.redirect(cashReturn(b));}const [categoryRows]=await conn.execute(`SELECT id,name,type,code FROM cash_categories WHERE id=? AND is_active=1 LIMIT 1`,[b.category_id]);const category=categoryRows[0];if(!category)throw new Error('Kategori kas tidak ditemukan atau sudah tidak aktif.');const vendor=vendorMeta(category,b),purchaseChannel=category.type==='expense'&&!vendor.isVendor&&['online','offline'].includes(b.purchase_channel)?b.purchase_channel:null;oldProof=rows[0].proof_path;if(req.file)saved=await saveCashProof(req.file);await conn.execute(`UPDATE cash_transactions SET transaction_date=?,name=?,category_id=?,site_id=?,amount=?,notes=?,purchase_channel=?,purchase_shop_name=?,vendor_name=?,vendor_duration=?,vendor_duration_unit=?,proof_path=COALESCE(?,proof_path),proof_original_name=COALESCE(?,proof_original_name),proof_mime=COALESCE(?,proof_mime),proof_size=COALESCE(?,proof_size),proof_uploaded_by=CASE WHEN ? IS NULL THEN proof_uploaded_by ELSE ? END,proof_uploaded_at=CASE WHEN ? IS NULL THEN proof_uploaded_at ELSE NOW() END,approval_status='PENDING_APPROVAL',approval_reason=NULL,reviewed_by=NULL,reviewed_at=NULL WHERE id=?`,[b.transaction_date,b.name,b.category_id,b.site_id||null,amount,b.notes||null,purchaseChannel,purchaseChannel?String(b.purchase_shop_name||'').trim()||null:null,vendor.name,vendor.duration,vendor.unit,saved?.filename||null,saved?.originalName||null,saved?.mime||null,saved?.size||null,saved?.filename||null,req.session.user.id,saved?.filename||null,req.params.id]);await assignCashTransactionCode(conn,req.params.id,b.category_id,b.transaction_date);await conn.commit();if(saved&&oldProof)await removeCashProof(oldProof);req.session.flash={type:'success',message:'Data kas diperbarui dan dikembalikan ke PENDING_APPROVAL. Saldo real belum berubah sampai disetujui Master Admin.'};}catch(e){await conn.rollback();if(saved)await removeCashProof(saved.filename);throw e;}finally{conn.release();}
+  try{await conn.beginTransaction();const [rows]=await conn.execute(`SELECT * FROM cash_transactions WHERE id=? FOR UPDATE`,[req.params.id]);if(!rows.length){req.session.flash={type:'warning',message:'Transaksi kas tidak ditemukan.'};await conn.rollback();return res.redirect(cashReturn(b));}const [categoryRows]=await conn.execute(`SELECT id,name,type,code FROM cash_categories WHERE id=? AND is_active=1 LIMIT 1`,[b.category_id]);const category=categoryRows[0];if(!category)throw new Error('Kategori kas tidak ditemukan atau sudah tidak aktif.');const vendor=vendorMeta(category,b),purchaseChannel=category.type==='expense'&&!vendor.isVendor&&['online','offline'].includes(b.purchase_channel)?b.purchase_channel:null;oldProof=rows[0].proof_path;if(req.file)saved=await saveCashProof(req.file);await conn.execute(`UPDATE cash_transactions SET transaction_date=?,name=?,category_id=?,site_id=?,amount=?,notes=?,purchase_channel=?,purchase_shop_name=?,vendor_name=?,vendor_duration=?,vendor_duration_unit=?,proof_path=COALESCE(?,proof_path),proof_original_name=COALESCE(?,proof_original_name),proof_mime=COALESCE(?,proof_mime),proof_size=COALESCE(?,proof_size),proof_uploaded_by=CASE WHEN ? IS NULL THEN proof_uploaded_by ELSE ? END,proof_uploaded_at=CASE WHEN ? IS NULL THEN proof_uploaded_at ELSE NOW() END,approval_status='PENDING_APPROVAL',approval_reason=NULL,reviewed_by=NULL,reviewed_at=NULL WHERE id=?`,[b.transaction_date,b.name,b.category_id,b.site_id||null,amount,b.notes||null,purchaseChannel,purchaseChannel?String(b.purchase_shop_name||'').trim()||null:null,vendor.name,vendor.duration,vendor.unit,saved?.filename||null,saved?.originalName||null,saved?.mime||null,saved?.size||null,saved?.filename||null,req.session.user.id,saved?.filename||null,req.params.id]);await assignCashTransactionCode(conn,req.params.id,b.category_id,b.transaction_date);await conn.commit();if(saved&&oldProof)await removeCashProof(oldProof);req.session.flash={type:'success',message:'Data kas diperbarui dan dikembalikan ke PENDING_APPROVAL. Saldo real belum berubah sampai disetujui Master Admin.'};}catch(e){await conn.rollback();if(saved)await removeCashProof(saved.filename);throw e;}finally{conn.release();}
   res.redirect(cashReturn(b));
 });
 
@@ -128,27 +131,30 @@ router.post('/cash/:id/reject',requireMasterAdmin,async(req,res)=>{
 // "official journal" per the Arsip vs Hapus Permanen rule and has already affected the real cash
 // balance elsewhere in the app, so wiping the row would silently desync reports. PENDING_APPROVAL and
 // REJECTED rows (never touched real balance) may still be hard-deleted freely.
+// v1.24.5 — the source_type='payment' ("AUTO BILLING") exclusion was removed: these rows now follow the
+// exact same rule as manual entries (blocked only while APPROVED; Master Admin can still Hapus Paksa).
 router.post('/cash/:id/delete',requireAdmin,async(req,res)=>{
-  const [rows]=await db.execute(`SELECT proof_path,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual') LIMIT 1`,[req.params.id]);
-  if(!rows.length){req.session.flash={type:'warning',message:'Transaksi otomatis dari pembayaran tidak dapat dihapus dari menu kas.'};return res.redirect(cashReturn(req.body));}
-  if(rows[0].approval_status==='APPROVED'){req.session.flash={type:'danger',message:'Transaksi ini sudah APPROVED dan menjadi bagian dari jurnal kas resmi, sehingga tidak dapat dihapus permanen. Batalkan/reject dulu bila memang keliru.'};return res.redirect(cashReturn(req.body));}
-  const [result]=await db.execute(`DELETE FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual') AND COALESCE(approval_status,'APPROVED')<>'APPROVED'`,[req.params.id]);
+  const [rows]=await db.execute(`SELECT proof_path,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'warning',message:'Transaksi kas tidak ditemukan.'};return res.redirect(cashReturn(req.body));}
+  if(rows[0].approval_status==='APPROVED'){req.session.flash={type:'danger',message:'Transaksi ini sudah APPROVED dan menjadi bagian dari jurnal kas resmi, sehingga tidak dapat dihapus permanen. Gunakan Hapus Paksa (Master Admin) bila memang perlu.'};return res.redirect(cashReturn(req.body));}
+  const [result]=await db.execute(`DELETE FROM cash_transactions WHERE id=? AND COALESCE(approval_status,'APPROVED')<>'APPROVED'`,[req.params.id]);
   if(result.affectedRows&&rows[0]?.proof_path)await removeCashProof(rows[0].proof_path);
   req.session.flash={type:result.affectedRows?'success':'warning',message:result.affectedRows?'Data kas berhasil dihapus.':'Transaksi tidak dapat dihapus.'};
   res.redirect(cashReturn(req.body));
 });
 
 // v1.21.1 — "Hapus Paksa" (Force Delete), Master Admin only. Bypasses ONLY the APPROVED-status guard
-// above; the source_type restriction stays in place, since auto/payment-derived cash rows must stay in
-// sync with their source payment record and are never independently (force-)deletable from this menu.
+// above.
+// v1.24.5 — the source_type='payment' ("AUTO BILLING") exclusion was removed: belum terhubung payment
+// gateway, jadi baris kas dari pembayaran perlu tetap bisa dikoreksi/dihapus manual oleh Master Admin.
 router.post('/cash/:id/force-delete',requireMasterAdmin,async(req,res)=>{
   // Triggered from the generic #forceDeleteModal, whose hidden form only carries the CSRF token — so
   // the return-filter context is passed via the action URL's query string, not body fields.
   const returnCtx=cashReturn({...req.query,...req.body});
-  const [rows]=await db.execute(`SELECT proof_path,name,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual') LIMIT 1`,[req.params.id]);
-  if(!rows.length){req.session.flash={type:'warning',message:'Transaksi otomatis dari pembayaran tidak dapat dihapus dari menu kas.'};return res.redirect(returnCtx);}
+  const [rows]=await db.execute(`SELECT proof_path,name,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!rows.length){req.session.flash={type:'warning',message:'Transaksi kas tidak ditemukan.'};return res.redirect(returnCtx);}
   const tx=rows[0];
-  const [result]=await db.execute(`DELETE FROM cash_transactions WHERE id=? AND (source_type IS NULL OR source_type='manual')`,[req.params.id]);
+  const [result]=await db.execute(`DELETE FROM cash_transactions WHERE id=?`,[req.params.id]);
   if(result.affectedRows&&tx.proof_path)await removeCashProof(tx.proof_path);
   if(result.affectedRows)await audit({userId:req.session.user.id,action:'force_delete',entityType:'cash_transaction',entityId:req.params.id,description:`HAPUS PAKSA transaksi kas ${tx.name} (status sebelumnya: ${tx.approval_status}, Master Admin override).`,ip:req.ip});
   req.session.flash={type:result.affectedRows?'success':'warning',message:result.affectedRows?`Transaksi kas ${tx.name} dihapus paksa permanen.`:'Transaksi tidak dapat dihapus.'};
@@ -157,8 +163,9 @@ router.post('/cash/:id/force-delete',requireMasterAdmin,async(req,res)=>{
 
 // v1.22 — checkbox-based bulk delete for Data Kas, mirroring the same per-row guards used by the
 // single-row routes above (never a bulk UPDATE/DELETE, always a per-row loop so the exact same rules
-// apply): 'delete' skips APPROVED/auto rows; 'force_delete' (Master Admin only) bypasses the APPROVED
-// guard but still refuses auto/payment-derived rows, exactly like /cash/:id/force-delete.
+// apply): 'delete' skips APPROVED rows; 'force_delete' (Master Admin only) bypasses the APPROVED guard.
+// v1.24.5 — the source_type='payment' ("AUTO BILLING") exclusion was removed from both actions below,
+// same reasoning as the single-row routes above.
 router.post('/cash/bulk',requireAdmin,async(req,res)=>{
   const action=String(req.body.action||'').trim();
   const ids=[...new Set([].concat(req.body.cash_ids||[]).map(x=>Number(x)).filter(Boolean))];
@@ -169,15 +176,15 @@ router.post('/cash/bulk',requireAdmin,async(req,res)=>{
   if(ids.length>500){req.session.flash={type:'danger',message:'Maksimal 500 transaksi per aksi massal.'};return res.redirect(returnCtx);}
   const placeholders=ids.map(()=>'?').join(',');
   if(action==='delete'){
-    const [rows]=await db.execute(`SELECT id,name,proof_path,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id IN (${placeholders}) AND (source_type IS NULL OR source_type='manual')`,ids);
+    const [rows]=await db.execute(`SELECT id,name,proof_path,COALESCE(approval_status,'APPROVED') approval_status FROM cash_transactions WHERE id IN (${placeholders})`,ids);
     const eligible=rows.filter(r=>r.approval_status!=='APPROVED');
     const skipped=ids.length-eligible.length;
-    if(!eligible.length){req.session.flash={type:'danger',message:'Semua transaksi terpilih sudah APPROVED atau otomatis dari pembayaran, sehingga tidak dapat dihapus massal.'};return res.redirect(returnCtx);}
+    if(!eligible.length){req.session.flash={type:'danger',message:'Semua transaksi terpilih sudah APPROVED, sehingga tidak dapat dihapus massal. Gunakan Hapus Paksa Massal (Master Admin).'};return res.redirect(returnCtx);}
     const eligibleIds=eligible.map(r=>r.id);const eligiblePlaceholders=eligibleIds.map(()=>'?').join(',');
     await db.execute(`DELETE FROM cash_transactions WHERE id IN (${eligiblePlaceholders})`,eligibleIds);
     for(const r of eligible)if(r.proof_path)await removeCashProof(r.proof_path);
-    await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'cash_transaction',entityId:null,description:`Hapus massal ${eligible.length} transaksi kas: ${eligible.map(r=>r.name).slice(0,20).join(', ')}${eligible.length>20?', ...':''}${skipped?` (${skipped} dilewati karena APPROVED/otomatis)`:''}`,ip:req.ip});
-    req.session.flash={type:'success',message:`${eligible.length} transaksi kas dihapus permanen.${skipped?` ${skipped} transaksi dilewati karena sudah APPROVED atau otomatis dari pembayaran.`:''}`};
+    await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'cash_transaction',entityId:null,description:`Hapus massal ${eligible.length} transaksi kas: ${eligible.map(r=>r.name).slice(0,20).join(', ')}${eligible.length>20?', ...':''}${skipped?` (${skipped} dilewati karena APPROVED)`:''}`,ip:req.ip});
+    req.session.flash={type:'success',message:`${eligible.length} transaksi kas dihapus permanen.${skipped?` ${skipped} transaksi dilewati karena sudah APPROVED.`:''}`};
     return res.redirect(returnCtx);
   }
   if(action==='force_delete'){
@@ -185,8 +192,8 @@ router.post('/cash/bulk',requireAdmin,async(req,res)=>{
       req.session.flash={type:'danger',message:'Hapus Paksa hanya dapat dilakukan oleh Master Admin.'};
       return res.redirect(returnCtx);
     }
-    const [rows]=await db.execute(`SELECT id,name,proof_path FROM cash_transactions WHERE id IN (${placeholders}) AND (source_type IS NULL OR source_type='manual')`,ids);
-    if(!rows.length){req.session.flash={type:'warning',message:'Transaksi otomatis dari pembayaran tidak dapat dihapus dari menu kas.'};return res.redirect(returnCtx);}
+    const [rows]=await db.execute(`SELECT id,name,proof_path FROM cash_transactions WHERE id IN (${placeholders})`,ids);
+    if(!rows.length){req.session.flash={type:'warning',message:'Transaksi kas tidak ditemukan.'};return res.redirect(returnCtx);}
     const rowIds=rows.map(r=>r.id);const rowPlaceholders=rowIds.map(()=>'?').join(',');
     await db.execute(`DELETE FROM cash_transactions WHERE id IN (${rowPlaceholders})`,rowIds);
     for(const r of rows)if(r.proof_path)await removeCashProof(r.proof_path);
