@@ -42,7 +42,7 @@
         <td><span class="cell-main"><%= c.site_code %></span><span class="cell-sub"><%= c.cluster_name || 'Belum di-cluster' %></span></td>
         <td><span class="cell-main"><%= c.package_name %></span><span class="cell-sub"><%= c.speed_label || 'Paket Internet' %></span></td>
         <td class="money"><%= formatRupiah(c.package_price) %><span class="cell-sub">/ bulan</span></td>
-        <td><% if(wa){ %><a class="customer-wa-link" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer" title="Buka WhatsApp <%= c.name %>"><i class="bi bi-whatsapp"></i><span><%= c.phone %></span></a><% }else{ %><span class="cell-main"><%= c.phone||'-' %></span><% } %><span class="wa-validation-badge <%= c.whatsapp_status||'invalid' %>"><i class="bi <%= c.whatsapp_status==='valid'?'bi-cpu-fill':'bi-exclamation-octagon-fill' %>"></i><%= c.whatsapp_status==='valid'?'Format valid · sistem':'Format nomor tidak valid' %></span><span class="cell-sub"><%= c.address || '-' %></span></td>
+        <td><% if(wa){ %><a class="customer-wa-link" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer" title="Buka WhatsApp <%= c.name %>"><i class="bi bi-whatsapp"></i><span><%= c.phone %></span></a><% }else{ %><span class="cell-main"><%= c.phone||'-' %></span><% } %><% if(c.whatsapp_status!=='valid'){ %><span class="wa-validation-badge invalid"><i class="bi bi-exclamation-octagon-fill"></i>Format nomor tidak valid</span><% } %></td>
         <td class="text-center customer-action-cell">
           <div class="customer-row-buttons">
             <a class="btn-tech compact" href="/customers/<%= c.id %>/edit" title="Edit pelanggan"><i class="bi bi-pencil-square"></i></a>
@@ -58,7 +58,7 @@
             <button class="action-menu" type="button" data-action-popover-target="customerAction<%= c.id %>" aria-label="Buka tindakan pelanggan <%= c.name %>"><i class="bi bi-three-dots-vertical"></i></button>
           </div>
           <div class="ink-action-popover" id="customerAction<%= c.id %>" hidden>
-            <div class="ink-action-popover-head"><div><small>PELANGGAN</small><strong><%= c.name %></strong><span><%= c.customer_code %> · <%= c.site_code %><%= c.cluster_name?' · '+c.cluster_name:'' %></span></div></div>
+            <div class="ink-action-popover-head"><div><small>PELANGGAN</small><strong><%= c.name %></strong><span><%= c.customer_code %> · <%= c.site_code %><%= c.cluster_name?' · '+c.cluster_name:'' %></span><% if(c.address){ %><span class="cell-sub"><%= c.address %></span><% } %></div></div>
             <div class="ink-action-popover-body">
               <a class="ink-action-item compact" href="/customers/<%= c.id %>"><i class="bi bi-person-vcard"></i><span><b>Detail Pelanggan</b><small>Lihat profil lengkap pelanggan</small></span></a>
               <a class="ink-action-item compact" href="/customers/<%= c.id %>/edit"><i class="bi bi-pencil-square"></i><span><b>Edit</b><small>Perbarui data pelanggan</small></span></a>

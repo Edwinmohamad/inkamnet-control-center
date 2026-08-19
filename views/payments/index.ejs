@@ -52,7 +52,11 @@
     <div class="data-card-head"><div><h3>Riwayat Pembayaran</h3><small>Master Admin dapat melakukan Approve atau Reject langsung dari kolom approval.</small></div><div class="legend-inline"><span><i class="dot success"></i>Disetujui</span><span><i class="dot warning"></i>Menunggu</span><span><i class="dot danger"></i>Ditolak</span></div></div>
     <div class="table-responsive">
       <table class="app-table">
-        <thead><tr><th>Pelanggan</th><th>Site / Cluster</th><th>Faktur</th><th>Nominal</th><th>Metode</th><th>Bukti Pembayaran</th><th>Diterima Oleh</th><th>Status Approval</th><th>Waktu</th><th>Approval Master</th><th>Aksi</th></tr></thead>
+        <!-- v1.24.6 — kolom "Status Approval" dan "Approval Master" digabung jadi satu kolom "Approval"
+             (UI/UX audit): sebelumnya dua kolom terpisah membahas hal yang sama (badge status di satu
+             kolom, tombol Approve/Reject di kolom lain) — sekarang satu kolom saja: badge biasa, atau
+             kalau statusnya menunggu & yang login Master Admin, badge itu berubah jadi tombol langsung. -->
+        <thead><tr><th>Pelanggan</th><th>Site / Cluster</th><th>Faktur</th><th>Nominal</th><th>Metode</th><th>Bukti Pembayaran</th><th>Diterima Oleh</th><th>Approval</th><th>Waktu</th><th>Aksi</th></tr></thead>
         <tbody>
           <% payments.forEach(p=>{ %>
           <tr>
@@ -66,13 +70,20 @@
               <% } else { %><span class="proof-missing proof-optional"><i class="bi bi-paperclip"></i>Tanpa bukti · input admin</span><% } %>
             </td>
             <td><%= p.collector_name||'-' %></td>
-            <td><% if(p.status==='pending'){ %><span class="status-badge orange"><i class="bi bi-hourglass-split"></i> menunggu Master Admin</span><% } else if(p.status==='failed'){ %><span class="status-badge red"><i class="bi bi-x-octagon-fill"></i> ditolak <%= p.verifier_name||'Master Admin' %></span><% if(p.rejection_reason){ %><span class="payment-reject-reason"><b>Alasan:</b> <%= p.rejection_reason %></span><% } %><% } else if(p.method==='cash'&&p.settlement_status==='held_by_staff'){ %><span class="status-badge purple">cash di staff</span><% } else if(p.method==='cash'&&p.settlement_status==='settled'){ %><span class="status-badge green">sudah disetor</span><% } else { %><span class="status-badge green"><i class="bi bi-shield-check"></i> disetujui <%= p.verifier_name||'Master Admin' %></span><% } %></td>
+            <td>
+              <% if(p.status==='pending'){ %>
+                <% if(isMasterAdmin){ %><div class="master-approval-actions"><form method="post" action="/payments/<%= p.id %>/verify" onsubmit="return confirm('Approve pembayaran <%= p.reference||p.id %><%= p.proof_path?' berdasarkan bukti yang tersedia':' TANPA bukti lampiran' %>? Tagihan akan diperbarui.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="return_to" value="/payments?<%= paymentFilterQuery %>"><button class="approval-button approve"><i class="bi bi-check2-circle"></i>Approve</button></form><button type="button" class="approval-button reject" data-payment-reject="<%= p.id %>" data-reference="<%= p.reference||p.id %>" data-return-to="/payments?<%= paymentFilterQuery %>" data-bs-toggle="modal" data-bs-target="#paymentRejectModal"><i class="bi bi-x-circle"></i>Reject</button></div>
+                <% } else { %><span class="status-badge orange"><i class="bi bi-hourglass-split"></i> menunggu Master Admin</span><% } %>
+              <% } else if(p.status==='failed'){ %><span class="status-badge red"><i class="bi bi-x-octagon-fill"></i> ditolak <%= p.verifier_name||'Master Admin' %></span><% if(p.rejection_reason){ %><span class="payment-reject-reason"><b>Alasan:</b> <%= p.rejection_reason %></span><% } %>
+              <% } else if(p.method==='cash'&&p.settlement_status==='held_by_staff'){ %><span class="status-badge purple">cash di staff</span>
+              <% } else if(p.method==='cash'&&p.settlement_status==='settled'){ %><span class="status-badge green">sudah disetor</span>
+              <% } else { %><span class="status-badge green"><i class="bi bi-shield-check"></i> disetujui <%= p.verifier_name||'Master Admin' %></span><% } %>
+            </td>
             <td><span class="cell-main"><%= new Date(p.paid_at).toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'}) %></span><span class="cell-sub"><%= new Date(p.paid_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jakarta'}) %></span></td>
-            <td><% if(isMasterAdmin&&p.status==='pending'){ %><div class="master-approval-actions"><form method="post" action="/payments/<%= p.id %>/verify" onsubmit="return confirm('Approve pembayaran <%= p.reference||p.id %><%= p.proof_path?' berdasarkan bukti yang tersedia':' TANPA bukti lampiran' %>? Tagihan akan diperbarui.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="return_to" value="/payments?<%= paymentFilterQuery %>"><button class="approval-button approve"><i class="bi bi-check2-circle"></i>Approve</button></form><button type="button" class="approval-button reject" data-payment-reject="<%= p.id %>" data-reference="<%= p.reference||p.id %>" data-return-to="/payments?<%= paymentFilterQuery %>" data-bs-toggle="modal" data-bs-target="#paymentRejectModal"><i class="bi bi-x-circle"></i>Reject</button></div><% }else if(isMasterAdmin){ %><span class="approval-resolved"><i class="bi <%= p.status==='confirmed'?'bi-check2-circle':'bi-x-circle' %>"></i><%= p.status==='confirmed'?'Selesai':'Ditolak' %></span><% }else{ %><span class="cell-sub">Khusus Master Admin</span><% } %></td>
             <td><div class="payment-actions"><% if(isAdmin||Number(p.received_by)===Number(user.id)||Number(p.collector_user_id)===Number(user.id)){ %><button type="button" class="action-pill proof-upload-btn" title="<%= p.proof_path?'Ganti bukti':'Upload bukti pembayaran' %>" data-bs-toggle="modal" data-bs-target="#proofUploadModal" data-payment-id="<%= p.id %>" data-customer="<%= p.customer_name %>" data-invoice="<%= p.invoice_number %>"><i class="bi bi-cloud-arrow-up"></i></button><% } %><% if(p.proof_path){ %><a class="action-pill" href="/payments/<%= p.id %>/proof" target="_blank" rel="noopener" title="Buka bukti"><i class="bi bi-box-arrow-up-right"></i></a><% } %></div></td>
           </tr>
           <% }) %>
-          <% if(!payments.length){ %><tr><td colspan="11"><div class="empty-state"><i class="bi bi-wallet2"></i><strong>Data pembayaran tidak ditemukan</strong><small>Ubah kata pencarian atau catat pembayaran baru.</small></div></td></tr><% } %>
+          <% if(!payments.length){ %><tr><td colspan="10"><div class="empty-state"><i class="bi bi-wallet2"></i><strong>Data pembayaran tidak ditemukan</strong><small>Ubah kata pencarian atau catat pembayaran baru.</small></div></td></tr><% } %>
         </tbody>
       </table>
     </div>

@@ -166,17 +166,9 @@ router.get('/', async (req, res) => {
   const [[appSettings]]=await db.query(`SELECT default_due_day,default_grace_days FROM settings WHERE id=1 LIMIT 1`);
   const closing=nextClosingCountdown(now,appSettings?.default_due_day,appSettings?.default_grace_days);
 
-  // Item 2: Breakdown Distribusi Paket Internet — active-customer count per package, percentage of the
-  // scoped active-customer total (`customer.active`, computed above).
-  const [packageDistributionRows]=await db.execute(`SELECT p.id,p.name,p.speed_label,s.code site_code,
-      COUNT(c.id) customer_count
-    FROM packages p
-    LEFT JOIN customers c ON c.package_id=p.id AND c.customer_status='active' AND c.archived_at IS NULL${siteId?' AND c.site_id=?':''}
-    LEFT JOIN sites s ON s.id=p.site_id
-    WHERE p.is_active=1
-    GROUP BY p.id,p.name,p.speed_label,s.code
-    HAVING customer_count>0
-    ORDER BY customer_count DESC LIMIT 8`,siteId?[siteId]:[]);
+  // v1.24.6 — the "Distribusi Paket" breakdown that used to live here was removed from the dashboard
+  // (see UI/UX audit) and relocated to the Paket Internet page (views/packages/index.ejs), which already
+  // computes a per-package customer_count of its own — no need to duplicate that query here anymore.
 
   // Item 3: WA Gateway & Automation Queue Status. IMPORTANT — this app does not (yet) integrate a real
   // WhatsApp Business API/gateway (no Baileys/Fonnte/Wablas connector exists in services/); reminders are
@@ -233,7 +225,7 @@ router.get('/', async (req, res) => {
     selectedSiteCode:selectedSite?.code||'',selectedSiteName:selectedSite?.name||'Semua Site',collectionRate,routerRate,
     selectedMonth,selectedYear,years,kpiMonth,kpiYear,kpiSiteCode:kpiSite?.code||'',psbMonth,psbYear,psbSiteCode:psbSite?.code||'',offMonth,offYear,offSiteCode:offSite?.code||'',
     greeting,monthly:{labels:monthLabels,invoices:monthlyInvoices,payments:monthlyPayments,psbLabels,psb:dailyPsb},
-    closing,packageDistribution:packageDistributionRows,waOverview,serverResource,odpAvailableCount,
+    closing,waOverview,serverResource,odpAvailableCount,
     collectionBilled:nz(collectionBilling.total),collectionCollected:nz(collectionBilling.collected)
   });
 });

@@ -1,0 +1,104 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.6
+==========================================
+Perubahan: penyederhanaan tampilan (UI/UX) di lima menu berdasarkan audit
+yang diminta — kolom yang jarang berguna dirapikan/dipindah, widget
+dashboard yang tidak perlu dilihat setiap hari dihapus dari halaman utama,
+dan Warning Center tidak lagi menumpuk semua peringatan sekaligus.
+
+PENTING: Ini MURNI perubahan tampilan. Tidak ada data yang dihapus dari
+database — semua kolom/angka yang "hilang" dari tabel tetap tersimpan
+seperti biasa dan sebagian dipindahkan ke tempat lain (popover Tindakan,
+halaman Paket Internet, dll), bukan dihapus.
+
+===========================================================
+1. MENU PELANGGAN
+===========================================================
+- Kolom Kontak dirapikan: alamat lengkap tidak lagi selalu tampil di
+  tabel utama, sekarang tampil di kepala popover Tindakan saat baris
+  dibuka.
+- Badge validasi WhatsApp hanya muncul kalau nomornya memang bermasalah
+  (format tidak valid) — untuk nomor yang sudah valid, badge tidak lagi
+  ditampilkan supaya kolom tidak penuh teks kecil untuk kondisi normal.
+
+===========================================================
+2. MENU TAGIHAN
+===========================================================
+- Kartu ringkasan di atas tabel disusutkan dari 8 menjadi 4: Tagihan
+  Terbit, Lunas, Belum Lunas, Sisa Tagihan (Outstanding). Kartu yang
+  dihapus (Pelanggan Aktif, Total Tagihan, Belum Terbit, Nominal
+  Terbayar) adalah turunan matematis dari kartu yang tetap ada — datanya
+  di backend TIDAK dihapus, hanya tidak lagi ditampilkan sebagai kartu
+  terpisah.
+- Kolom "Kirim Pengingat" dihapus dari tabel karena tombol yang sama
+  sudah ada di dalam popover Tindakan setiap baris.
+
+===========================================================
+3. MENU PEMBAYARAN (Approval & Transaksi)
+===========================================================
+- Kolom "Status Approval" dan "Approval Master" digabung jadi satu
+  kolom "Approval": badge status tetap tampil seperti biasa, dan kalau
+  statusnya menunggu + yang login Master Admin, tombol Approve/Reject
+  otomatis muncul di kolom yang sama (tidak perlu dua kolom terpisah
+  lagi).
+
+===========================================================
+4. MENU DATA KAS
+===========================================================
+- Kolom "Pendapatan" dan "Pengeluaran" digabung jadi satu kolom
+  "Nominal" — hijau untuk pemasukan, merah untuk pengeluaran (satu dari
+  dua kolom lama SELALU kosong di setiap baris, sekarang tidak lagi).
+- Kolom "Sumber / Jasa" (vendor/pembelian online-offline) dihapus
+  sebagai kolom sendiri; datanya sekarang tampil sebagai baris kedua
+  kecil di dalam kolom Keterangan, hanya muncul kalau memang ada
+  datanya.
+- Kolom nomor urut "No." dihapus karena Kode Transaksi sudah menjadi
+  pengenal baris.
+- Total kolom tabel turun dari 13-14 menjadi 10-11 tanpa kehilangan
+  informasi apapun.
+
+===========================================================
+5. DASHBOARD
+===========================================================
+- Tiga widget dihapus dari halaman utama karena bukan sesuatu yang
+  perlu dilihat setiap hari oleh staf non-teknis:
+    * Server Monitor (CPU/RAM/Disk server) — lebih pas untuk tim NOC.
+    * WA Gateway — duplikat dari menu WA Gateway itu sendiri.
+    * Distribusi Paket — DIPINDAHKAN (bukan dihapus) ke halaman Paket
+      Internet, tampil sebagai kartu "Distribusi Paket" tepat di atas
+      daftar paket, memakai data yang memang sudah dihitung halaman itu.
+- Warning Center (popup peringatan di pojok kanan bawah) sekarang hanya
+  menampilkan 3 peringatan paling atas secara default, dengan tombol
+  "Lihat X Lainnya" untuk membuka sisanya kalau memang ada lebih dari 3
+  — tidak lagi menumpuk sampai 11 peringatan sekaligus.
+
+===========================================================
+FILE YANG DIUBAH
+===========================================================
+- views/customers/index.ejs   (kolom Kontak dirapikan)
+- views/invoices/index.ejs    (4 kartu ringkasan, kolom Kirim Pengingat
+                                dihapus)
+- views/payments/index.ejs    (kolom Approval digabung)
+- views/finance/cash.ejs       (kolom Nominal digabung, Sumber/Jasa &
+                                No. dihapus/dipindah)
+- views/dashboard/index.ejs    (3 widget dihapus, Warning Center dibatasi
+                                3 + tombol "Lihat Lainnya")
+- views/packages/index.ejs     (kartu baru "Distribusi Paket")
+- routes/dashboard.js          (query Distribusi Paket lama dihapus,
+                                sudah tidak dipakai lagi di dashboard)
+- public/css/app.css           (gaya untuk pembatasan Warning Center)
+- views/partials/layout.ejs    (versi -> v1.24.6)
+- package.json                 (versi -> 1.24.6)
+- scripts/validate-v119.js     (assertion versi -> 1.24.6)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan struktur
+   database, tidak ada migrasi yang perlu dijalankan).
+2. Timpa (overwrite) 11 file di atas sesuai struktur folder pada patch
+   ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R) supaya CSS baru ikut termuat.
+6. Cek halaman Pelanggan, Tagihan, Pembayaran, Data Kas, Dashboard, dan
+   Paket Internet — semua data lama tetap ada, hanya tampilannya yang
+   lebih ringkas.

@@ -16,14 +16,15 @@
     <div><strong>Periode aktif: <%= monthNames[filters.month-1] %> <%= filters.year %></strong><span>Ringkasan dan tabel di bawah mengikuti periode/filter yang dipilih. Pembuatan tagihan dapat dilakukan untuk semua pelanggan aktif atau satu pelanggan tertentu.</span></div>
   </div>
 
+  <!-- v1.24.6 — disusutkan dari 8 kartu jadi 4 (UI/UX audit): Pelanggan Aktif, Total Tagihan, Belum
+       Terbit, dan Nominal Terbayar dihapus dari sini karena nilainya turunan/tumpang tindih dengan kartu
+       lain atau sudah tersedia di Dashboard. Data summary.* itu sendiri TIDAK dihapus dari routes/invoices.js
+       (masih dihitung, hanya tidak semuanya ditampilkan di sini) supaya tidak berisiko merusak halaman lain
+       yang mungkin memakai object summary yang sama. -->
   <div class="billing-stat-grid">
-    <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-people"></i></span><div><small>Pelanggan Aktif</small><strong><%= summary.active %></strong></div></article>
-    <article class="billing-stat"><span class="billing-stat-icon blue"><i class="bi bi-calendar2-check"></i></span><div><small>Total Tagihan</small><strong><%= summary.total %></strong></div></article>
     <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-receipt"></i></span><div><small>Tagihan Terbit</small><strong><%= summary.issued %></strong></div></article>
-    <article class="billing-stat"><span class="billing-stat-icon red"><i class="bi bi-calendar2-x"></i></span><div><small>Belum Terbit</small><strong><%= summary.notIssued %></strong></div></article>
     <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-check2-circle"></i></span><div><small>Tagihan Lunas</small><strong><%= summary.paidCount %></strong></div></article>
     <article class="billing-stat"><span class="billing-stat-icon red"><i class="bi bi-alarm"></i></span><div><small>Belum Lunas</small><strong><%= summary.unpaidCount %></strong></div></article>
-    <article class="billing-stat"><span class="billing-stat-icon green"><i class="bi bi-cash-coin"></i></span><div><small>Nominal Terbayar</small><strong><%= formatRupiah(summary.paidAmount) %></strong></div></article>
     <article class="billing-stat"><span class="billing-stat-icon red"><i class="bi bi-hourglass-split"></i></span><div><small>Sisa Tagihan</small><strong><%= formatRupiah(summary.outstanding) %></strong></div></article>
   </div>
 
@@ -52,7 +53,10 @@
     </div>
     <div class="table-responsive action-safe-table">
       <table class="app-table invoice-table" data-bulk-scope="invoiceDeleteBulkBar">
-        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua tagihan untuk batalkan/hapus massal"></th><% } %><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th>Kirim Pengingat</th><th class="invoice-action-head">Tindakan</th></tr></thead>
+        <!-- v1.24.6 — kolom "Kirim Pengingat" dihapus (UI/UX audit): tombolnya sudah ada juga di popover
+             Tindakan setiap baris, jadi tidak perlu kolom tersendiri yang isinya cuma satu tombol/teks
+             "Tidak diperlukan" di sebagian besar baris. -->
+        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua tagihan untuk batalkan/hapus massal"></th><% } %><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
           <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); const waValid=/^628[1-9]\d{7,11}$/.test(wa); const hardOverdue=Number(i.days_overdue)>2&&Number(i.outstanding)>0&&!['paid','cancelled','refunded'].includes(i.status); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const hasPending=Number(i.active_payment_count||0)>0&&Number(i.paid_amount||0)===0; const canPay=Number(i.outstanding)>0 && !hasPending && !['paid','cancelled','refunded'].includes(i.status); %>
           <tr class="<%= hardOverdue?'invoice-hard-overdue':'' %>">
@@ -70,7 +74,6 @@
             <td class="money text-success-soft"><%= formatRupiah(i.paid_amount) %></td>
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
             <td><%= formatDate(i.due_date) %><% if(hardOverdue){ %><span class="cell-sub text-danger-soft"><%= i.days_overdue %> hari lewat jatuh tempo</span><% } %></td>
-            <td><% if(canPay&&waValid){ %><a class="invoice-reminder-button <%= i.whatsapp_status==='valid'?'validated':'' %>" target="_blank" rel="noopener" href="https://wa.me/<%= wa %>?text=<%= encodeURIComponent(reminder) %>" data-wa-send data-wa-phone="<%= wa %>" data-wa-message="<%= encodeURIComponent(reminder) %>" data-wa-customer-id="<%= i.customer_id %>" data-wa-invoice-id="<%= i.id %>"><i class="bi bi-whatsapp"></i><span>Kirim<small><%= i.whatsapp_status==='valid'?'WA tervalidasi':'WA belum divalidasi' %></small></span></a><% }else if(canPay){ %><span class="invoice-reminder-invalid"><i class="bi bi-exclamation-circle"></i>Nomor WA tidak valid</span><% }else{ %><span class="cell-sub">Tidak diperlukan</span><% } %></td>
             <td class="invoice-action-cell">
               <div class="invoice-inline-actions">
                 <% if(canPay&&isAdmin){ %><button type="button" class="invoice-pay-button" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>" title="Input pembayaran penuh untuk approval"><i class="bi bi-check2-circle"></i><span>Lunasi</span></button><% } %>
@@ -94,7 +97,7 @@
             </td>
           </tr>
           <% }) %>
-          <% if(!invoices.length){ %><tr><td colspan="<%= isAdmin?11:10 %>"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Refresh / Generate Tagihan.</small></div></td></tr><% } %>
+          <% if(!invoices.length){ %><tr><td colspan="<%= isAdmin?10:9 %>"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Refresh / Generate Tagihan.</small></div></td></tr><% } %>
         </tbody>
       </table>
     </div>

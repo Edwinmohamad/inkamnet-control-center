@@ -13,6 +13,21 @@
     <article class="metric-card"><div class="metric-top"><span class="metric-label">Subscriber</span><span class="metric-icon"><i class="bi bi-people-fill"></i></span></div><strong><%= packages.reduce((a,p)=>a+Number(p.customer_count||0),0) %></strong><small>Pelanggan aktif</small></article>
   </div>
 
+  <!-- v1.24.6 — "Distribusi Paket" relocated here from the Dashboard (see UI/UX audit): it belongs next to
+       the packages it's describing, and reuses the customer_count each package row already carries — no
+       new query needed. -->
+  <% const distTotalSubs=packages.reduce((a,p)=>a+Number(p.customer_count||0),0); const distPackages=packages.filter(p=>Number(p.customer_count||0)>0).sort((a,b)=>Number(b.customer_count||0)-Number(a.customer_count||0)); %>
+  <% if(distPackages.length){ %>
+  <article class="data-card package-distribution-card">
+    <div class="data-card-head"><div><h3>Distribusi Paket</h3><small>Persentase pelanggan aktif per paket<%= selectedSite?'':' · semua site' %></small></div><i class="bi bi-pie-chart-fill"></i></div>
+    <div class="package-distribution-list">
+      <% distPackages.forEach(p=>{ const pct=distTotalSubs?Math.round(Number(p.customer_count||0)/distTotalSubs*100):0; %>
+      <div class="package-distribution-row"><span class="package-distribution-name"><%= p.name %><small><%= p.site_code||'GLOBAL' %><%= p.speed_label?` · ${p.speed_label}`:'' %></small></span><span class="package-distribution-bar"><i style="width:<%= pct %>%"></i></span><b><%= pct %>%</b><em><%= p.customer_count %></em></div>
+      <% }) %>
+    </div>
+  </article>
+  <% } %>
+
   <!-- v1.21.0 — Section 3: checkbox + bulk delete for Paket Internet, same [data-bulk-scope] mechanism
        used by Pelanggan (public/js/app.js handles select-all + the floating bulk bar generically). -->
   <div class="plan-grid package-catalog-grid" data-bulk-scope="packagesBulkBar">
