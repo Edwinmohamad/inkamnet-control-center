@@ -1,0 +1,62 @@
+INKAMNET CONTROL CENTER — FULL SOURCE PACKAGE (bukan patch delta) v1.24.0
+==========================================================================
+
+KENAPA INI DIKIRIM SEBAGAI PAKET PENUH, BUKAN PATCH KECIL LAGI
+------------------------------------------------------------------
+Bapak/Ibu sempat melaporkan tombol Hapus di menu "Arus Kas" (Data Kas &
+Kategori Kas) belum ada, padahal fitur ini sudah kami tambahkan sejak patch
+v1.21.1–v1.22.0 beberapa putaran lalu. Kami cek ulang kode sumbernya
+sekarang, dan fitur berikut SUDAH ADA dan lengkap:
+
+MENU DATA KAS (/cash):
+- Tombol "Hapus" per baris (transaksi manual).
+- Tombol "Hapus Paksa" per baris — khusus Master Admin, untuk transaksi
+  yang sudah APPROVED.
+- Checkbox pilih banyak (multi-select) + tombol "Hapus Massal".
+- Tombol "Hapus Paksa Massal" — khusus Master Admin.
+- Tombol "Hapus Semua" — hapus semua transaksi manual dalam satu bulan
+  sekaligus (transaksi otomatis dari pembayaran tetap aman).
+
+MENU KATEGORI KAS (/cash/categories):
+- Tombol "Hapus" per kategori (kategori yang masih dipakai transaksi akan
+  ditolak dulu, supaya tidak ada transaksi kas yang datanya jadi rusak/
+  hilang dari laporan).
+
+Karena laporan yang sama muncul lagi meski fiturnya sudah ada di kode,
+kemungkinan besar penyebabnya adalah salah satu file dari patch-patch
+sebelumnya (v1.21.1 / v1.22.0 / v1.23.0) belum sempat ditimpa semua di
+server, atau server belum di-restart/browser belum di-hard-refresh. Supaya
+tidak ada lagi file yang "ketinggalan", kali ini kami kirim SELURUH kode
+sumber aplikasi (bukan cuma daftar file yang berubah) — jadi Bapak/Ibu
+tinggal timpa seluruh folder aplikasi dengan isi paket ini, dijamin semua
+fitur dari v1.17.0 sampai v1.24.0 (termasuk WA Gateway, Hapus Paksa,
+Kas checkbox massal, dan tampilan baru yang lebih sederhana) ada semua.
+
+YANG **TIDAK** BOLEH DITIMPA / DIHAPUS (penting!)
+------------------------------------------------------
+- File `.env` Anda (paket ini TIDAK menyertakan .env — jangan hapus punya
+  Anda, itu berisi koneksi database Anda).
+- Folder `node_modules/` (akan dibuat ulang otomatis oleh `npm install`).
+- Folder `storage/` (berisi bukti kas, foto profil, sesi WA Gateway, dsb
+  milik Anda — JANGAN diganti dengan folder storage kosong dari paket ini,
+  paket ini sengaja tidak menyertakan folder storage supaya aman).
+
+CARA PASANG (menggantikan SEMUA patch sebelumnya)
+------------------------------------------------------
+1. WAJIB backup folder aplikasi & database dulu.
+2. Salin isi paket ini ke folder aplikasi Anda, TIMPA semua file yang ada
+   namanya sama, KECUALI `.env` dan folder `storage/` (biarkan yang lama).
+3. Jalankan `npm install` (ada dependency WA Gateway yang perlu terpasang
+   kalau belum pernah dipasang sebelumnya — aman dijalankan berkali-kali).
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Login lalu cek menu Kas → Data Kas dan Kas → Kategori Kas. Kalau tombol
+   Hapus/Hapus Massal/Hapus Paksa masih belum kelihatan setelah langkah di
+   atas, kirim screenshot menu tersebut berikut info role akun yang
+   Bapak/Ibu pakai login (Admin biasa / Master Admin) — supaya kami bisa
+   cek lebih lanjut apa yang berbeda di sisi server Bapak/Ibu.
+
+Versi aplikasi tetap v1.24.0 (tidak ada fitur baru ditambahkan di paket
+ini — isinya sama persis dengan gabungan semua patch v1.17.0–v1.24.0,
+hanya dikemas ulang sebagai satu paket penuh biar tidak ada yang
+ketinggalan).
