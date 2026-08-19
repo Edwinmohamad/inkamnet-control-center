@@ -1,0 +1,56 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.9
+==========================================
+Perubahan: field Due Day, Grace, dan Generate H- dihapus dari menu
+Lokasi Server / POP (baik di form Tambah Site maupun kolom tabelnya).
+
+===========================================================
+LATAR BELAKANG
+===========================================================
+Ketiga field itu dimaksudkan sebagai default jatuh tempo per SITE.
+Tapi kenyataannya, jatuh tempo pelanggan Anda berbeda-beda per
+PELANGGAN (ada yang tanggal 15, ada yang tanggal 30) — bukan berbeda
+per site. Semua site yang sudah ada juga tidak pernah pakai override
+ini (tabelnya selalu menampilkan "company", artinya semua ikut default
+Pengaturan). Jadi field ini di menu Site cuma jadi elemen tambahan
+yang membingungkan tanpa pernah benar-benar dipakai.
+
+===========================================================
+APA YANG BERUBAH
+===========================================================
+- Form "Tambah Lokasi Server": sekarang cuma Code, Nama, dan Alamat.
+- Tabel Site Registry: kolom Due Day, Grace, Generate H- dihapus,
+  tersisa Code, Nama, Pelanggan, Router, Status.
+- Deskripsi halaman diperbarui: menjelaskan bahwa jatuh tempo & grace
+  period sekarang fokus diatur di menu Pelanggan.
+
+===========================================================
+TIDAK BERUBAH (PENTING)
+===========================================================
+- Field "Jatuh Tempo" dan "Grace Period" di form Tambah/Edit Pelanggan
+  TETAP ADA seperti biasa — di situlah tempat yang tepat untuk mengatur
+  tanggal 15/30 per pelanggan.
+- Default perusahaan di menu Pengaturan (dipakai kalau pelanggan tidak
+  diisi jatuh tempo sendiri) TETAP ADA dan tidak berubah.
+- Tidak ada data yang dihapus dari database. Kolom default_due_day,
+  default_grace_days, invoice_generate_days di tabel Site tetap ada di
+  database (untuk kompatibilitas), cuma tidak lagi ditampilkan/diisi
+  lewat menu Site karena memang tidak pernah dipakai.
+
+===========================================================
+FILE YANG DIUBAH
+===========================================================
+- views/sites/index.ejs        (hapus 3 field dari form & tabel)
+- views/partials/layout.ejs    (versi -> v1.24.9)
+- package.json                 (versi -> 1.24.9)
+- scripts/validate-v119.js     (assertion versi -> 1.24.9)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan database).
+2. Timpa (overwrite) 4 file di atas sesuai struktur folder pada patch
+   ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Cek menu Lokasi Server / POP — form Tambah Site & tabelnya sudah
+   lebih ringkas, tanpa Due Day/Grace/Generate H-.
