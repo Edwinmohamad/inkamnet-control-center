@@ -1,0 +1,38 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.7
+==========================================
+Perbaikan kecil: dua baris di Dashboard (Collection Rate/Tiket Aktif/
+Router Health, dan Target Penagihan/Quick Action) menyisakan ruang
+kosong besar di sebelah kanan setelah widget-widget yang tidak perlu
+dihapus di v1.24.6. Ini murni perbaikan tata letak (CSS), tidak ada
+perubahan data maupun perilaku lain.
+
+===========================================================
+APA YANG BERUBAH
+===========================================================
+- Baris "Collection Rate / Tiket Aktif / Router Health": sebelumnya
+  tata letaknya disiapkan untuk 4 kolom padahal isinya hanya selalu 3
+  kartu, sehingga selalu ada 1 kolom kosong di kanan. Sekarang tata
+  letaknya 3 kolom pas dengan isinya.
+- Baris "Target Penagihan / Quick Action Launchpad": sebelumnya
+  disiapkan untuk 3 kolom, padahal sejak v1.24.6 (Distribusi Paket, WA
+  Gateway, dan Server Monitor dipindah/dihapus dari dashboard) baris
+  ini hanya berisi 2 kartu. Sekarang tata letaknya 2 kolom pas dengan
+  isinya, kedua kartu tampil lebih besar dan rapi tanpa ruang kosong.
+
+===========================================================
+FILE YANG DIUBAH
+===========================================================
+- public/css/app.css           (perapian grid 2 baris di atas)
+- views/partials/layout.ejs    (versi -> v1.24.7)
+- package.json                 (versi -> 1.24.7)
+- scripts/validate-v119.js     (assertion versi -> 1.24.7)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan database).
+2. Timpa (overwrite) 4 file di atas sesuai struktur folder pada patch
+   ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R) supaya CSS baru ikut termuat —
+   ini WAJIB karena perubahan hanya di file CSS.
