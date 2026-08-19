@@ -64,24 +64,21 @@
         <!-- v1.24.6 — kolom "Kirim Pengingat" dihapus (UI/UX audit): tombolnya sudah ada juga di popover
              Tindakan setiap baris, jadi tidak perlu kolom tersendiri yang isinya cuma satu tombol/teks
              "Tidak diperlukan" di sebagian besar baris. -->
-        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua tagihan untuk batalkan/hapus massal"></th><% } %><th>Faktur</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
+        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua tagihan"></th><% } %><th>No.</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
-          <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); const waValid=/^628[1-9]\d{7,11}$/.test(wa); const hardOverdue=Number(i.days_overdue)>2&&Number(i.outstanding)>0&&!['paid','cancelled','refunded'].includes(i.status); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const hasPending=Number(i.active_payment_count||0)>0&&Number(i.paid_amount||0)===0; const canPay=Number(i.outstanding)>0 && !hasPending && !['paid','cancelled','refunded'].includes(i.status); %>
-          <tr class="<%= hardOverdue?'invoice-hard-overdue':'' %>">
-            <% if(isAdmin){ %><td><input type="checkbox" data-row-check value="<%= i.id %>" aria-label="Pilih tagihan <%= i.invoice_number %> untuk batalkan/hapus massal"></td><% } %>
-            <td><a class="invoice-number-link standalone" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></td>
+          <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); const waValid=/^628[1-9]\d{7,11}$/.test(wa); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const hasPending=Number(i.active_payment_count||0)>0&&Number(i.paid_amount||0)===0; const canPay=Number(i.outstanding)>0 && !hasPending && !['paid','cancelled','refunded'].includes(i.status); %>
+          <tr>
+            <% if(isAdmin){ %><td><input type="checkbox" data-row-check data-can-pay="<%= canPay?'1':'0' %>" value="<%= i.id %>" aria-label="Pilih tagihan <%= i.invoice_number %>"></td><% } %>
+            <td><span class="cell-main"><%= index+1 %></span></td>
             <td>
-              <div class="invoice-customer-select">
-                <% if(isAdmin){ %><input class="form-check-input invoice-table-check" type="checkbox" value="<%= i.id %>" data-invoice-table-check <%= canPay?'':'disabled' %> aria-label="Pilih tagihan <%= i.customer_name %>"><% } %>
-                <div><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><% if(i.customer_archived_at){ %><span class="status-badge gray customer-archived-pill" title="Pelanggan ini sudah diarsipkan — riwayat tagihan tetap ditampilkan untuk audit."><i class="bi bi-archive-fill"></i>Diarsipkan</span><% } %></div>
-              </div>
+              <div><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><a class="invoice-number-link standalone" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a><% if(i.customer_archived_at){ %><span class="status-badge gray customer-archived-pill" title="Pelanggan ini sudah diarsipkan — riwayat tagihan tetap ditampilkan untuk audit."><i class="bi bi-archive-fill"></i>Diarsipkan</span><% } %></div>
             </td>
             <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
-            <td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span><% if(hasPending){ %><span class="status-badge orange mt-1"><i class="bi bi-hourglass-split"></i> menunggu approval</span><% } %><% if(hardOverdue){ %><span class="invoice-hard-warning"><i class="bi bi-exclamation-octagon-fill"></i>PERINGATAN KERAS</span><% } %></td>
+            <td><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span><% if(hasPending){ %><span class="status-badge orange mt-1"><i class="bi bi-hourglass-split"></i> menunggu approval</span><% } %></td>
             <td class="money"><%= formatRupiah(i.total) %><span class="cell-sub"><%= i.package_name %></span></td>
             <td class="money text-success-soft"><%= formatRupiah(i.paid_amount) %></td>
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
-            <td><%= formatDate(i.due_date) %><% if(hardOverdue){ %><span class="cell-sub text-danger-soft"><%= i.days_overdue %> hari lewat jatuh tempo</span><% } %></td>
+            <td><%= formatDate(i.due_date) %></td>
             <td class="invoice-action-cell">
               <div class="invoice-inline-actions">
                 <% if(canPay&&isAdmin){ %><button type="button" class="invoice-pay-button" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>" title="Input pembayaran penuh untuk approval"><i class="bi bi-check2-circle"></i><span>Lunasi</span></button><% } %>
@@ -176,11 +173,24 @@
 
 <script>
 (()=>{
-  const tableChecks=[...document.querySelectorAll('[data-invoice-table-check]')];
+  // v1.25.3 — the checkbox column previously duplicated selection state: one checkbox in its own
+  // column drove Batalkan/Hapus Massal (via the generic [data-bulk-scope] mechanism in app.js), and a
+  // SECOND, separate checkbox embedded in the Pelanggan cell drove "Bayar Dipilih" — two checkboxes per
+  // row for two different bulk actions, which read as a visual bug. Consolidated to ONE checkbox per
+  // row: [data-row-check] now feeds both mechanisms. "Bayar Dipilih" simply filters the same checked
+  // set down to rows carrying data-can-pay="1" (rows ineligible for payment stay selectable so they can
+  // still be included in Batalkan/Hapus Massal).
+  const invoiceTable=document.querySelector('.invoice-table');
   const paySelected=document.getElementById('paySelectedInvoices');
   const selectedCount=document.getElementById('invoiceTableSelectedCount');
-  const refreshSelection=()=>{const ids=tableChecks.filter(x=>x.checked&&!x.disabled).map(x=>String(x.value));if(selectedCount)selectedCount.textContent=ids.length;if(paySelected)paySelected.disabled=!ids.length;return ids;};
-  tableChecks.forEach(ch=>ch.addEventListener('change',refreshSelection));
+  const refreshSelection=()=>{
+    const payableIds=[...document.querySelectorAll('[data-row-check]')].filter(x=>x.checked&&x.dataset.canPay==='1').map(x=>String(x.value));
+    if(selectedCount)selectedCount.textContent=payableIds.length;
+    if(paySelected)paySelected.disabled=!payableIds.length;
+    return payableIds;
+  };
+  invoiceTable?.addEventListener('change',event=>{if(event.target.matches('[data-row-check],[data-select-all]'))refreshSelection();});
+  document.getElementById('invoiceDeleteBulkBar')?.querySelector('[data-bulk-clear]')?.addEventListener('click',()=>setTimeout(refreshSelection,0));
   paySelected?.addEventListener('click',()=>{const ids=refreshSelection();if(!ids.length)return;const paymentModal=document.getElementById('paymentModal');if(!paymentModal)return;paymentModal.querySelectorAll('.payment-invoice-check').forEach(ch=>{ch.checked=ids.includes(String(ch.value));ch.dispatchEvent(new Event('change',{bubbles:true}));});bootstrap.Modal.getOrCreateInstance(paymentModal).show();});
   const editModal=document.getElementById('invoiceEditModal');
   editModal?.addEventListener('show.bs.modal',event=>{const b=event.relatedTarget;if(!b)return;document.getElementById('invoiceEditForm').action=`/invoices/${b.dataset.invoiceEditId}/update-meta`;document.getElementById('invoiceEditIdentity').textContent=`${b.dataset.invoiceEditNumber} · ${b.dataset.invoiceEditCustomer}`;document.getElementById('invoiceEditDate').value=b.dataset.invoiceEditDate||'';document.getElementById('invoiceEditDue').value=b.dataset.invoiceEditDue||'';document.getElementById('invoiceEditProrata').value=b.dataset.invoiceEditProrata||'0';});

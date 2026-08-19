@@ -1,0 +1,138 @@
+INKAMNET CONTROL CENTER — PATCH v1.25.3
+==========================================
+Patch ini menjawab 6 revisi susulan khusus untuk Menu Tagihan (Daftar
+Tagihan), sesuai laporan:
+1. Desain checkbox dirapikan agar sesuai tema UI.
+2. Kolom Faktur dihapus.
+3. Dobel checkbox per baris diperbaiki.
+4. Notifikasi "PERINGATAN KERAS" dihapus.
+5. Kolom nomor urut ("No.") ditambahkan.
+6. Urutan kolom dirapikan ulang.
+
+===========================================================
+1) DESAIN CHECKBOX DIRAPIKAN (BERLAKU DI SELURUH APLIKASI)
+===========================================================
+Sebelumnya, checkbox untuk pilih-baris/pilih-semua (mis. di Daftar Tagihan,
+Pembayaran, Pelanggan, Data Kas, Paket, dll.) adalah <input type="checkbox">
+polos TANPA styling apa pun — tampil sebagai kotak default browser yang
+tidak menyatu dengan tema gelap aplikasi. Sekarang SEMUA checkbox (dan
+radio button) di seluruh aplikasi otomatis mengikuti warna aksen tema yang
+sedang aktif (termasuk saat ganti palet warna dari header), dengan ukuran
+yang konsisten. Perubahan ini bersifat global (1 baris CSS) jadi ikut
+merapikan checkbox di menu lain juga, bukan cuma Tagihan.
+(public/css/app.css)
+
+===========================================================
+2) KOLOM "FAKTUR" DIHAPUS DARI DAFTAR TAGIHAN
+===========================================================
+Kolom "Faktur" (nomor tagihan + tautan PDF) yang sebelumnya berdiri sendiri
+kini digabung kembali ke dalam kolom Pelanggan (nomor faktur tampil sebagai
+tautan kecil di bawah nama pelanggan) — sama seperti pola yang sudah
+dipakai di Menu Approval & Transaksi. Tautan ke PDF faktur tetap ada dan
+tetap bisa diklik, hanya lokasinya dipindah agar tabel tidak terlalu lebar.
+(views/invoices/index.ejs)
+
+===========================================================
+3) DOBEL CHECKBOX DIPERBAIKI
+===========================================================
+BUG DITEMUKAN: setiap baris Daftar Tagihan sebenarnya punya DUA checkbox
+terpisah — satu di kolom paling kiri (untuk Batalkan Massal/Hapus Massal)
+dan satu lagi tersembunyi di dalam kolom Pelanggan (untuk "Bayar Dipilih")
+— sehingga tampil seperti checkbox dobel yang membingungkan. Sekarang HANYA
+ADA SATU checkbox per baris yang dipakai untuk KEDUA aksi tersebut:
+mencentang sebuah baris membuatnya ikut terhitung di Batalkan/Hapus Massal
+DAN (bila tagihan tersebut memang masih bisa dibayar) ikut terhitung di
+"Bayar Dipilih". Tidak ada perubahan pada aturan kelayakan tiap aksi —
+tagihan yang tidak bisa dibayar (sudah lunas/dibatalkan/dsb.) tetap bisa
+dicentang untuk Batalkan/Hapus Massal, hanya tidak akan ikut di "Bayar
+Dipilih".
+(views/invoices/index.ejs)
+
+===========================================================
+4) NOTIFIKASI "PERINGATAN KERAS" DIHAPUS DARI MENU TAGIHAN
+===========================================================
+Badge merah "PERINGATAN KERAS" yang sebelumnya muncul di kolom Status untuk
+tagihan yang sangat terlambat (beserta warna latar baris yang ikut menyala
+merah) sudah dihapus dari Daftar Tagihan — status "TERLAMBAT" di kolom
+Status sudah cukup menyampaikan informasi tersebut tanpa perlu badge
+tambahan yang mencolok. (Catatan: widget "PERINGATAN KERAS" di Dashboard
+TIDAK terpengaruh — itu adalah fitur menu yang berbeda dan tidak diminta
+untuk dihapus.)
+(views/invoices/index.ejs, public/css/app.css)
+
+===========================================================
+5) KOLOM "No." (NOMOR URUT) DITAMBAHKAN
+===========================================================
+Kolom nomor urut ditambahkan di sebelah kiri (setelah kolom checkbox),
+konsisten dengan kolom "No." yang sudah ada di menu-menu lain (Approval &
+Transaksi, Data Kas, Kategori Kas, Laporan).
+(views/invoices/index.ejs)
+
+===========================================================
+6) URUTAN KOLOM DIRAPIKAN
+===========================================================
+Urutan kolom Daftar Tagihan sekarang: Checkbox → No. → Pelanggan (termasuk
+tautan faktur) → Periode → Status → Tagihan → Terbayar → Site → Jatuh
+Tempo → Tindakan — konsisten dengan pola urutan kolom yang sudah dipakai
+di menu Approval & Transaksi (identitas dulu, lalu data finansial, lalu
+lokasi/tanggal, aksi paling akhir).
+(views/invoices/index.ejs)
+
+===========================================================
+FILE YANG DIUBAH (5 file)
+===========================================================
+- views/invoices/index.ejs
+- public/css/app.css
+- package.json (versi -> 1.25.3)
+- views/partials/layout.ejs (versi -> v1.25.3)
+- scripts/validate-v119.js (assertion versi -> 1.25.3)
+
+===========================================================
+PENGUJIAN YANG SUDAH DILAKUKAN
+===========================================================
+- node --check pada seluruh file route/service aplikasi (npm run check):
+  OK, tidak ada error sintaks.
+- Seluruh 39 file EJS aplikasi dikompilasi ulang: semua lulus tanpa error.
+- npm run validate:v119 (validasi statis + kontrak versi/fitur + tes proxy
+  infrastruktur + tes approval kas + tes CSS responsif): SEMUA LULUS.
+- Render test (server Express sungguhan + fetch HTTP, dengan 2 baris data
+  tiruan — salah satunya berstatus TERLAMBAT untuk memastikan badge
+  PERINGATAN KERAS benar-benar tidak muncul lagi) untuk
+  views/invoices/index.ejs, memverifikasi secara terprogram:
+  a) Header tabel TIDAK lagi memuat kolom "Faktur" (PASS)
+  b) Header tabel memuat kolom "No." (PASS)
+  c) Teks "PERINGATAN KERAS" sudah tidak muncul sama sekali di HTML (PASS)
+  d) Hanya ADA 1 elemen <input type="checkbox" data-row-check> per baris
+     (2 baris data tiruan -> tepat 2 checkbox ditemukan, bukan 4) (PASS)
+  e) Class checkbox lama yang terpisah (invoice-table-check) sudah tidak
+     ada lagi di HTML (PASS)
+  f) Urutan kolom header persis: Checkbox, No., Pelanggan, Periode,
+     Status, Tagihan, Terbayar, Site, Jatuh Tempo, Tindakan (PASS)
+- Ditinjau manual: checkbox dan radio button lain di aplikasi (mis. toggle
+  Auto Isolir, pilihan metode pembayaran, pilihan palet warna, pilihan
+  jenis transaksi kas) memakai pola "input tersembunyi + kartu visual
+  custom" — dipastikan TIDAK terpengaruh oleh perubahan styling checkbox
+  global, karena input-nya sendiri memang sengaja disembunyikan
+  (opacity:0) di CSS yang sudah ada sebelumnya.
+
+===========================================================
+CARA PASANG
+===========================================================
+1. Backup folder aplikasi terlebih dahulu. TIDAK ADA migrasi database pada
+   patch ini.
+2. Timpa (overwrite) 5 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R) agar CSS/JS terbaru termuat.
+6. Cek cepat di Menu Tagihan:
+   a. Checkbox di kolom kiri dan checkbox "pilih semua" di header sekarang
+      berwarna sesuai tema (bukan kotak putih polos bawaan browser).
+   b. Kolom "Faktur" sudah tidak ada; nomor faktur + tautan PDF kini
+      tampil di dalam kolom Pelanggan.
+   c. Hanya ada SATU checkbox per baris (bukan dua).
+   d. Cari tagihan yang lewat jatuh tempo lebih dari 2 hari — pastikan
+      badge "PERINGATAN KERAS" sudah tidak muncul lagi.
+   e. Kolom "No." (nomor urut) sudah tampil di sebelah kiri.
+   f. Coba centang beberapa baris lalu klik "Bayar Dipilih" — pastikan
+      masih berfungsi seperti biasa; coba juga Batalkan/Hapus Massal
+      dengan centang yang sama.
