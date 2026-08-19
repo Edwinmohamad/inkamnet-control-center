@@ -18,9 +18,16 @@ function fakeConn(initial){
 
   const nonPending=fakeConn({id:9,source_type:'manual',approval_status:'APPROVED'});
   await assert.rejects(()=>approveCashTransaction(nonPending,9,1),/PENDING_APPROVAL/);
-  const automatic=fakeConn({id:10,source_type:'payment',approval_status:'PENDING_APPROVAL'});
-  await assert.rejects(()=>approveCashTransaction(automatic,10,1),/otomatis/);
+  // v1.24.5 — AUTO BILLING rows (source_type='payment') can be edited from Data Kas like manual entries
+  // (routes/finance.js POST /cash/:id/update), which resets them to PENDING_APPROVAL just like a manual
+  // row. approveCashTransaction/rejectCashTransaction therefore no longer special-case source_type: an
+  // edited AUTO BILLING row must be approvable/rejectable too, or it would get stuck in PENDING_APPROVAL
+  // forever. This asserts the CURRENT (intentional) behavior instead of the old pre-v1.24.5 guard, which
+  // this test previously still expected even though the guard itself was already removed from cashService.js.
+  const automatic=fakeConn({id:10,transaction_code:'EXP-202608-000010',name:'Auto billing edit',amount:120000,source_type:'payment',approval_status:'PENDING_APPROVAL'});
+  const automaticTx=await approveCashTransaction(automatic,10,1);
+  assert.equal(automaticTx.id,10);assert.equal(automatic.row.approval_status,'APPROVED');
   const shortReason=fakeConn({id:11,source_type:'manual',approval_status:'PENDING_APPROVAL'});
   await assert.rejects(()=>rejectCashTransaction(shortReason,11,1,'x'),/minimal 3 karakter/);
-  console.log('Cash approval validation OK: approve/reject transitions, reason validation, duplicate-state and automatic-transaction guards passed.');
+  console.log('Cash approval validation OK: approve/reject transitions, reason validation, duplicate-state guards, and edited-AUTO-BILLING-row approval passed.');
 })().catch(err=>{console.error('Cash approval validation FAILED:',err.stack||err);process.exit(1);});

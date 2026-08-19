@@ -15,7 +15,10 @@ function common(req){
     month,year,site:req.query.site||'',cluster:req.query.cluster||'',status:req.query.status||'',package:req.query.package||'',customer:req.query.customer||'',
     category:req.query.category||'',flow_type:req.query.flow_type||'',method:req.query.method||'',q:String(req.query.q||'').trim(),
     from:iso(req.query.from,new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10)),
-    to:iso(req.query.to,now.toISOString().slice(0,10))
+    to:iso(req.query.to,now.toISOString().slice(0,10)),
+    // v1.25.2 — filter tanggal jatuh tempo untuk Laporan Tagihan/Faktur. Opsional (kosong = tidak
+    // membatasi), independen dari filter Bulan/Tahun periode penerbitan tagihan di atas.
+    dueFrom:iso(req.query.due_from,''),dueTo:iso(req.query.due_to,'')
   };
 }
 
@@ -47,6 +50,8 @@ async function billingReport(f){
   if(f.status){where.push('i.status=?');p.push(f.status);}
   if(f.customer){where.push('c.id=?');p.push(f.customer);}
   if(f.q){const like=`%${f.q}%`;where.push('(c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');p.push(like,like,like,like,like);}
+  if(f.dueFrom){where.push('i.due_date>=?');p.push(f.dueFrom);}
+  if(f.dueTo){where.push('i.due_date<=?');p.push(f.dueTo);}
   const [rows]=await db.execute(`SELECT i.id,i.invoice_number,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name,pk.name package_name,i.due_date,i.total,i.paid_amount,i.outstanding,i.status FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id JOIN packages pk ON pk.id=c.package_id WHERE ${where.join(' AND ')} ORDER BY s.code,cl.name,c.name`,p);
   return rows;
 }
@@ -78,18 +83,22 @@ router.get('/',async(req,res)=>{
   res.render('reports/index',{title:'Laporan',filters,...opts,customerRows,billingRows,cashRows,invoiceRows,summary,monthNames:MONTHS});
 });
 
-router.get('/pdf',async(req,res)=>{
+// v1.25.2 — dipakai bersama oleh /pdf dan /txt (item "2 pilihan download txt atau pdf") supaya query,
+// kolom, dan angka ringkasan pada kedua format SELALU identik (satu sumber kebenaran, tidak ada risiko
+// PDF dan TXT menampilkan angka yang berbeda untuk filter yang sama).
+async function buildReportPayload(req){
   const f=common(req);
   const type=['customers','billing','cash','invoice'].includes(req.query.type)?req.query.type:f.view;
-  let rows=[],columns=[],summaryItems=[],title='',subtitle='',filename='laporan-INKAMNET.pdf';
+  let rows=[],columns=[],summaryItems=[],title='',subtitle='',baseFilename='laporan-INKAMNET';
   let clusterLabel='';
   if(f.cluster){const [clusterRows]=await db.execute(`SELECT cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.id=? LIMIT 1`,[Number(f.cluster)]);if(clusterRows[0])clusterLabel=`${clusterRows[0].site_code} / ${clusterRows[0].name}`;}
+  const dueRangeLabel=(f.dueFrom||f.dueTo)?` | Jatuh Tempo ${f.dueFrom?date(f.dueFrom):'awal'} s/d ${f.dueTo?date(f.dueTo):'akhir'}`:'';
 
   if(type==='customers'){
     rows=await customerReport(f);
     title='LAPORAN PELANGGAN';
     subtitle=`Scope: ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''} | ${rows.length} pelanggan${f.status?` | Status ${documentLabel(f.status,'id')}`:''}`;
-    filename=`laporan-pelanggan-INKAMNET-${new Date().toISOString().slice(0,10)}.pdf`;
+    baseFilename=`laporan-pelanggan-INKAMNET-${new Date().toISOString().slice(0,10)}`;
     summaryItems=[
       {label:'TOTAL PELANGGAN',value:rows.length,color:COLORS.purple},
       {label:'AKTIF',value:rows.filter(x=>x.customer_status==='active').length,color:COLORS.green},
@@ -109,7 +118,7 @@ router.get('/pdf',async(req,res)=>{
     const expense=rows.filter(x=>x.type==='expense').reduce((a,x)=>a+Number(x.amount||0),0);
     title='LAPORAN ARUS KAS';
     subtitle=`Periode ${date(f.from)} s/d ${date(f.to)} | ${f.site||'Semua Site'}`;
-    filename=`laporan-arus-kas-INKAMNET-${f.from}-sd-${f.to}.pdf`;
+    baseFilename=`laporan-arus-kas-INKAMNET-${f.from}-sd-${f.to}`;
     summaryItems=[
       {label:'PENDAPATAN',value:rupiah(income),color:COLORS.green},
       {label:'PENGELUARAN',value:rupiah(expense),color:COLORS.red},
@@ -122,7 +131,7 @@ router.get('/pdf',async(req,res)=>{
       {label:'Kategori',width:1.3,key:'category'},
       {label:'Site',width:.7,value:r=>r.site_code||'GLOBAL'},
       {label:'Jenis',width:.8,value:r=>r.type==='income'?'MASUK':'KELUAR'},
-      {label:'Nominal',width:1.2,value:r=>rupiah(r.amount),bold:true,align:'right'}
+      {label:'Nominal',width:1.2,value:r=>rupiah(r.amount),bold:true,align:'right',total:true,totalBy:r=>Number(r.amount||0)}
     ];
   } else {
     rows=await billingReport(f);
@@ -130,8 +139,8 @@ router.get('/pdf',async(req,res)=>{
     const paid=rows.reduce((a,x)=>a+Number(x.paid_amount||0),0);
     const out=rows.reduce((a,x)=>a+Number(x.outstanding||0),0);
     title=type==='invoice'?'REGISTER FAKTUR':'LAPORAN TAGIHAN';
-    subtitle=`Periode ${MONTHS[f.month-1]} ${f.year} | ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''}${f.status?` | Status ${documentLabel(f.status,'id')}`:''}`;
-    filename=`${type==='invoice'?'register-faktur':'laporan-tagihan'}-INKAMNET-${f.year}-${String(f.month).padStart(2,'0')}.pdf`;
+    subtitle=`Periode ${MONTHS[f.month-1]} ${f.year} | ${f.site||'Semua Site'}${clusterLabel?` | Cluster ${clusterLabel}`:''}${f.status?` | Status ${documentLabel(f.status,'id')}`:''}${dueRangeLabel}`;
+    baseFilename=`${type==='invoice'?'register-faktur':'laporan-tagihan'}-INKAMNET-${f.year}-${String(f.month).padStart(2,'0')}`;
     summaryItems=[
       {label:'TOTAL TAGIHAN',value:rupiah(billed),color:COLORS.purple},
       {label:'TERBAYAR',value:rupiah(paid),color:COLORS.green},
@@ -143,13 +152,75 @@ router.get('/pdf',async(req,res)=>{
       {label:'Pelanggan',width:1.65,key:'customer_name'},
       {label:'Site / Cluster',width:1,value:r=>`${r.site_code} / ${r.cluster_name||'-'}`},
       {label:'Jatuh Tempo',width:1,value:r=>date(r.due_date)},
-      {label:'Tagihan',width:1.05,value:r=>rupiah(r.total),align:'right'},
-      {label:'Sisa',width:1.05,value:r=>rupiah(r.outstanding),bold:true,align:'right'},
+      {label:'Tagihan',width:1.05,value:r=>rupiah(r.total),align:'right',total:true,totalBy:r=>Number(r.total||0)},
+      {label:'Sisa',width:1.05,value:r=>rupiah(r.outstanding),bold:true,align:'right',total:true,totalBy:r=>Number(r.outstanding||0)},
       {label:'Status',width:.85,value:r=>documentLabel(r.status,'id').toUpperCase()}
     ];
   }
 
-  createReportPdf(res,{title,subtitle,filename,summaryItems,columns,rows,layout:'landscape'});
+  return {type,rows,columns,summaryItems,title,subtitle,baseFilename};
+}
+
+router.get('/pdf',async(req,res)=>{
+  const {rows,columns,summaryItems,title,subtitle,baseFilename}=await buildReportPayload(req);
+  createReportPdf(res,{title,subtitle,filename:`${baseFilename}.pdf`,summaryItems,columns,rows,layout:'landscape'});
 });
+
+// v1.25.2 — item "buat 2 pilihan download txt atau pdf": versi teks polos dari laporan yang sama,
+// memakai baris/kolom/ringkasan persis dari buildReportPayload() supaya konsisten dengan PDF-nya.
+// Kolom dirender sebagai tabel rata-kolom (fixed width) khas file .txt, bukan CSV.
+router.get('/txt',async(req,res)=>{
+  const {rows,columns,summaryItems,title,subtitle,baseFilename}=await buildReportPayload(req);
+  const pad=(str,width,align)=>{
+    const s=String(str??'-');
+    if(s.length>=width) return s.slice(0,Math.max(0,width-1))+(width>1?'…':'');
+    const gap=' '.repeat(width-s.length);
+    return align==='right'?gap+s:s+gap;
+  };
+  const colWidths=columns.map((c,i)=>{
+    const headerLen=String(c.label||'').length;
+    const maxDataLen=rows.reduce((m,r)=>Math.max(m,String((typeof c.value==='function'?c.value(r):r[c.key])??'-').length),0);
+    return Math.min(42,Math.max(headerLen,maxDataLen,6))+2;
+  });
+  const lineWidth=colWidths.reduce((a,b)=>a+b,0);
+  const sep='='.repeat(Math.min(100,lineWidth));
+  const thin='-'.repeat(Math.min(100,lineWidth));
+  const lines=[];
+  lines.push('INKAMNET CONTROL CENTER');
+  lines.push(safeTxt(title));
+  if(subtitle) lines.push(safeTxt(subtitle));
+  lines.push(`Dibuat: ${new Intl.DateTimeFormat('id-ID',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jakarta'}).format(new Date())} WIB`);
+  lines.push(sep);
+  if(summaryItems.length){
+    lines.push('RINGKASAN');
+    summaryItems.forEach(it=>lines.push(`  ${it.label}: ${it.value}`));
+    lines.push(sep);
+  }
+  lines.push(columns.map((c,i)=>pad(c.label,colWidths[i],c.align)).join(''));
+  lines.push(thin);
+  if(!rows.length){
+    lines.push('Tidak ada data untuk filter yang dipilih.');
+  } else {
+    rows.forEach(r=>{
+      lines.push(columns.map((c,i)=>pad(typeof c.value==='function'?c.value(r):r[c.key],colWidths[i],c.align)).join(''));
+    });
+    if(columns.some(c=>c.total)){
+      lines.push(thin);
+      lines.push(columns.map((c,i)=>{
+        if(!c.total) return pad(i===0?'TOTAL':'',colWidths[i],c.align);
+        const sum=rows.reduce((a,r)=>a+c.totalBy(r),0);
+        return pad(rupiah(sum),colWidths[i],'right');
+      }).join(''));
+    }
+  }
+  lines.push(sep);
+  lines.push(`${rows.length} baris data · Dokumen digital dari INKAMNET Control Center.`);
+  const body=lines.map(safeTxt).join('\r\n')+'\r\n';
+  res.setHeader('Content-Type','text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition',`attachment; filename="${baseFilename}.txt"`);
+  res.send(body);
+});
+
+function safeTxt(v){return String(v??'').replace(/[\r\n]+/g,' ');}
 
 module.exports=router;

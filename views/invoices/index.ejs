@@ -28,15 +28,23 @@
     <article class="billing-stat"><span class="billing-stat-icon red"><i class="bi bi-hourglass-split"></i></span><div><small>Sisa Tagihan</small><strong><%= formatRupiah(summary.outstanding) %></strong></div></article>
   </div>
 
+  <% const scopedInvoiceRow=filters.customer?invoices.find(i=>String(i.customer_id)===String(filters.customer)):null;
+     const scopedCustomer=filters.customer?(customers.find(c=>String(c.id)===String(filters.customer))||(scopedInvoiceRow?{name:scopedInvoiceRow.customer_name,customer_code:scopedInvoiceRow.customer_code}:null)):null; %>
   <form class="billing-filter-panel" method="get" action="/invoices">
-    <div class="billing-filter-head"><div><strong>Filter Tagihan</strong><small>Pilih periode dan data yang ingin ditampilkan.</small></div><a href="/invoices" class="ink-text-link"><i class="bi bi-arrow-counterclockwise"></i> Atur Ulang</a></div>
+    <div class="billing-filter-head">
+      <div><strong>Filter Tagihan</strong><small>Pilih periode dan data yang ingin ditampilkan. Gunakan kotak Cari untuk menemukan pelanggan tertentu.</small></div>
+      <a href="/invoices" class="ink-text-link"><i class="bi bi-arrow-counterclockwise"></i> Atur Ulang</a>
+    </div>
+    <% if(scopedCustomer){ %><div class="billing-filter-scope"><i class="bi bi-funnel-fill"></i><span>Menampilkan tagihan untuk <strong><%= scopedCustomer.name %></strong> (<%= scopedCustomer.customer_code %>)</span><a href="/invoices?<%= new URLSearchParams({month:filters.month,year:filters.year,status:filters.status,site:filters.site,cluster:filters.cluster,q:filters.q,due_from:filters.dueFrom,due_to:filters.dueTo}).toString() %>"><i class="bi bi-x-lg"></i>Hapus</a></div><% } %>
     <div class="billing-filter-grid">
       <div class="filter-group"><label>BULAN</label><select class="form-select" name="month"><% monthNames.forEach((m,i)=>{ %><option value="<%= i+1 %>" <%= filters.month===i+1?'selected':'' %>><%= m %></option><% }) %></select></div>
       <div class="filter-group"><label>TAHUN</label><input class="form-control" name="year" type="number" min="2020" max="2100" value="<%= filters.year %>"></div>
       <div class="filter-group"><label>STATUS</label><select class="form-select" name="status"><option value="">Semua Status</option><option value="open" <%= filters.status==='open'?'selected':'' %>>Belum Lunas (Semua)</option><option value="unpaid" <%= filters.status==='unpaid'?'selected':'' %>>Belum Lunas</option><option value="partial" <%= filters.status==='partial'?'selected':'' %>>Sebagian</option><option value="overdue" <%= filters.status==='overdue'?'selected':'' %>>Terlambat</option><option value="paid" <%= filters.status==='paid'?'selected':'' %>>Lunas</option></select></div>
       <div class="filter-group"><label>SITE / POP</label><select class="form-select" name="site"><option value="">Semua Site</option><% sites.forEach(s=>{ %><option value="<%= s.code %>" <%= filters.site===s.code?'selected':'' %>><%= s.code %> · <%= s.name %></option><% }) %></select></div>
       <div class="filter-group"><label>CLUSTER / ODP</label><select class="form-select" name="cluster"><option value="">Semua Cluster</option><% clusters.forEach(c=>{ %><option value="<%= c.id %>" <%= String(filters.cluster)===String(c.id)?'selected':'' %>><%= c.site_code %> · <%= c.name %></option><% }) %></select></div>
-      <div class="filter-group billing-filter-customer"><label>PELANGGAN</label><select class="form-select" name="customer"><option value="">Semua Pelanggan</option><% customers.forEach(c=>{ %><option value="<%= c.id %>" <%= String(filters.customer)===String(c.id)?'selected':'' %>><%= c.site_code %> · Cluster <%= c.cluster_name||'-' %> · <%= c.customer_code %> · <%= c.name %></option><% }) %></select></div>
+      <div class="filter-group"><label>JATUH TEMPO DARI</label><input class="form-control" type="date" name="due_from" value="<%= filters.dueFrom %>"></div>
+      <div class="filter-group"><label>JATUH TEMPO SAMPAI</label><input class="form-control" type="date" name="due_to" value="<%= filters.dueTo %>"></div>
+      <% if(filters.customer){ %><input type="hidden" name="customer" value="<%= filters.customer %>"><% } %>
       <div class="filter-group billing-filter-search"><label>CARI</label><div class="search-box"><i class="bi bi-search"></i><input name="q" value="<%= filters.q %>" placeholder="Nama, ID pelanggan, faktur, site, cluster..."></div></div>
       <div class="billing-filter-submit"><button class="btn-tech primary"><i class="bi bi-funnel"></i>Terapkan Filter</button></div>
     </div>
@@ -56,16 +64,16 @@
         <!-- v1.24.6 — kolom "Kirim Pengingat" dihapus (UI/UX audit): tombolnya sudah ada juga di popover
              Tindakan setiap baris, jadi tidak perlu kolom tersendiri yang isinya cuma satu tombol/teks
              "Tidak diperlukan" di sebagian besar baris. -->
-        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua tagihan untuk batalkan/hapus massal"></th><% } %><th>#</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
+        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua tagihan untuk batalkan/hapus massal"></th><% } %><th>Faktur</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
           <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); const waValid=/^628[1-9]\d{7,11}$/.test(wa); const hardOverdue=Number(i.days_overdue)>2&&Number(i.outstanding)>0&&!['paid','cancelled','refunded'].includes(i.status); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const hasPending=Number(i.active_payment_count||0)>0&&Number(i.paid_amount||0)===0; const canPay=Number(i.outstanding)>0 && !hasPending && !['paid','cancelled','refunded'].includes(i.status); %>
           <tr class="<%= hardOverdue?'invoice-hard-overdue':'' %>">
             <% if(isAdmin){ %><td><input type="checkbox" data-row-check value="<%= i.id %>" aria-label="Pilih tagihan <%= i.invoice_number %> untuk batalkan/hapus massal"></td><% } %>
-            <td><span class="cell-main"><%= index+1 %></span></td>
+            <td><a class="invoice-number-link standalone" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></td>
             <td>
               <div class="invoice-customer-select">
                 <% if(isAdmin){ %><input class="form-check-input invoice-table-check" type="checkbox" value="<%= i.id %>" data-invoice-table-check <%= canPay?'':'disabled' %> aria-label="Pilih tagihan <%= i.customer_name %>"><% } %>
-                <div><span class="cell-main"><%= i.customer_name %></span><% if(i.customer_archived_at){ %><span class="status-badge gray customer-archived-pill" title="Pelanggan ini sudah diarsipkan — riwayat tagihan tetap ditampilkan untuk audit."><i class="bi bi-archive-fill"></i>Diarsipkan</span><% } %><span class="cell-sub"><%= i.customer_code %></span><a class="invoice-number-link" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= i.invoice_number %></a></div>
+                <div><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><% if(i.customer_archived_at){ %><span class="status-badge gray customer-archived-pill" title="Pelanggan ini sudah diarsipkan — riwayat tagihan tetap ditampilkan untuk audit."><i class="bi bi-archive-fill"></i>Diarsipkan</span><% } %></div>
               </div>
             </td>
             <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
@@ -84,6 +92,7 @@
                 <div class="ink-action-popover-body">
                   <% if(canPay&&isAdmin){ %><button type="button" class="ink-action-item compact success" data-action-close data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>"><i class="bi bi-check2-circle"></i><span><b>Input Pembayaran / Lunas</b><small>Nominal otomatis dikunci sebesar sisa tagihan</small></span></button><% }else if(i.status==='paid'){ %><div class="ink-action-item compact action-complete"><i class="bi bi-patch-check-fill"></i><span><b>Tagihan Sudah Lunas</b><small>Pembayaran baru tidak diperlukan</small></span></div><% } %>
                   <button type="button" class="ink-action-item compact" data-action-close data-bs-toggle="modal" data-bs-target="#invoiceEditModal" data-invoice-edit-id="<%= i.id %>" data-invoice-edit-number="<%= i.invoice_number %>" data-invoice-edit-customer="<%= i.customer_name %>" data-invoice-edit-date="<%= i.invoice_date_key %>" data-invoice-edit-due="<%= i.due_date_key %>" data-invoice-edit-prorata="<%= i.is_prorata?1:0 %>"><i class="bi bi-pencil-square"></i><span><b>Edit Tagihan</b><small>Tanggal & tipe, bukan nominal</small></span></button>
+                  <% if(isAdmin && !['paid','cancelled','refunded'].includes(i.status)){ %><button type="button" class="ink-action-item compact" data-action-close data-bs-toggle="modal" data-bs-target="#invoiceDiscountModal" data-discount-invoice-id="<%= i.id %>" data-discount-invoice-number="<%= i.invoice_number %>" data-discount-customer="<%= i.customer_name %>" data-discount-subtotal="<%= i.subtotal %>" data-discount-current="<%= i.discount %>"><i class="bi bi-percent"></i><span><b>Tambah Diskon</b><small>Nominal Rp atau persen · total otomatis disesuaikan</small></span></button><% } %>
                   <% if(isAdmin && (Number(i.paid_amount)>0 || ['paid','partial'].includes(i.status))){ %><form method="post" action="/invoices/<%= i.id %>/reset-unpaid" onsubmit="return confirm('Koreksi tagihan menjadi BELUM LUNAS? Semua pembayaran aktif untuk faktur ini akan dibatalkan dan pendapatan kas terkait otomatis dikurangi. Nominal tagihan tidak berubah.')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="return_to" value="/invoices?<%= periodQueryString %>"><button class="ink-action-item compact warning" type="submit"><i class="bi bi-arrow-counterclockwise"></i><span><b>Jadikan Belum Lunas</b><small>Koreksi pembayaran & pendapatan otomatis</small></span></button></form><% } %>
                   <a class="ink-action-item compact" href="/invoices/<%= i.id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><span><b>Lihat Faktur PDF</b><small>Buka di tab baru</small></span></a>
                   <a class="ink-action-item compact" href="/invoices/<%= i.id %>/pdf?download=1"><i class="bi bi-download"></i><span><b>Unduh PDF</b><small>Simpan faktur</small></span></a>
@@ -144,6 +153,25 @@
   </div>
 </div>
 
+<div class="modal fade" id="invoiceDiscountModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="invoiceDiscountForm" method="post">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input type="hidden" name="return_to" value="/invoices?<%= periodQueryString %>">
+      <div class="modal-header"><div><div class="module-kicker">DISKON TAGIHAN</div><h5 class="modal-title">Tambah / Ubah Diskon</h5><small class="text-secondary" id="invoiceDiscountIdentity">-</small></div><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="invoice-edit-safety"><i class="bi bi-shield-lock-fill"></i><div><strong>Total dihitung ulang otomatis</strong><small>Total Akhir = Nominal Tagihan − Diskon. Tidak berlaku untuk tagihan yang sudah lunas/dibatalkan.</small></div></div>
+        <div class="row g-3 mt-1">
+          <div class="col-12"><small class="text-secondary">Nominal Tagihan (sebelum diskon): <strong id="invoiceDiscountSubtotal">-</strong></small></div>
+          <div class="col-md-5"><label class="form-label">Tipe Diskon</label><select class="form-select" name="discount_mode" id="invoiceDiscountMode"><option value="flat">Nominal (Rp)</option><option value="percent">Persentase (%)</option></select></div>
+          <div class="col-md-7"><label class="form-label">Nilai Diskon</label><input class="form-control" type="number" name="discount_value" id="invoiceDiscountValue" min="0" step="1" required></div>
+        </div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn-tech" data-bs-dismiss="modal">Batal</button><button class="btn-tech primary"><i class="bi bi-percent"></i>Simpan Diskon</button></div>
+    </form>
+  </div>
+</div>
+
 <% if(isAdmin){ %><%- include('../payments/_payment-modal',{openInvoices,staff,banks,preselectedInvoiceId:null,returnTo:'/invoices?'+periodQueryString,autoOpenPaymentModal:false}) %><% } %>
 
 <script>
@@ -156,6 +184,8 @@
   paySelected?.addEventListener('click',()=>{const ids=refreshSelection();if(!ids.length)return;const paymentModal=document.getElementById('paymentModal');if(!paymentModal)return;paymentModal.querySelectorAll('.payment-invoice-check').forEach(ch=>{ch.checked=ids.includes(String(ch.value));ch.dispatchEvent(new Event('change',{bubbles:true}));});bootstrap.Modal.getOrCreateInstance(paymentModal).show();});
   const editModal=document.getElementById('invoiceEditModal');
   editModal?.addEventListener('show.bs.modal',event=>{const b=event.relatedTarget;if(!b)return;document.getElementById('invoiceEditForm').action=`/invoices/${b.dataset.invoiceEditId}/update-meta`;document.getElementById('invoiceEditIdentity').textContent=`${b.dataset.invoiceEditNumber} · ${b.dataset.invoiceEditCustomer}`;document.getElementById('invoiceEditDate').value=b.dataset.invoiceEditDate||'';document.getElementById('invoiceEditDue').value=b.dataset.invoiceEditDue||'';document.getElementById('invoiceEditProrata').value=b.dataset.invoiceEditProrata||'0';});
+  const discountModal=document.getElementById('invoiceDiscountModal');
+  discountModal?.addEventListener('show.bs.modal',event=>{const b=event.relatedTarget;if(!b)return;document.getElementById('invoiceDiscountForm').action=`/invoices/${b.dataset.discountInvoiceId}/discount`;document.getElementById('invoiceDiscountIdentity').textContent=`${b.dataset.discountInvoiceNumber} · ${b.dataset.discountCustomer}`;document.getElementById('invoiceDiscountSubtotal').textContent=new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(b.dataset.discountSubtotal||0));document.getElementById('invoiceDiscountMode').value='flat';document.getElementById('invoiceDiscountValue').value=Number(b.dataset.discountCurrent||0)||'';});
   refreshSelection();
 })();
 </script>

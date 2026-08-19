@@ -49,21 +49,35 @@
   </form>
 
   <div class="data-card">
-    <div class="data-card-head"><div><h3>Riwayat Pembayaran</h3><small>Master Admin dapat melakukan Approve atau Reject langsung dari kolom approval.</small></div><div class="legend-inline"><span><i class="dot success"></i>Disetujui</span><span><i class="dot warning"></i>Menunggu</span><span><i class="dot danger"></i>Ditolak</span></div></div>
+    <div class="data-card-head">
+      <div><h3>Riwayat Pembayaran</h3><small>Master Admin dapat melakukan Approve atau Reject langsung dari kolom approval, atau memilih beberapa baris sekaligus untuk Approve Massal.</small></div>
+      <div class="invoice-registry-tools">
+        <% if(isMasterAdmin){ %><div class="invoice-selection-state"><i class="bi bi-check2-square"></i><span><b id="paymentsTableSelectedCount">0</b> dipilih</span></div><% } %>
+        <div class="legend-inline"><span><i class="dot success"></i>Disetujui</span><span><i class="dot warning"></i>Menunggu</span><span><i class="dot danger"></i>Ditolak</span></div>
+      </div>
+    </div>
     <div class="table-responsive">
-      <table class="app-table">
+      <table class="app-table" data-bulk-scope="paymentsApproveBulkBar">
         <!-- v1.24.6 — kolom "Status Approval" dan "Approval Master" digabung jadi satu kolom "Approval"
              (UI/UX audit): sebelumnya dua kolom terpisah membahas hal yang sama (badge status di satu
              kolom, tombol Approve/Reject di kolom lain) — sekarang satu kolom saja: badge biasa, atau
-             kalau statusnya menunggu & yang login Master Admin, badge itu berubah jadi tombol langsung. -->
-        <thead><tr><th>Pelanggan</th><th>Site / Cluster</th><th>Faktur</th><th>Nominal</th><th>Metode</th><th>Bukti Pembayaran</th><th>Diterima Oleh</th><th>Approval</th><th>Waktu</th><th>Aksi</th></tr></thead>
+             kalau statusnya menunggu & yang login Master Admin, badge itu berubah jadi tombol langsung.
+             v1.25.2 — audit UI: kolom "Faktur" dihapus (nomor faktur dipindah jadi sub-teks di kolom
+             Pelanggan agar tetap bisa dibuka, tanpa kolom sendiri) dan kolom "Waktu" dihapus, digantikan
+             kolom "Jatuh Tempo" yang lebih relevan untuk follow-up penagihan. Kolom "No." dan checkbox
+             pilih-massal (Master Admin) ditambahkan di paling kiri. -->
+        <thead><tr>
+          <% if(isMasterAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua pembayaran menunggu approval"></th><% } %>
+          <th>No.</th><th>Pelanggan</th><th>Site / Cluster</th><th>Nominal</th><th>Metode</th><th>Bukti Pembayaran</th><th>Diterima Oleh</th><th>Approval</th><th>Jatuh Tempo</th><th>Aksi</th>
+        </tr></thead>
         <tbody>
-          <% payments.forEach(p=>{ %>
+          <% payments.forEach((p,idx)=>{ %>
           <tr>
-            <td><span class="cell-main"><%= p.customer_name %></span><span class="cell-sub"><%= p.customer_code %></span></td>
+            <% if(isMasterAdmin){ %><td><input type="checkbox" data-row-check value="<%= p.id %>" <%= p.status==='pending'?'':'disabled' %> aria-label="Pilih pembayaran <%= p.reference||p.id %> untuk approve massal"></td><% } %>
+            <td><span class="cell-main"><%= idx+1 %></span></td>
+            <td><span class="cell-main"><%= p.customer_name %></span><span class="cell-sub"><%= p.customer_code %></span><a class="invoice-number-link standalone" href="/invoices/<%= p.invoice_id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= p.invoice_number %></a></td>
             <td><span class="cell-main"><%= p.site_code %></span><span class="cell-sub">Cluster <%= p.cluster_name||'-' %></span></td>
-            <td><a class="invoice-number-link" href="/invoices/<%= p.invoice_id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= p.invoice_number %></a><span class="cell-sub"><%= p.reference||'-' %></span></td>
-            <td class="money"><%= formatRupiah(p.amount) %></td>
+            <td class="money"><%= formatRupiah(p.amount) %><span class="cell-sub"><%= p.reference||'-' %></span></td>
             <td><span class="payment-method <%= p.method %>"><i class="bi <%= p.method==='cash'?'bi-cash-coin':p.method==='transfer'?'bi-bank':'bi-wallet2' %>"></i><%= statusLabel(p.method).toUpperCase() %></span></td>
             <td>
               <% if(p.proof_path){ %><button type="button" class="proof-chip proof-view-btn" data-bs-toggle="modal" data-bs-target="#proofViewerModal" data-proof-url="/payments/<%= p.id %>/proof" data-proof-mime="<%= p.proof_mime||'' %>" data-customer="<%= p.customer_name %>" data-customer-code="<%= p.customer_code %>" data-invoice="<%= p.invoice_number %>" data-amount="<%= formatRupiah(p.amount) %>" data-bank="<%= p.bank_name||'-' %>" data-reference="<%= p.reference||'-' %>" data-uploader="<%= p.proof_uploader_name||'-' %>" data-uploaded="<%= p.proof_uploaded_at?new Date(p.proof_uploaded_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'}):'-' %>" data-status="<%= statusLabel(p.status) %>"><span class="proof-chip-icon"><i class="bi <%= p.proof_mime==='application/pdf'?'bi-file-earmark-pdf-fill':'bi-image-fill' %>"></i></span><span><strong>Lihat Bukti</strong><small><%= p.proof_mime==='application/pdf'?'PDF':'Foto' %></small></span></button>
@@ -79,15 +93,16 @@
               <% } else if(p.method==='cash'&&p.settlement_status==='settled'){ %><span class="status-badge green">sudah disetor</span>
               <% } else { %><span class="status-badge green"><i class="bi bi-shield-check"></i> disetujui <%= p.verifier_name||'Master Admin' %></span><% } %>
             </td>
-            <td><span class="cell-main"><%= new Date(p.paid_at).toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'}) %></span><span class="cell-sub"><%= new Date(p.paid_at).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jakarta'}) %></span></td>
+            <td><%= formatDate(p.due_date) %></td>
             <td><div class="payment-actions"><% if(isAdmin||Number(p.received_by)===Number(user.id)||Number(p.collector_user_id)===Number(user.id)){ %><button type="button" class="action-pill proof-upload-btn" title="<%= p.proof_path?'Ganti bukti':'Upload bukti pembayaran' %>" data-bs-toggle="modal" data-bs-target="#proofUploadModal" data-payment-id="<%= p.id %>" data-customer="<%= p.customer_name %>" data-invoice="<%= p.invoice_number %>"><i class="bi bi-cloud-arrow-up"></i></button><% } %><% if(p.proof_path){ %><a class="action-pill" href="/payments/<%= p.id %>/proof" target="_blank" rel="noopener" title="Buka bukti"><i class="bi bi-box-arrow-up-right"></i></a><% } %></div></td>
           </tr>
           <% }) %>
-          <% if(!payments.length){ %><tr><td colspan="10"><div class="empty-state"><i class="bi bi-wallet2"></i><strong>Data pembayaran tidak ditemukan</strong><small>Ubah kata pencarian atau catat pembayaran baru.</small></div></td></tr><% } %>
+          <% if(!payments.length){ %><tr><td colspan="<%= isMasterAdmin?11:10 %>"><div class="empty-state"><i class="bi bi-wallet2"></i><strong>Data pembayaran tidak ditemukan</strong><small>Ubah kata pencarian atau catat pembayaran baru.</small></div></td></tr><% } %>
         </tbody>
       </table>
     </div>
   </div>
+  <% if(isMasterAdmin){ %><div class="customer-bulk-bar" id="paymentsApproveBulkBar" hidden><span><b data-bulk-count>0</b> pembayaran terpilih</span><div class="customer-bulk-buttons"><button type="button" data-bulk-clear class="ghost"><i class="bi bi-x-lg"></i>Batal</button><button type="button" class="success" data-simple-delete-bulk data-bulk-scope-id="paymentsApproveBulkBar" data-bulk-url="/payments/bulk-verify" data-bulk-action-field="action" data-bulk-action-value="verify" data-bulk-id-field="payment_ids[]" data-entity-label-plural="pembayaran" data-simple-delete-title="Approve pembayaran terpilih?" data-simple-delete-warning="Hanya pembayaran yang masih berstatus menunggu dan nominalnya tidak melebihi sisa tagihan saat ini yang akan disetujui — sisanya otomatis dilewati. Tagihan dan jurnal kas terkait akan diperbarui otomatis."><i class="bi bi-check2-circle"></i>Approve Massal</button></div></div><% } %>
 </section>
 
 <% if(isAdmin){ %><%- include('_payment-modal',{openInvoices,staff,banks,preselectedInvoiceId,returnTo:'/payments?'+paymentFilterQuery,autoOpenPaymentModal:!!preselectedInvoiceId}) %><% } %>

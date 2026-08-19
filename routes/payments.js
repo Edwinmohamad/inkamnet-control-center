@@ -45,6 +45,11 @@ function selectedInvoiceIds(body){
   const list=Array.isArray(raw)?raw:[raw];
   return [...new Set(list.map(Number).filter(Number.isInteger).filter(x=>x>0))];
 }
+function selectedPaymentIds(body){
+  const raw=body.payment_ids??body.payment_id;
+  const list=Array.isArray(raw)?raw:[raw];
+  return [...new Set(list.map(Number).filter(Number.isInteger).filter(x=>x>0))];
+}
 function paymentReference(paymentId, date=new Date()){
   const d=new Date(date);
   const stamp=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
@@ -99,7 +104,7 @@ router.get('/',async(req,res)=>{
   const month=Number(req.query.month)>=1&&Number(req.query.month)<=12?Number(req.query.month):'';
   const year=Number(req.query.year)>=2020&&Number(req.query.year)<=2100?Number(req.query.year):'';
   const approval=['pending','confirmed','failed'].includes(String(req.query.approval||''))?String(req.query.approval):'';
-  let sql=`SELECT p.*,i.invoice_number,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name,u.name collector_name,v.name verifier_name,pu.name proof_uploader_name
+  let sql=`SELECT p.*,i.invoice_number,i.due_date,c.customer_code,c.name customer_name,s.code site_code,cl.name cluster_name,u.name collector_name,v.name verifier_name,pu.name proof_uploader_name
     FROM payments p JOIN invoices i ON i.id=p.invoice_id JOIN customers c ON c.id=i.customer_id JOIN sites s ON s.id=c.site_id LEFT JOIN clusters cl ON cl.id=c.cluster_id
     LEFT JOIN users u ON u.id=COALESCE(p.collector_user_id,p.received_by) LEFT JOIN users v ON v.id=p.verified_by LEFT JOIN users pu ON pu.id=p.proof_uploaded_by WHERE 1=1`;
   const params=[];
@@ -234,6 +239,43 @@ router.post('/:id/verify',requireMasterAdmin,async(req,res)=>{
     req.session.flash={type:'success',message:`Pembayaran disetujui Master Admin ${p.proof_path?'berdasarkan bukti':'tanpa bukti lampiran'}. Tagihan dan jurnal terkait sudah diperbarui.`};
   }catch(e){await conn.rollback();req.session.flash={type:'danger',message:`Verifikasi gagal: ${e.message}`};}finally{conn.release();}
   res.redirect(localReturn(req.body.return_to,'/payments'));
+});
+
+// v1.25.2 — "Approve Massal": Master Admin can select several pending payments in the Riwayat
+// Pembayaran table and approve them all at once. Reuses the EXACT same per-row guard/locking as the
+// single /:id/verify route above (one `SELECT ... FOR UPDATE` transaction per payment, still checked
+// against the invoice's CURRENT outstanding), just looped — so a batch never bypasses the same
+// financial-safety checks that protect individual approvals. Payments that fail their own guard (already
+// resolved, or amount now exceeds outstanding because of a race) are skipped rather than aborting the batch.
+router.post('/bulk-verify',requireMasterAdmin,async(req,res)=>{
+  const returnTo=localReturn(req.body.return_to,'/payments');
+  const ids=selectedPaymentIds(req.body);
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu pembayaran terlebih dahulu.'};return res.redirect(returnTo);}
+  if(ids.length>200){req.session.flash={type:'danger',message:'Maksimal 200 pembayaran per approval massal.'};return res.redirect(returnTo);}
+  const done=[];const skipped=[];
+  for(const id of ids){
+    const conn=await db.getConnection();
+    try{
+      await conn.beginTransaction();
+      const [rows]=await conn.execute(`SELECT * FROM payments WHERE id=? FOR UPDATE`,[id]);
+      const p=rows[0];
+      if(!p||p.status!=='pending'){await conn.rollback();continue;}
+      const [invoiceRows]=await conn.execute(`SELECT outstanding,status FROM invoices WHERE id=? FOR UPDATE`,[p.invoice_id]);
+      if(!invoiceRows.length||Number(p.amount)>Number(invoiceRows[0].outstanding)){await conn.rollback();skipped.push(p);continue;}
+      await conn.execute(`UPDATE payments SET status='confirmed',settlement_status=?,verified_by=?,verified_at=NOW() WHERE id=?`,[p.method==='cash'?'held_by_staff':'not_applicable',req.session.user.id,p.id]);
+      await refreshInvoiceStatus(conn,p.invoice_id);
+      if(p.method!=='cash')await postCashTransaction(conn,{paymentId:p.id,invoiceId:p.invoice_id,amount:p.amount,reference:p.reference,actorUserId:req.session.user.id});
+      await conn.commit();
+      done.push(p);
+    }catch(e){await conn.rollback();skipped.push({id});}finally{conn.release();}
+  }
+  if(done.length){
+    for(const p of done){await maybeAutoUnisolate(p.invoice_id);}
+    await audit({userId:req.session.user.id,action:'bulk_approve',entityType:'payment',entityId:null,description:`Approval massal ${done.length} pembayaran: ${done.map(p=>p.reference||`#${p.id}`).slice(0,20).join(', ')}${done.length>20?', ...':''}${skipped.length?` (${skipped.length} dilewati karena sudah tidak menunggu / nominal melebihi sisa tagihan terkini)`:''}`,ip:req.ip});
+  }
+  if(!done.length){req.session.flash={type:'danger',message:'Semua pembayaran terpilih sudah tidak berstatus menunggu, atau nominalnya melebihi sisa tagihan saat ini.'};return res.redirect(returnTo);}
+  req.session.flash={type:'success',message:`${done.length} pembayaran disetujui. Tagihan dan jurnal kas terkait sudah diperbarui.${skipped.length?` ${skipped.length} pembayaran dilewati karena sudah tidak menunggu approval atau nominalnya melebihi sisa tagihan saat ini.`:''}`};
+  res.redirect(returnTo);
 });
 
 router.post('/:id/reject',requireMasterAdmin,async(req,res)=>{

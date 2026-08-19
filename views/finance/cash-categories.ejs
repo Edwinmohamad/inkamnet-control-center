@@ -19,16 +19,16 @@
     <div class="data-card-head"><div><h3>Daftar Kategori Kas</h3><small>Kode kategori menjadi prefix nomor transaksi, contoh OPS-202608-000123.</small></div></div>
     <div class="table-responsive">
       <table class="app-table">
-        <thead><tr><th>Kode</th><th>Nama</th><th>Jenis</th><th>Site</th><th>Keterangan</th><th>Dipakai</th><th>Status</th><th class="text-end">Tindakan</th></tr></thead>
+        <thead><tr><th>No.</th><th>Kode</th><th>Nama</th><th>Jenis</th><th>Site</th><th>Keterangan</th><th>Status</th><th class="text-end">Tindakan</th></tr></thead>
         <tbody>
-          <% categories.forEach(c=>{ %>
+          <% categories.forEach((c,catIndex)=>{ %>
           <tr>
+            <td><span class="cell-main"><%= catIndex+1 %></span></td>
             <td><code class="cash-category-code"><%= c.code||'-' %></code></td>
             <td><span class="cell-main"><%= c.name %></span> <% if(c.is_recurring_mandatory){ %><span class="status-badge purple"><i class="bi bi-calendar2-check-fill"></i>Wajib Bulanan</span><% } %></td>
             <td><span class="status-badge <%= c.type==='income'?'green':'red' %>"><%= c.type==='income'?'Pendapatan':'Pengeluaran' %></span></td>
             <td><span class="status-badge purple"><%= c.site_code||'GLOBAL' %></span></td>
             <td><%= c.description||'-' %></td>
-            <td><span class="cell-main"><%= Number(c.usage_count||0) %> transaksi</span></td>
             <td><span class="status-badge <%= c.is_active?'green':'gray' %>"><%= c.is_active?'aktif':'nonaktif' %></span></td>
             <td class="text-end">
               <% if(isAdmin){ %>

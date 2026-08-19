@@ -183,4 +183,69 @@ async function refreshInvoiceStatus(conn, invoiceId) {
   await conn.execute(`UPDATE invoices SET paid_amount=?, outstanding=?, status=? WHERE id=?`, [paid, outstanding, status, invoiceId]);
 }
 
-module.exports = { generateMonthlyInvoices, refreshInvoiceStatus, calcProrata };
+// v1.25.2 — CRITICAL FIX: previously, changing/removing a customer's discount_id only affected
+// invoices generated AFTER the change (see generateMonthlyInvoices above); any invoice already
+// generated for the customer kept whatever discount was baked in at generation time, which is what
+// admins reported as the discount feature "not working" (they'd change a customer's discount and see
+// no change on the customer's current/ongoing invoice). This recomputes discount/total for every OPEN
+// invoice belonging to the customer against the NEW discount rule (or removes the discount entirely if
+// discountId is null), then reuses refreshInvoiceStatus so paid_amount/outstanding/status stay
+// consistent with the existing single source of truth.
+//
+// Safety constraint (per spec): must NEVER touch historical invoices that are already settled — so this
+// only targets invoices with status NOT IN ('paid','cancelled','refunded'). A 'partial' invoice is still
+// considered "berjalan" (ongoing) and is included; refreshInvoiceStatus will re-derive paid/outstanding
+// against the new total afterward (clamped at 0, so a discount that now exceeds what's already been
+// paid simply resolves the invoice to 'paid', it never goes negative).
+//
+// Call this ONLY when discount_id actually changed (compare old vs new before calling) so re-saving a
+// customer form without touching the discount field never disturbs a discount an admin manually set on
+// one specific invoice via "Tambah Diskon".
+async function syncCustomerDiscountToOpenInvoices(conn, customerId, discountId) {
+  let rule = null;
+  if (discountId) {
+    const [[d]] = await conn.execute(`SELECT type,amount FROM discounts WHERE id=? AND is_active=1 LIMIT 1`, [discountId]);
+    rule = d || null; // if the rule is inactive/missing by the time we get here, treat as "no discount"
+  }
+  const [invoices] = await conn.execute(
+    `SELECT id, subtotal FROM invoices WHERE customer_id=? AND status NOT IN ('paid','cancelled','refunded') FOR UPDATE`,
+    [customerId]
+  );
+  for (const inv of invoices) {
+    const subtotal = Number(inv.subtotal);
+    let discountAmount = 0;
+    if (rule) {
+      discountAmount = rule.type === 'percent'
+        ? Math.round(subtotal * Number(rule.amount || 0) / 100)
+        : Number(rule.amount || 0);
+      discountAmount = Math.max(0, Math.min(discountAmount, subtotal));
+    }
+    const total = subtotal - discountAmount;
+    await conn.execute(`UPDATE invoices SET discount=?, total=? WHERE id=?`, [discountAmount, total, inv.id]);
+    await refreshInvoiceStatus(conn, inv.id);
+  }
+  return invoices.length;
+}
+
+// v1.25.2 — backs the per-invoice "Tambah Diskon" action (Daftar Tagihan row menu): lets an admin set a
+// one-off discount (flat rupiah or percent) directly on a single invoice, independent of the customer's
+// discount_id. Guarded the same way as syncCustomerDiscountToOpenInvoices: refuses to touch an invoice
+// that is already 'paid'/'cancelled'/'refunded' so historical/settled invoices can never be corrupted.
+// Returns null (no-op) if the invoice doesn't exist or isn't eligible; otherwise the recomputed
+// {subtotal, discount, total}. Caller is expected to already hold/open the transaction and to audit +
+// flash the result.
+async function applyInvoiceDiscount(conn, invoiceId, mode, rawValue) {
+  const [rows] = await conn.execute(`SELECT id,subtotal,status FROM invoices WHERE id=? LIMIT 1 FOR UPDATE`, [invoiceId]);
+  if (!rows.length) return null;
+  const invoice = rows[0];
+  if (['paid', 'cancelled', 'refunded'].includes(invoice.status)) return null;
+  const subtotal = Number(invoice.subtotal);
+  let discountAmount = mode === 'percent' ? Math.round(subtotal * Number(rawValue || 0) / 100) : Number(rawValue || 0);
+  discountAmount = Math.max(0, Math.min(discountAmount, subtotal));
+  const total = subtotal - discountAmount;
+  await conn.execute(`UPDATE invoices SET discount=?, total=? WHERE id=?`, [discountAmount, total, invoiceId]);
+  await refreshInvoiceStatus(conn, invoiceId);
+  return { subtotal, discount: discountAmount, total };
+}
+
+module.exports = { generateMonthlyInvoices, refreshInvoiceStatus, calcProrata, syncCustomerDiscountToOpenInvoices, applyInvoiceDiscount };

@@ -2,7 +2,7 @@ const express=require('express');
 const fs=require('fs');
 const path=require('path');
 const db=require('../config/db');
-const { generateMonthlyInvoices }=require('../services/invoiceService');
+const { generateMonthlyInvoices, applyInvoiceDiscount }=require('../services/invoiceService');
 const { requireAdmin, requireMasterAdmin, isMasterAdminRole }=require('../middleware/auth');
 const { createCorporateInvoicePdf }=require('../services/reportPdf');
 const { audit }=require('../services/auditService');
@@ -17,6 +17,7 @@ function periodDate(year,month){
   const day=(now.getFullYear()===year && now.getMonth()+1===month)?now.getDate():1;
   return new Date(year,month-1,day);
 }
+function isoDate(v){return /^\d{4}-\d{2}-\d{2}$/.test(String(v||''))?String(v):'';}
 function periodQuery(filters){
   const p=new URLSearchParams();
   p.set('month',filters.month);p.set('year',filters.year);
@@ -25,6 +26,8 @@ function periodQuery(filters){
   if(filters.cluster) p.set('cluster',filters.cluster);
   if(filters.customer) p.set('customer',filters.customer);
   if(filters.q) p.set('q',filters.q);
+  if(filters.dueFrom) p.set('due_from',filters.dueFrom);
+  if(filters.dueTo) p.set('due_to',filters.dueTo);
   return p.toString();
 }
 async function loadInvoiceBranding(){
@@ -50,6 +53,11 @@ router.get('/',async(req,res)=>{
   const cluster=String(req.query.cluster||'').trim();
   const customer=String(req.query.customer||'').trim();
   const q=String(req.query.q||'').trim();
+  // v1.25.2 — filter tanggal jatuh tempo (due_date), independen dari filter Bulan/Tahun periode
+  // penerbitan tagihan di atas. Opsional: kalau dikosongkan, tidak membatasi apa pun (perilaku sama
+  // seperti sebelum filter ini ada).
+  const dueFrom=isoDate(req.query.due_from);
+  const dueTo=isoDate(req.query.due_to);
 
   const commonWhere=['i.period_year=?','i.period_month=?'];
   const commonParams=[year,month];
@@ -62,6 +70,8 @@ router.get('/',async(req,res)=>{
   if(status==='open') listWhere.push("i.status IN ('unpaid','partial','overdue')");
   else if(status){listWhere.push('i.status=?');listParams.push(status);}
   if(q){listWhere.push('(c.name LIKE ? OR c.customer_code LIKE ? OR i.invoice_number LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)');const like=`%${q}%`;listParams.push(like,like,like,like,like);}
+  if(dueFrom){listWhere.push('i.due_date>=?');listParams.push(dueFrom);}
+  if(dueTo){listWhere.push('i.due_date<=?');listParams.push(dueTo);}
 
   // v1.20.2: c.archived_at exposed so the view can flag "Pelanggan diarsipkan" next to the invoice —
   // by design invoices from an archived (soft-deleted) customer stay visible here forever (financial
@@ -108,7 +118,7 @@ router.get('/',async(req,res)=>{
     WHERE i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 AND NOT EXISTS (SELECT 1 FROM payments pp WHERE pp.invoice_id=i.id AND pp.status='pending') ORDER BY s.code,cl.name,c.name,i.due_date`);
   const [staff]=await db.query(`SELECT id,name,role FROM users WHERE is_active=1 ORDER BY name`);
   const [banks]=await db.query(`SELECT id,bank_name,account_name,account_number,type FROM banks WHERE is_active=1 AND type IN ('bank_transfer','virtual_account','other') ORDER BY bank_name,account_number`);
-  const filters={month,year,status,site,cluster,customer,q};
+  const filters={month,year,status,site,cluster,customer,q,dueFrom,dueTo};
   res.render('invoices/index',{title:'Tagihan',invoices,summary,customers,sites,clusters,openInvoices,staff,banks,filters,monthNames:MONTH_NAMES,periodQueryString:periodQuery(filters)});
 });
 
@@ -172,6 +182,43 @@ router.post('/:id/update-meta',async(req,res)=>{
   await audit({userId:req.session.user.id,action:'update',entityType:'invoice',entityId:req.params.id,description:`Edit metadata tagihan ${rows[0].invoice_number}: tanggal ${invoiceDate}, jatuh tempo ${dueDate}, tipe ${isProrata?'prorata':'bulanan'}; nominal tidak diubah`,ip:req.ip});
   req.session.flash={type:'success',message:'Metadata tagihan berhasil diperbarui. Nominal, pembayaran, dan saldo tagihan tidak diubah.'};
   res.redirect(localReturn(req.body.return_to,`/invoices?month=${rows[0].period_month}&year=${rows[0].period_year}`));
+});
+
+// v1.25.2 — "Tambah Diskon" row action (Daftar Tagihan): lets an admin set a one-off discount (flat
+// rupiah or percent) directly on a single invoice, independent of the customer's discount_id. Formula:
+// Total Akhir = Nominal Tagihan (subtotal) - Diskon, applied via applyInvoiceDiscount() which locks the
+// row FOR UPDATE inside this transaction and refuses to touch an already paid/cancelled/refunded invoice
+// so historical/settled invoices can never be corrupted by this action.
+router.post('/:id/discount',requireAdmin,async(req,res)=>{
+  const mode=req.body.discount_mode==='percent'?'percent':'flat';
+  const rawValue=Number(req.body.discount_value);
+  const returnTarget=(period)=>localReturn(req.body.return_to,period?`/invoices?month=${period.period_month}&year=${period.period_year}`:'/invoices');
+  if(!Number.isFinite(rawValue)||rawValue<0){
+    req.session.flash={type:'danger',message:'Nilai diskon tidak valid.'};
+    return res.redirect(returnTarget(null));
+  }
+  if(mode==='percent'&&rawValue>100){
+    req.session.flash={type:'danger',message:'Persentase diskon tidak boleh lebih dari 100%.'};
+    return res.redirect(returnTarget(null));
+  }
+  const conn=await db.getConnection();
+  let invoice=null,result=null;
+  try{
+    await conn.beginTransaction();
+    const [rows]=await conn.execute(`SELECT id,invoice_number,period_month,period_year,status FROM invoices WHERE id=? LIMIT 1`,[req.params.id]);
+    if(!rows.length){await conn.rollback();req.session.flash={type:'danger',message:'Tagihan tidak ditemukan.'};return res.redirect('/invoices');}
+    invoice=rows[0];
+    result=await applyInvoiceDiscount(conn,invoice.id,mode,rawValue);
+    if(!result){
+      await conn.rollback();
+      req.session.flash={type:'warning',message:`Tagihan ${invoice.invoice_number} sudah ${invoice.status==='paid'?'lunas':'tidak aktif'} sehingga diskonnya tidak bisa diubah lagi, agar riwayat tagihan tetap utuh. Gunakan “Jadikan Belum Lunas” terlebih dahulu jika benar-benar perlu.`};
+      return res.redirect(returnTarget(invoice));
+    }
+    await conn.commit();
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+  await audit({userId:req.session.user.id,action:'update_discount',entityType:'invoice',entityId:invoice.id,description:`Diskon tagihan ${invoice.invoice_number} diperbarui menjadi ${mode==='percent'?`${rawValue}%`:`Rp${rawValue}`} (Rp${result.discount}). Total tagihan otomatis disesuaikan dari Rp${result.subtotal} menjadi Rp${result.total}.`,ip:req.ip});
+  req.session.flash={type:'success',message:`Diskon tagihan ${invoice.invoice_number} berhasil disimpan. Total tagihan otomatis disesuaikan menjadi Rp${Number(result.total).toLocaleString('id-ID')}.`};
+  res.redirect(returnTarget(invoice));
 });
 
 

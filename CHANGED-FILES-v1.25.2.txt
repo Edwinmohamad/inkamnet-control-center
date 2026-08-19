@@ -1,0 +1,252 @@
+INKAMNET CONTROL CENTER — PATCH v1.25.2
+==========================================
+Patch ini menggabungkan 2 batch revisi yang diminta:
+(A) 6 poin revisi cepat (filter jatuh tempo, hapus filter Pelanggan, rapikan
+    tabel Tagihan, download PDF/TXT di Laporan, PDF redesign + Total), dan
+(B) dokumen kebutuhan besar: perbaikan BUG KRITIS diskon, fitur Approve
+    Massal, audit kolom "No." di semua tabel, dan beberapa pembersihan UI.
+
+===========================================================
+BAGIAN 1 — PERBAIKAN BUG & LOGIKA DISKON (CRITICAL FIX)
+===========================================================
+
+1) BUG DITEMUKAN & DIPERBAIKI: sebelumnya, mengubah/menghapus diskon seorang
+   pelanggan HANYA memengaruhi tagihan yang dibuat SETELAH perubahan itu.
+   Tagihan yang sudah terbit (misalnya tagihan bulan berjalan yang belum
+   dibayar) tetap memakai diskon lama — inilah yang dilaporkan sebagai
+   "fitur diskon tidak berfungsi". Sekarang, begitu diskon pelanggan diubah
+   di Edit Pelanggan, sistem OTOMATIS menghitung ulang Diskon dan Total pada
+   SEMUA tagihan pelanggan itu yang masih berjalan (belum lunas/dibatalkan),
+   sesuai rumus Total Akhir = Nominal Tagihan − Diskon.
+   (services/invoiceService.js — syncCustomerDiscountToOpenInvoices,
+   routes/customers.js)
+
+2) PENGAMAN WAJIB (sesuai permintaan): tagihan yang statusnya sudah LUNAS,
+   DIBATALKAN, atau REFUND tidak akan pernah disentuh oleh penyesuaian ini —
+   riwayat tagihan yang sudah tuntas tetap utuh apa pun perubahan diskon
+   pelanggan setelahnya. Penyesuaian hanya berlaku untuk tagihan yang masih
+   "berjalan" (belum lunas / sebagian / terlambat).
+
+3) FITUR BARU — "Tambah Diskon" per tagihan: setiap baris di Daftar Tagihan
+   sekarang punya aksi baru "Tambah Diskon" (menu titik-tiga di kolom
+   Tindakan) yang membuka modal sederhana untuk mengatur diskon langsung
+   pada SATU tagihan tertentu — pilih Nominal (Rp) atau Persentase (%).
+   Total tagihan otomatis dihitung ulang begitu disimpan. Aksi ini otomatis
+   disembunyikan pada tagihan yang sudah lunas/dibatalkan (pengaman yang
+   sama seperti poin 2).
+   (views/invoices/index.ejs, routes/invoices.js — POST /invoices/:id/discount,
+   services/invoiceService.js — applyInvoiceDiscount)
+
+4) Semua perhitungan diskon (baik dari perubahan data pelanggan maupun dari
+   "Tambah Diskon" per tagihan) dijaga agar diskon tidak pernah melebihi
+   nominal tagihan (dikunci minimal Rp 0), dan status/sisa tagihan otomatis
+   ikut disesuaikan lewat mekanisme yang sama dipakai fitur pembayaran
+   (refreshInvoiceStatus), supaya tidak ada logika ganda yang bisa berbeda
+   hasil.
+
+===========================================================
+BAGIAN 2 — MODUL TAGIHAN PELANGGAN
+===========================================================
+
+5) Filter "Pelanggan" (dropdown) di menu Tagihan DIHAPUS karena sudah ada
+   kotak pencarian yang mencakup nama/ID pelanggan. Kotak Cari diperlebar
+   untuk mengisi ruang yang kosong.
+   (views/invoices/index.ejs, public/css/app.css)
+
+6) Filter tanggal Jatuh Tempo (Dari — Sampai) ditambahkan di menu Tagihan,
+   independen dari filter Bulan/Tahun periode penerbitan.
+   (routes/invoices.js, views/invoices/index.ejs)
+
+7) Tampilan Daftar Tagihan dirapikan: kolom Faktur (nomor tagihan + tautan
+   PDF) dipisah dari kolom Pelanggan agar tidak menumpuk, padding baris
+   diperbesar sedikit agar lebih lega, dan badge status yang bertumpuk kini
+   diberi jarak rapi.
+   (views/invoices/index.ejs, public/css/app.css)
+
+===========================================================
+BAGIAN 3 — MODUL APPROVAL & TRANSAKSI
+===========================================================
+
+8) FITUR BARU — "Approve Massal": Master Admin sekarang bisa mencentang
+   beberapa baris pembayaran yang berstatus "menunggu approval" sekaligus,
+   lalu menyetujuinya dalam satu klik lewat tombol "Approve Massal" yang
+   muncul di bagian bawah tabel. Setiap baris tetap diproses satu-per-satu
+   secara aman di balik layar (dicek ulang: masih pending & nominal tidak
+   melebihi sisa tagihan saat ini) — baris yang sudah tidak memenuhi syarat
+   otomatis dilewati dan dilaporkan, tidak membatalkan baris lain yang valid.
+   (routes/payments.js — POST /payments/bulk-verify, views/payments/index.ejs,
+   public/css/app.css)
+
+9) Kolom tabel Approval & Transaksi dirapikan: kolom "No." (nomor urut) dan
+   "Jatuh Tempo" ditambahkan; kolom "Faktur" dan "Waktu" dihapus (nomor
+   faktur dipindah jadi tautan kecil di dalam kolom Pelanggan, agar tabel
+   tidak terlalu lebar).
+   (views/payments/index.ejs, routes/payments.js)
+
+===========================================================
+BAGIAN 4 — MODUL LAPORAN & EKSPOR DATA
+===========================================================
+
+10) Filter tanggal Jatuh Tempo ditambahkan di menu Laporan (tab Laporan
+    Tagihan / Faktur), sama seperti di menu Tagihan.
+    (routes/reports.js, views/reports/index.ejs)
+
+11) Menu Laporan sekarang punya 2 pilihan unduh: "Download PDF" dan
+    "Download TXT" (tampil berdampingan di tab navigasi maupun di panel
+    filter). Kedua format memakai sumber data yang sama persis (satu fungsi
+    pembangun data bersama) sehingga angkanya dijamin tidak pernah berbeda
+    antara PDF dan TXT.
+    (routes/reports.js — buildReportPayload()/GET /reports/txt,
+    views/reports/index.ejs, public/css/app.css)
+
+12) Output PDF laporan dirapikan & didesain ulang: header dengan gradasi
+    warna dan info dokumen resmi, kartu ringkasan dengan aksen warna, tabel
+    dengan header gradasi, dan kotak tanda tangan/sah yang lebih rapi.
+    Kolom bertipe "total" (mis. Nominal pada Laporan Kas, Tagihan & Sisa
+    pada Laporan Tagihan) sekarang menampilkan baris TOTAL tebal di bagian
+    bawah tabel.
+    (services/reportPdf.js)
+
+13) BUG DITEMUKAN & DIPERBAIKI: PDF yang diunduh selalu menghasilkan 1
+    halaman kosong tambahan di akhir dokumen (root cause: teks footer yang
+    diletakkan di margin bawah halaman memicu page-break otomatis milik
+    PDFKit tanpa disadari). Footer sekarang dibatasi tingginya secara
+    eksplisit sehingga tidak lagi memicu halaman kosong. Sekaligus
+    ditemukan & diperbaiki bug kedua: kotak tanda-tangan/sah di akhir PDF
+    memakai posisi Y yang salah hitung (efek samping API PDFKit) sehingga
+    elemen di dalamnya kadang tampil keluar dari kotak — sudah diperbaiki
+    agar selalu tertata rapi di dalam kotak.
+    (services/reportPdf.js)
+
+===========================================================
+BAGIAN 5 — AUDIT UI & STANDARISASI TABEL
+===========================================================
+
+14) Kolom "No." (nomor urut) ditambahkan di kiri setiap tabel berikut, agar
+    konsisten di seluruh aplikasi: Menu Data Kas, Menu Kategori Kas, Menu
+    Laporan (ketiga tab: Pelanggan/Kas/Tagihan-Faktur), dan Menu Approval &
+    Transaksi (lihat Bagian 3 poin 9).
+    (views/finance/cash.ejs, views/finance/cash-categories.ejs,
+    views/reports/index.ejs)
+
+15) Menu Pelanggan: filter "Status PPPoE" dihapus dari panel filter (fungsi
+    monitoring PPPoE sudah terpusat di menu MikroTik NMS / Network Monitor).
+    (views/customers/index.ejs)
+
+16) Menu Paket Internet: layout "Distribusi Paket" dirapikan — sebelumnya
+    daftar paket ditampilkan satu kolom memanjang ke bawah dan cepat perlu
+    di-scroll; sekarang ditata 2 kolom (di layar besar) dengan pemisah antar
+    baris yang lebih jelas, sehingga lebih banyak paket terlihat sekaligus
+    tanpa scroll berlebihan.
+    (public/css/app.css)
+
+17) Menu Kategori Kas: kolom "Dipakai" (jumlah transaksi) dihapus dari
+    tabel untuk menyederhanakan tampilan. Data pemakaian tetap dihitung di
+    belakang layar dan tetap dipakai untuk mengunci penghapusan/perubahan
+    jenis kategori yang sudah dipakai — hanya kolom tampilannya yang
+    dihapus.
+    (views/finance/cash-categories.ejs)
+
+===========================================================
+BAGIAN 6 — AUDIT SISTEM & QA
+===========================================================
+
+18) Ditemukan & diperbaiki 1 skenario uji (test) yang sudah usang: skrip QA
+    scripts/test-cash-approval.js masih menguji perilaku LAMA (transaksi
+    kas otomatis dari pembayaran tidak boleh di-approve manual), padahal
+    perilaku itu sudah sengaja diubah pada rilis sebelumnya (transaksi
+    AUTO BILLING yang diedit dari Data Kas memang harus bisa di-approve
+    lagi). Skrip pengujian sudah diperbarui agar sesuai dengan perilaku
+    yang benar dan disengaja tersebut — bukan perubahan perilaku aplikasi.
+    (scripts/test-cash-approval.js)
+
+19) Versi aplikasi dinaikkan ke v1.25.2 secara konsisten di 3 tempat:
+    package.json, label versi di sidebar, dan validator otomatis.
+    (package.json, views/partials/layout.ejs, scripts/validate-v119.js)
+
+===========================================================
+FILE YANG DIUBAH (17 file)
+===========================================================
+- routes/invoices.js
+- routes/reports.js
+- routes/payments.js
+- routes/customers.js
+- services/reportPdf.js
+- services/invoiceService.js
+- views/invoices/index.ejs
+- views/payments/index.ejs
+- views/reports/index.ejs
+- views/finance/cash.ejs
+- views/finance/cash-categories.ejs
+- views/customers/index.ejs
+- views/partials/layout.ejs (versi -> v1.25.2)
+- package.json (versi -> 1.25.2)
+- scripts/validate-v119.js (assertion versi -> 1.25.2)
+- scripts/test-cash-approval.js (perbaikan skenario uji usang)
+- public/css/app.css
+
+===========================================================
+PENGUJIAN YANG SUDAH DILAKUKAN
+===========================================================
+- node --check pada SELURUH file route/service/middleware/config aplikasi
+  (npm run check): OK, tidak ada error sintaks.
+- Seluruh 39 file EJS di aplikasi dikompilasi (bukan cuma yang diubah):
+  semua lulus tanpa error render/sintaks.
+- npm run validate:v119 (validasi statis + validasi kontrak versi/fitur
+  v1.19 + tes proxy infrastruktur + tes approval kas + tes CSS responsif):
+  SEMUA LULUS.
+- Perbaikan sinkronisasi diskon (services/invoiceService.js) DIUJI dengan
+  database MariaDB nyata memakai 6 skenario sekaligus:
+  a) Tagihan berstatus LUNAS: diskon & total TIDAK berubah saat diskon
+     pelanggan diganti (PASS — riwayat historis aman)
+  b) Tagihan berstatus DIBATALKAN: diskon & total TIDAK berubah (PASS)
+  c) Tagihan BELUM LUNAS: diskon & total otomatis disesuaikan ke aturan
+     diskon baru pelanggan (PASS)
+  d) Tagihan SEBAGIAN LUNAS (sudah ada pembayaran parsial): diskon & total
+     tetap ikut disesuaikan, sisa tagihan dihitung ulang dengan benar
+     berdasarkan pembayaran yang sudah masuk (PASS)
+  e) Menghapus diskon pelanggan (kosongkan pilihan): diskon pada tagihan
+     yang masih berjalan otomatis kembali ke Rp 0 (PASS)
+  f) Aksi "Tambah Diskon" per tagihan (flat & persentase, termasuk kasus
+     persentase >100% yang harus dikunci maksimal sebesar nominal tagihan)
+     dan penolakan otomatis saat mencoba mengubah diskon tagihan yang sudah
+     LUNAS/DIBATALKAN: semua skenario PASS.
+- Render test (EJS, dengan data tiruan lengkap lewat server Express
+  sungguhan + fetch HTTP, bukan cuma dibaca teksnya) untuk SEMUA halaman
+  yang diubah: views/invoices/index.ejs, views/payments/index.ejs,
+  views/reports/index.ejs (ketiga tab), views/finance/cash.ejs,
+  views/finance/cash-categories.ejs, views/packages/index.ejs (layout
+  Distribusi Paket), dan views/customers/index.ejs — semua status 200,
+  semua elemen baru (kolom No., filter jatuh tempo, tombol Download
+  TXT/PDF, aksi Tambah Diskon, tombol Approve Massal, dsb.) terbukti
+  benar-benar muncul di HTML yang dirender.
+
+===========================================================
+CARA PASANG
+===========================================================
+1. Backup folder aplikasi terlebih dahulu. TIDAK ADA migrasi struktur
+   database baru pada patch ini (kolom yang dipakai sudah ada sejak patch
+   sebelumnya).
+2. Timpa (overwrite) 17 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R) agar CSS/JS terbaru termuat.
+6. Cek cepat:
+   a. Menu Tagihan: filter Pelanggan sudah hilang, filter Jatuh Tempo sudah
+      ada, dan aksi "Tambah Diskon" muncul di menu titik-tiga setiap baris
+      (kecuali tagihan yang sudah lunas/dibatalkan).
+   b. Ubah diskon seorang pelanggan di Edit Pelanggan, lalu buka menu
+      Tagihan — pastikan tagihan pelanggan itu yang masih berjalan langsung
+      menampilkan total yang sudah disesuaikan.
+   c. Menu Approval & Transaksi: centang beberapa pembayaran pending,
+      pastikan tombol "Approve Massal" muncul dan berhasil menyetujui.
+   d. Menu Laporan: pastikan tombol "Download PDF" dan "Download TXT"
+      sama-sama muncul, dan filter Jatuh Tempo tersedia di tab Tagihan.
+   e. Buka salah satu PDF Laporan: pastikan tidak ada halaman kosong di
+      akhir, dan ada baris TOTAL di bagian bawah tabel.
+   f. Menu Data Kas, Kategori Kas, dan Laporan: pastikan kolom "No." ada
+      di kiri setiap tabel. Menu Kategori Kas: pastikan kolom "Dipakai"
+      sudah tidak tampil.
+   g. Menu Pelanggan: pastikan filter "Status PPPoE" sudah tidak ada.
+   h. Menu Paket Internet: pastikan bagian Distribusi Paket tampil rapi
+      2 kolom di layar lebar.

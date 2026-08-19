@@ -4,6 +4,7 @@ const db = require('../config/db');
 const { audit } = require('../services/auditService');
 const { requireAdmin, requireMasterAdmin, isMasterAdminRole } = require('../middleware/auth');
 const { validateWhatsapp } = require('../services/whatsappService');
+const { syncCustomerDiscountToOpenInvoices } = require('../services/invoiceService');
 const router = express.Router();
 
 async function options() {
@@ -542,8 +543,27 @@ router.post('/:id',async(req,res)=>{
   if(discountError){req.session.flash={type:'danger',message:discountError};return res.redirect(`/customers/${req.params.id}/edit`);}
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
   const wa=validateWhatsapp(b.phone);
-  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,cluster_id=?,package_id=?,discount_id=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,discountId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
-  await audit({userId:req.session.user.id,action:'update',entityType:'customer',entityId:req.params.id,description:`Update ${customerCode} - ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Data pelanggan diperbarui.'};res.redirect('/customers');
+  // v1.25.2 — CRITICAL FIX: changing a customer's discount previously never touched any invoice already
+  // generated for them (see syncCustomerDiscountToOpenInvoices in services/invoiceService.js), which is
+  // what admins experienced as "the discount feature doesn't work". Wrapped in a transaction so the
+  // customer row update and the resync of their open invoices commit/rollback together; the resync only
+  // fires when discount_id actually changed, and only ever touches invoices that are NOT paid/cancelled/
+  // refunded, so already-settled historical invoices are never altered.
+  const [[before]]=await db.execute(`SELECT discount_id FROM customers WHERE id=? LIMIT 1`,[req.params.id]);
+  const previousDiscountId=before?before.discount_id:null;
+  const conn=await db.getConnection();
+  let resynced=0;
+  try{
+    await conn.beginTransaction();
+    await conn.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,cluster_id=?,package_id=?,discount_id=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,discountId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
+    if(Number(previousDiscountId||0)!==Number(discountId||0)){
+      resynced=await syncCustomerDiscountToOpenInvoices(conn,req.params.id,discountId);
+    }
+    await conn.commit();
+  }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+  await audit({userId:req.session.user.id,action:'update',entityType:'customer',entityId:req.params.id,description:`Update ${customerCode} - ${b.name}${resynced?` · diskon disesuaikan otomatis pada ${resynced} tagihan berjalan`:''}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Data pelanggan diperbarui.${resynced?` Diskon otomatis disesuaikan pada ${resynced} tagihan berjalan milik pelanggan ini (tagihan yang sudah lunas/dibatalkan tidak diubah).`:''}`};
+  res.redirect('/customers');
 });
 router.post('/:id/delete',requireAdmin,async(req,res)=>{
   const [rows]=await db.execute(`SELECT id,customer_code,name,customer_status FROM customers WHERE id=? LIMIT 1`,[req.params.id]);
