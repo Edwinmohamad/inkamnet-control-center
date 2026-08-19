@@ -33,6 +33,24 @@ router.get('/discounts',async(req,res)=>{const [discounts]=await db.query(`SELEC
 router.post('/discounts',async(req,res)=>{const b=req.body;await db.execute(`INSERT INTO discounts(name,type,amount,description,is_active) VALUES(?,?,?,?,1)`,[b.name,b.type||'flat',b.amount||0,b.description||null]);req.session.flash={type:'success',message:'Diskon ditambahkan.'};res.redirect('/discounts');});
 router.post('/discounts/:id/edit',async(req,res)=>{const b=req.body;const name=String(b.name||'').trim();if(!name){req.session.flash={type:'danger',message:'Nama diskon wajib diisi.'};return res.redirect('/discounts');}const type=['flat','percent'].includes(b.type)?b.type:'flat';await db.execute(`UPDATE discounts SET name=?,type=?,amount=?,description=? WHERE id=?`,[name,type,b.amount||0,b.description||null,req.params.id]);req.session.flash={type:'success',message:'Diskon berhasil diperbarui.'};res.redirect('/discounts');});
 router.post('/discounts/:id/toggle',async(req,res)=>{await db.execute(`UPDATE discounts SET is_active=IF(is_active=1,0,1) WHERE id=?`,[req.params.id]);res.redirect('/discounts');});
+// v1.25.1 — requested delete action for Diskon. Mirrors the same "block hard delete while still in use"
+// safety pattern used for Paket Internet (routes/packages.js /:id/delete): a discount still attached to
+// any non-archived customer (customers.discount_id) is blocked from permanent deletion — use Aktif/Nonaktif
+// instead so it stops being offered without breaking the customers already using it.
+router.post('/discounts/:id/delete',requireAdmin,async(req,res)=>{
+  const id=Number(req.params.id);
+  const [[discount]]=await db.execute(`SELECT id,name FROM discounts WHERE id=? LIMIT 1`,[id]);
+  if(!discount){req.session.flash={type:'warning',message:'Diskon tidak ditemukan.'};return res.redirect('/discounts');}
+  const [[usage]]=await db.execute(`SELECT COUNT(*) n FROM customers WHERE discount_id=? AND archived_at IS NULL`,[id]);
+  if(Number(usage?.n||0)>0){
+    req.session.flash={type:'danger',message:`Diskon ${discount.name} masih dipakai ${usage.n} pelanggan aktif dan tidak dapat dihapus permanen. Gunakan tombol Aktif/Nonaktif agar diskon berhenti ditawarkan tanpa memutus data pelanggan yang sudah memakainya.`};
+    return res.redirect('/discounts');
+  }
+  await db.execute(`DELETE FROM discounts WHERE id=?`,[id]);
+  await audit({userId:req.session.user.id,action:'delete',entityType:'discount',entityId:id,description:`Hapus diskon ${discount.name}`,ip:req.ip});
+  req.session.flash={type:'success',message:`Diskon ${discount.name} dihapus permanen.`};
+  res.redirect('/discounts');
+});
 
 router.get('/charges',async(req,res)=>{const [charges]=await db.query(`SELECT * FROM additional_charges ORDER BY is_active DESC,id DESC`);res.render('finance/charges',{title:'Biaya Tambahan',charges});});
 router.post('/charges',async(req,res)=>{const b=req.body;await db.execute(`INSERT INTO additional_charges(name,amount,description,is_active) VALUES(?,?,?,1)`,[b.name,b.amount||0,b.description||null]);req.session.flash={type:'success',message:'Biaya tambahan ditambahkan.'};res.redirect('/charges');});

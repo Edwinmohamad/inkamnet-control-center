@@ -457,4 +457,14 @@ async function ensureV31Schema() {
     WHERE NOT EXISTS (SELECT 1 FROM cash_categories WHERE code='KASBON' OR LOWER(name)='kasbon karyawan')`);
 }
 
-module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema, ensureV30Schema, ensureV31Schema };
+async function ensureV32Schema() {
+  // v1.25.1 — user reported the "Diskon" catalog (menu Keuangan → Diskon) had no way to actually be
+  // attached to a customer, so a discount created there never affected any bill. Adds an OPTIONAL
+  // per-customer discount link: customers.discount_id points at a discounts row, consumed by
+  // services/invoiceService.js when generating each month's invoice (reduces subtotal → total/outstanding,
+  // stored on invoices.discount so it still shows on the printed invoice like before). Nullable / no
+  // default — a customer with no discount behaves exactly as before this migration.
+  await db.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS discount_id BIGINT UNSIGNED NULL AFTER package_id`);
+}
+
+module.exports = { ensureV14Schema, ensureV15Schema, ensureV16Schema, ensureV17Schema, ensureV18Schema, ensureV19Schema, ensureV20Schema, ensureV21Schema, ensureV22Schema, ensureV23Schema, ensureV24Schema, ensureV25Schema, ensureV26Schema, ensureV27Schema, ensureV29Schema, ensureV30Schema, ensureV31Schema, ensureV32Schema };

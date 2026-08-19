@@ -12,12 +12,26 @@ async function options() {
   const [routers] = await db.query(`SELECT r.id,r.name,s.code site_code FROM routers r JOIN sites s ON s.id=r.site_id WHERE r.is_active=1 ORDER BY s.code,r.name`);
   const [clusters] = await db.query(`SELECT cl.id,cl.name,s.code site_code FROM clusters cl JOIN sites s ON s.id=cl.site_id WHERE cl.status!='inactive' ORDER BY s.code,cl.name`);
   const [sales] = await db.query(`SELECT e.id,e.employee_code,e.name FROM employees e LEFT JOIN positions p ON p.id=e.position_id WHERE e.is_active=1 AND p.category='sales' ORDER BY e.name`);
-  return { sites, packages, routers, clusters, sales };
+  const [discounts] = await db.query(`SELECT id,name,type,amount FROM discounts WHERE is_active=1 ORDER BY name`);
+  return { sites, packages, routers, clusters, sales, discounts };
 }
 
 // v1.25 audit: mirrors the same 1-28 / 0-30 range validation already enforced on the Excel-import path
 // (see importCustomersFromExcel below) so a direct POST to Create/Edit can't slip in an out-of-range
 // due_day/grace_days that would push the isolir cutoff (networkService.js) before the due date itself.
+// v1.25.1 — the Diskon catalog (menu Keuangan → Diskon) had no field anywhere that actually attached a
+// discount to a customer, so a discount created there never reduced anyone's bill. This validates the
+// posted discount_id (optional — empty means "no discount") against active discounts before saving.
+async function resolveDiscountId(rawValue) {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return { discountId: null, error: null };
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) return { discountId: null, error: 'Diskon tidak valid.' };
+  const [rows] = await db.execute(`SELECT id FROM discounts WHERE id=? AND is_active=1 LIMIT 1`, [id]);
+  if (!rows.length) return { discountId: null, error: 'Diskon terpilih tidak ditemukan atau sudah nonaktif.' };
+  return { discountId: id, error: null };
+}
+
 function validDueGrace(body) {
   const dueRaw=body.due_day, graceRaw=body.grace_days;
   const due=(dueRaw===undefined||dueRaw===null||dueRaw==='')?null:Number(dueRaw);
@@ -31,7 +45,10 @@ function customerFilter(req) {
   return { q:(req.query.q||'').trim(), site:req.query.site||'', cluster:req.query.cluster||'', sales:req.query.sales||'', status:req.query.status||'', network:req.query.network||'' };
 }
 function customerSql(filters) {
-  let sql=`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,p.speed_label,r.name router_name,cl.name cluster_name,se.name sales_name,se.employee_code sales_code,(SELECT i.id FROM invoices i WHERE i.customer_id=c.id AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY i.period_year DESC,i.period_month DESC,i.id DESC LIMIT 1) open_invoice_id,(SELECT COUNT(*) FROM invoices i2 WHERE i2.customer_id=c.id) has_invoice_count FROM customers c JOIN sites s ON s.id=c.site_id LEFT JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id WHERE 1=1`;
+  // v1.25.1: LEFT JOIN discounts so the customer list/detail can show the optional attached discount
+  // (dc.name/dc.type/dc.amount) resolved from customers.discount_id — added when discount-to-customer
+  // linking was introduced (see resolveDiscountId() above and ensureV32Schema()).
+  let sql=`SELECT c.*,s.code site_code,s.name site_name,p.name package_name,p.price package_price,p.speed_label,r.name router_name,cl.name cluster_name,se.name sales_name,se.employee_code sales_code,dc.name discount_name,dc.type discount_type,dc.amount discount_amount,(SELECT i.id FROM invoices i WHERE i.customer_id=c.id AND i.status IN ('unpaid','partial','overdue') AND i.outstanding>0 ORDER BY i.period_year DESC,i.period_month DESC,i.id DESC LIMIT 1) open_invoice_id,(SELECT COUNT(*) FROM invoices i2 WHERE i2.customer_id=c.id) has_invoice_count FROM customers c JOIN sites s ON s.id=c.site_id LEFT JOIN packages p ON p.id=c.package_id LEFT JOIN routers r ON r.id=c.router_id LEFT JOIN clusters cl ON cl.id=c.cluster_id LEFT JOIN employees se ON se.id=c.sales_id LEFT JOIN discounts dc ON dc.id=c.discount_id WHERE 1=1`;
   const params=[];
   if(filters.q){sql+=` AND (c.customer_code LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ? OR c.pppoe_username LIKE ? OR s.code LIKE ? OR cl.name LIKE ?)`;params.push(...Array(7).fill(`%${filters.q}%`));}
   if(filters.site){sql+=` AND s.code=?`;params.push(filters.site);}
@@ -406,9 +423,13 @@ router.post('/', async (req, res) => {
   }
   const dueGraceError=validDueGrace(b);
   if(dueGraceError){req.session.flash={type:'danger',message:dueGraceError};return res.redirect('/customers/new');}
+  // v1.25.1 — optional discount attached to the customer (see resolveDiscountId()). Invalid/inactive
+  // selections are rejected here rather than silently dropped, same treatment as package_id above.
+  const {discountId,error:discountError}=await resolveDiscountId(b.discount_id);
+  if(discountError){req.session.flash={type:'danger',message:discountError};return res.redirect('/customers/new');}
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
   const wa=validateWhatsapp(b.phone);
-  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at,email,address,sales_id,site_id,router_id,cluster_id,package_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,NOW(),?,?,?,?,NULL,?,?,NULL,?,?,?,?,?,'offline',NOW(),?,?)`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid',b.prorata_enabled?1:0,b.notes||null]);
+  const [result]=await db.execute(`INSERT INTO customers (customer_code,name,phone,whatsapp_status,whatsapp_normalized,whatsapp_verified_at,email,address,sales_id,site_id,router_id,cluster_id,package_id,discount_id,pppoe_username,activation_date,due_day,grace_days,customer_status,billing_status,network_status,status_changed_at,prorata_enabled,notes) VALUES (?,?,?,?,?,NOW(),?,?,?,?,NULL,?,?,?,NULL,?,?,?,?,?,'offline',NOW(),?,?)`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,discountId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status||'active','unpaid',b.prorata_enabled?1:0,b.notes||null]);
   await audit({userId:req.session.user.id,action:'create',entityType:'customer',entityId:result.insertId,description:`Tambah ${customerCode} - ${b.name}`,ip:req.ip});
   req.session.flash={type:'success',message:`Pelanggan berhasil ditambahkan dengan Customer ID ${customerCode}.`};res.redirect('/customers');
 });
@@ -517,9 +538,11 @@ router.post('/:id',async(req,res)=>{
   }
   const dueGraceError=validDueGrace(b);
   if(dueGraceError){req.session.flash={type:'danger',message:dueGraceError};return res.redirect(`/customers/${req.params.id}/edit`);}
+  const {discountId,error:discountError}=await resolveDiscountId(b.discount_id);
+  if(discountError){req.session.flash={type:'danger',message:discountError};return res.redirect(`/customers/${req.params.id}/edit`);}
   const email=b.email_mode==='auto'?autoCustomerEmail(customerCode):(String(b.email||'').trim()||null);
   const wa=validateWhatsapp(b.phone);
-  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,cluster_id=?,package_id=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
+  await db.execute(`UPDATE customers SET customer_code=?,name=?,phone=?,whatsapp_status=?,whatsapp_normalized=?,whatsapp_verified_at=NOW(),whatsapp_verified_by=NULL,email=?,address=?,sales_id=?,site_id=?,cluster_id=?,package_id=?,discount_id=?,activation_date=?,due_day=?,grace_days=?,status_changed_at=IF(customer_status<>?,NOW(),status_changed_at),customer_status=?,prorata_enabled=?,notes=? WHERE id=?`,[customerCode,b.name,b.phone||null,wa.valid?'valid':'invalid',wa.normalized,email,b.address||null,b.sales_id||null,siteId,b.cluster_id||null,packageId,discountId,b.activation_date||null,b.due_day||null,b.grace_days||null,b.customer_status,b.customer_status,b.prorata_enabled?1:0,b.notes||null,req.params.id]);
   await audit({userId:req.session.user.id,action:'update',entityType:'customer',entityId:req.params.id,description:`Update ${customerCode} - ${b.name}`,ip:req.ip});req.session.flash={type:'success',message:'Data pelanggan diperbarui.'};res.redirect('/customers');
 });
 router.post('/:id/delete',requireAdmin,async(req,res)=>{

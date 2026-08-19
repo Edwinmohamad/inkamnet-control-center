@@ -1,0 +1,120 @@
+INKAMNET CONTROL CENTER — PATCH v1.25.1
+==========================================
+Patch ini menjawab laporan: "fitur diskon PAS MAU DI SAMBUNGIN KE PELANGGAN
+tidak bisa dimasukan". Setelah ditelusuri, menu Diskon (Keuangan → Diskon)
+memang sudah bisa dibuat, tapi TIDAK ADA satu pun tempat di aplikasi yang
+menghubungkan diskon itu ke pelanggan atau ke tagihan — jadi diskon yang
+dibuat di sana tidak pernah memotong tagihan siapa pun. Patch ini menyambungkan
+diskon ke pelanggan secara OPSIONAL (sesuai jawaban Anda), dan sekaligus
+menambahkan tombol Hapus di menu Diskon (juga sesuai permintaan).
+
+===========================================================
+BAGIAN 1 — DISKON SEKARANG BISA DISAMBUNGKAN KE PELANGGAN
+===========================================================
+
+1) Form Tambah/Edit Pelanggan sekarang punya field baru "Diskon (opsional)"
+   di bagian BILLING POLICY, berisi daftar diskon yang aktif dari menu
+   Keuangan → Diskon. Boleh dikosongkan ("Tanpa diskon") — pelanggan yang
+   tidak diberi diskon berperilaku persis seperti sebelum patch ini.
+   (views/customers/form.ejs, routes/customers.js)
+
+2) Diskon yang dipilih bersifat BERULANG (recurring) — otomatis dipakai
+   di SETIAP tagihan bulanan yang dibuat untuk pelanggan itu, selama
+   diskon tersebut masih berstatus aktif di menu Diskon. Kalau diskonnya
+   dinonaktifkan kemudian, tagihan berikutnya otomatis tidak lagi memotong
+   (tanpa perlu mengubah data pelanggan satu per satu).
+   (services/invoiceService.js)
+
+3) Perhitungan diskon:
+   - Tipe "Flat": nominal diskon langsung dikurangkan dari tagihan bulan itu
+     (sudah memperhitungkan prorata bulan pertama bila berlaku).
+   - Tipe "Percent": dihitung dari persentase atas nominal tagihan bulan itu.
+   - Jika nominal diskon lebih besar dari tagihan, total tagihan dikunci
+     minimal Rp 0 (tidak pernah menjadi minus).
+   - Nominal diskon yang dipakai disimpan di kolom invoices.discount (kolom
+     ini sebenarnya sudah ada sejak lama dan sudah ditampilkan di cetak
+     faktur/PDF — sebelum patch ini nilainya selalu 0 karena tidak ada yang
+     mengisinya).
+   (services/invoiceService.js)
+
+4) Daftar & detail pelanggan sekarang ikut menampilkan info diskon yang
+   terpasang (nama, tipe, nominal) lewat data tambahan pada query pelanggan.
+   (routes/customers.js — customerSql())
+
+5) Data teknis: kolom baru customers.discount_id (boleh kosong/NULL, tidak
+   ada default) ditambahkan lewat migrasi otomatis standar aplikasi ini
+   (ensureV32Schema, jalan otomatis saat restart, aman dijalankan berkali-
+   kali). Tidak ada perubahan struktur lain.
+   (services/schemaService.js, app.js)
+
+===========================================================
+BAGIAN 2 — TOMBOL HAPUS DI MENU DISKON
+===========================================================
+
+6) Menu Keuangan → Diskon sekarang punya tombol Hapus (ikon tempat sampah)
+   di samping Edit dan Aktif/Nonaktif, dengan konfirmasi sebelum dihapus —
+   konsisten dengan pola hapus yang sudah dipakai di menu lain (mis. Paket
+   Internet).
+   (views/finance/discounts.ejs)
+
+7) Sama seperti Paket Internet: diskon yang MASIH DIPAKAI oleh pelanggan
+   aktif (tidak termasuk pelanggan yang sudah diarsipkan) TIDAK BISA
+   dihapus permanen — sistem akan menolak dan menyarankan pakai tombol
+   Aktif/Nonaktif saja, supaya data pelanggan yang sudah memakai diskon itu
+   tidak ikut rusak/terputus.
+   (routes/finance.js)
+
+===========================================================
+FILE YANG DIUBAH (10 file)
+===========================================================
+- routes/customers.js
+- routes/finance.js
+- services/invoiceService.js
+- services/schemaService.js
+- app.js
+- views/customers/form.ejs
+- views/finance/discounts.ejs
+- views/partials/layout.ejs (versi -> v1.25.1)
+- package.json (versi -> 1.25.1)
+- scripts/validate-v119.js (assertion versi -> 1.25.1)
+
+===========================================================
+PENGUJIAN YANG SUDAH DILAKUKAN
+===========================================================
+- node --check pada seluruh file route/service yang diubah: OK.
+- npm run check (syntax seluruh app) dan node scripts/validate-v119.js:
+  semua lulus.
+- Render test (EJS) untuk views/customers/form.ejs (mode Tambah & Edit,
+  termasuk pelanggan yang sudah punya diskon terpasang) dan
+  views/finance/discounts.ejs: semua render tanpa error.
+- Migrasi ensureV32Schema DIUJI dengan database MariaDB nyata (bukan cuma
+  dibaca): kolom customers.discount_id berhasil dibuat, bersifat nullable,
+  dan migrasi terbukti aman dijalankan berulang (idempotent).
+- Perhitungan diskon pada generateMonthlyInvoices DIUJI dengan database
+  nyata memakai 5 skenario pelanggan sekaligus:
+  a) diskon flat Rp 25.000 -> tagihan Rp 200.000 jadi Rp 175.000 (PASS)
+  b) diskon percent 10%    -> tagihan Rp 200.000 jadi Rp 180.000 (PASS)
+  c) tanpa diskon          -> tagihan tetap Rp 200.000 (PASS)
+  d) diskon yang sudah dinonaktifkan -> TIDAK dipakai, tagihan tetap penuh
+     (PASS — membuktikan diskon nonaktif otomatis berhenti memotong)
+  e) diskon flat lebih besar dari tagihan (Rp 999.999 vs Rp 200.000) ->
+     total tagihan dikunci Rp 0, tidak minus (PASS)
+
+===========================================================
+CARA PASANG
+===========================================================
+1. Backup folder aplikasi DAN database terlebih dahulu (ada 1 migrasi
+   struktur baru: kolom customers.discount_id, nullable, tanpa default —
+   tidak mengubah data pelanggan yang sudah ada).
+2. Timpa (overwrite) 10 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js (migrasi schemaService jalan otomatis saat start).
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Cek: buka Tambah/Edit Pelanggan, pastikan field "Diskon (opsional)"
+   muncul di bagian Billing Policy dan bisa dipilih/dikosongkan.
+7. Cek: menu Keuangan → Diskon sekarang punya tombol Hapus; coba hapus
+   diskon yang sedang dipakai pelanggan aktif — sistem harus menolak dengan
+   pesan yang menyarankan Aktif/Nonaktif.
+8. Pasang diskon ke satu pelanggan uji coba, lalu jalankan Generate Tagihan
+   Bulanan (manual atau tunggu jadwal otomatis) dan pastikan tagihan yang
+   terbit sudah terpotong sesuai nominal/persentase diskon tersebut.

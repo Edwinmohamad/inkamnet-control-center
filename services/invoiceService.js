@@ -78,10 +78,12 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
       SELECT c.*, p.price AS package_price, p.name AS package_name, s.code AS site_code,
              COALESCE(c.due_day, s.default_due_day, st.default_due_day, 5) AS effective_due_day,
              COALESCE(c.grace_days, s.default_grace_days, st.default_grace_days, 2) AS effective_grace_days,
-             COALESCE(s.invoice_generate_days, st.invoice_generate_days, 3) AS generate_days
+             COALESCE(s.invoice_generate_days, st.invoice_generate_days, 3) AS generate_days,
+             d.type AS discount_type, d.amount AS discount_rule_amount, d.is_active AS discount_is_active
       FROM customers c
       JOIN packages p ON p.id=c.package_id
       JOIN sites s ON s.id=c.site_id
+      LEFT JOIN discounts d ON d.id=c.discount_id
       CROSS JOIN settings st
       WHERE ${where.join(' AND ')}
       ORDER BY s.code,c.name
@@ -117,14 +119,27 @@ async function generateMonthlyInvoices(referenceDate = new Date(), force = false
         }
       }
 
+      // v1.25.1 — optional per-customer discount (customers.discount_id, set via the customer form's
+      // "Diskon" field) recurs on every monthly invoice generated for that customer, as long as the
+      // discount rule is still active. Computed against the (post-prorata) subtotal, clamped so total
+      // never goes below 0, and stored on invoices.discount so it prints on the invoice like before.
+      let discountAmount = 0;
+      if (c.discount_id && Number(c.discount_is_active) === 1) {
+        discountAmount = c.discount_type === 'percent'
+          ? Math.round(amount * Number(c.discount_rule_amount || 0) / 100)
+          : Number(c.discount_rule_amount || 0);
+        discountAmount = Math.max(0, Math.min(discountAmount, amount));
+      }
+      const total = amount - discountAmount;
+
       const invoiceNumber = await nextInvoiceNumber(conn, c.site_code, year, monthIndex);
       try {
         await conn.execute(`
           INSERT INTO invoices
           (invoice_number, customer_id, period_year, period_month, invoice_date, due_date,
-           subtotal, total, outstanding, status, is_prorata, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)
-        `, [invoiceNumber, c.id, year, month, toSqlDate(referenceDate), toSqlDate(dueDate), amount, amount, amount, isProrata, actorUserId]);
+           subtotal, discount, total, outstanding, status, is_prorata, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)
+        `, [invoiceNumber, c.id, year, month, toSqlDate(referenceDate), toSqlDate(dueDate), amount, discountAmount, total, total, isProrata, actorUserId]);
         created++;
       } catch (err) {
         // Proteksi terakhir jika request paralel / cron sempat membuat customer-period yang sama.
