@@ -1,0 +1,66 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.2
+==========================================
+Fitur baru: cara "menghapus" transaksi AUTO BILLING di Data Kas
+
+PERMINTAAN
+------------
+"transaksi otomatis dari pembayaran pelanggan (tertulis AUTO BILLING) —
+tolong tambahkan hapus juga."
+
+KENAPA TIDAK KAMI BUAT JADI TOMBOL "HAPUS" BIASA
+----------------------------------------------------
+Transaksi AUTO BILLING itu bukan data berdiri sendiri — dia dibuat otomatis
+oleh sistem saat sebuah pembayaran tagihan pelanggan disimpan, dan datanya
+"terikat" ke pembayaran + tagihan tersebut. Kalau baris kas ini dihapus
+begitu saja (tanpa menyentuh pembayarannya), akan terjadi data tidak
+sinkron: tagihan tetap tercatat LUNAS, riwayat pembayaran pelanggan tetap
+ada, TAPI pendapatan di jurnal kas hilang — Saldo Kas dan Laporan Keuangan
+jadi tidak cocok dengan histori pembayaran yang sebenarnya. Karena itu,
+baik tombol Hapus biasa maupun Hapus Paksa memang SENGAJA tidak menyentuh
+baris AUTO BILLING (ini sudah diblokir dari sisi server, bukan cuma
+tampilan).
+
+CARA YANG KAMI BUAT SEBAGAI GANTINYA
+----------------------------------------
+Kolom Aksi untuk transaksi AUTO BILLING sekarang (untuk Admin/Master
+Admin) menampilkan tombol "Aksi" (bukan cuma gembok polos), berisi:
+
+- Info singkat kenapa tidak bisa dihapus langsung + faktur asalnya.
+- Link "Buka Tagihan Terkait" untuk lihat detail fakturnya.
+- Tombol "Batalkan Pembayaran" — ini yang jadi cara aman untuk
+  "menghapus" transaksi AUTO BILLING tersebut. Saat diklik dan
+  dikonfirmasi:
+    1. Pembayaran yang bersangkutan dibatalkan (status jadi gagal,
+       dengan catatan koreksi otomatis untuk audit).
+    2. Tagihan terkait kembali berstatus BELUM LUNAS.
+    3. Transaksi kas AUTO BILLING ini OTOMATIS TERHAPUS dari jurnal.
+    4. Semua tercatat rapi di Log Aktivitas untuk audit.
+
+Ini memakai fitur "Jadikan Belum Lunas" yang sebelumnya hanya ada di menu
+Tagihan — sekarang bisa langsung dipicu dari Data Kas juga, jadi Anda
+tidak perlu pindah menu untuk mencari fakturnya satu-satu.
+
+Kalau baris AUTO BILLING ternyata sudah tidak punya faktur asal yang bisa
+ditemukan (kasus langka, misal faktur lama sudah dihapus permanen
+sebelumnya), tombol Aksi tidak muncul dan tetap menampilkan gembok biasa
+seperti sebelumnya — supaya tidak ada aksi yang menyasar data yang salah.
+
+FILE YANG DIUBAH
+-------------------
+- routes/finance.js                (query Data Kas ikut ambil info faktur
+                                     asal untuk transaksi AUTO BILLING)
+- views/finance/cash.ejs           (tombol Aksi + Batalkan Pembayaran
+                                     untuk baris AUTO BILLING)
+- views/partials/layout.ejs        (versi -> v1.24.2)
+- package.json                     (versi -> 1.24.2)
+- scripts/validate-v119.js         (assertion versi -> 1.24.2)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan database).
+2. Timpa (overwrite) 5 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Cek menu Data Kas → transaksi AUTO BILLING sekarang menampilkan tombol
+   Aksi berisi "Batalkan Pembayaran".
