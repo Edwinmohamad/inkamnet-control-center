@@ -38,6 +38,20 @@ router.post('/:id/toggle',requireAdmin,async(req,res)=>{
   req.session.flash={type:'success',message:`Site ${site.name} sekarang ${site.is_active?'NONAKTIF':'AKTIF'}.`};
   res.redirect('/sites');
 });
+router.post('/:id/edit',requireAdmin,async(req,res)=>{
+  const b=req.body;
+  const [[site]]=await db.execute(`SELECT id,name FROM sites WHERE id=? LIMIT 1`,[req.params.id]);
+  if(!site){req.session.flash={type:'warning',message:'Site tidak ditemukan.'};return res.redirect('/sites');}
+  const code=String(b.code||'').trim().toUpperCase();
+  const name=String(b.name||'').trim();
+  if(!code||!name){req.session.flash={type:'danger',message:'Code dan Nama wajib diisi.'};return res.redirect('/sites');}
+  const [dup]=await db.execute(`SELECT id FROM sites WHERE code=? AND id<>? LIMIT 1`,[code,site.id]);
+  if(dup.length){req.session.flash={type:'danger',message:`Code ${code} sudah dipakai site lain.`};return res.redirect('/sites');}
+  await db.execute(`UPDATE sites SET code=?,name=?,address=? WHERE id=?`,[code,name,b.address||null,site.id]);
+  await audit({userId:req.session.user.id,action:'update',entityType:'site',entityId:site.id,description:`Edit site ${site.name} -> ${name} (${code})`,ip:req.ip});
+  req.session.flash={type:'success',message:`Site ${name} berhasil diperbarui.`};
+  res.redirect('/sites');
+});
 router.post('/:id/delete',requireAdmin,async(req,res)=>{
   const [[site]]=await db.execute(`SELECT id,name FROM sites WHERE id=? LIMIT 1`,[req.params.id]);
   if(!site){req.session.flash={type:'warning',message:'Site tidak ditemukan.'};return res.redirect('/sites');}

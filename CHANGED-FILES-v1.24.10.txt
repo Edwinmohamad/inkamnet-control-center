@@ -1,0 +1,34 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.10
+==========================================
+Perubahan: tombol "Edit" ditambahkan di menu Lokasi Server / POP —
+sebelumnya site hanya bisa Aktif/Nonaktif atau Hapus, tidak bisa
+diedit sama sekali (typo nama/alamat harus hapus lalu buat ulang).
+
+===========================================================
+APA YANG BERUBAH
+===========================================================
+- Kolom Aksi di tabel Site Registry sekarang punya 3 tombol: Edit
+  (baru), Aktif/Nonaktif, dan Hapus.
+- Tombol Edit membuka form berisi Code, Nama, dan Alamat (sama seperti
+  field Tambah Site) yang sudah terisi data site tersebut.
+- Code divalidasi supaya tidak bentrok dengan site lain yang sudah ada.
+
+===========================================================
+FILE YANG DIUBAH
+===========================================================
+- routes/sites.js              (route baru POST /sites/:id/edit)
+- views/sites/index.ejs        (tombol Edit + modal edit per site)
+- views/partials/layout.ejs    (versi -> v1.24.10)
+- package.json                 (versi -> 1.24.10)
+- scripts/validate-v119.js     (assertion versi -> 1.24.10)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan database).
+2. Timpa (overwrite) 5 file di atas sesuai struktur folder pada patch
+   ini.
+3. TIDAK perlu "npm install".
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Cek menu Lokasi Server / POP — tombol Edit (ikon pensil) sudah
+   muncul di kolom Aksi setiap baris site.
