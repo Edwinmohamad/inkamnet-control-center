@@ -66,7 +66,7 @@
         <nav class="sidebar-nav">
           <a class="sidebar-link <%= currentPath.startsWith('/invoices') ? 'active' : '' %>" href="/invoices"><i class="bi bi-receipt-cutoff"></i><span><%= t('invoices') %></span></a>
           <a class="sidebar-link <%= currentPath === '/payments' ? 'active' : '' %>" href="/payments"><i class="bi bi-shield-check"></i><span><%= language==='en'?'Approval & Transactions':'Approval & Transaksi' %></span></a>
-          <% if(user?.role==='admin'){ %><a class="sidebar-link <%= currentPath.startsWith('/payments/reconciliation') ? 'active' : '' %>" href="/payments/reconciliation"><i class="bi bi-arrow-repeat"></i><span><%= t('reconciliation') %></span></a><% } %>
+          <% if(isAdmin){ %><a class="sidebar-link <%= currentPath.startsWith('/payments/reconciliation') ? 'active' : '' %>" href="/payments/reconciliation"><i class="bi bi-arrow-repeat"></i><span><%= t('reconciliation') %></span></a><% } %>
           <a class="sidebar-link <%= currentPath.startsWith('/custom-invoices') ? 'active' : '' %>" href="/custom-invoices"><i class="bi bi-file-earmark-text-fill"></i><span><%= t('customInvoices') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/discounts') ? 'active' : '' %>" href="/discounts"><i class="bi bi-percent"></i><span><%= t('discounts') %></span></a>
           <a class="sidebar-link <%= currentPath.startsWith('/charges') ? 'active' : '' %>" href="/charges"><i class="bi bi-plus-square-fill"></i><span><%= t('charges') %></span></a>
@@ -129,7 +129,7 @@
 
       <div class="sidebar-footer">
         <div class="system-status"><span class="status-dot"></span><div><strong>INKAMNET System Online</strong><small>NOC · Billing · Finance · Warehouse</small></div></div>
-        <span class="version-pill">CONTROL CENTER v1.24.0</span>
+        <span class="version-pill">CONTROL CENTER v1.24.1</span>
       </div>
     </aside>
 
@@ -262,7 +262,7 @@
       <div class="command-list" id="commandList">
         <% if(can('customers')){ %><a href="/customers/new" data-keywords="pelanggan baru psb tambah"><i class="bi bi-person-plus-fill"></i><div><strong>Tambah Pelanggan</strong><small>Registrasi PSB baru</small></div><span>→</span></a><% } %>
         <% if(can('billing')){ %><a href="/invoices" data-keywords="tagihan invoice generate"><i class="bi bi-receipt"></i><div><strong>Buka Tagihan</strong><small>Generate & kelola billing</small></div><span>→</span></a>
-        <a href="/payments" data-keywords="approval pembayaran transaksi kas"><i class="bi bi-shield-check"></i><div><strong>Approval & Transaksi</strong><small>Pembayaran dan approval kas</small></div><span>→</span></a><% if(user?.role==='admin'){ %>
+        <a href="/payments" data-keywords="approval pembayaran transaksi kas"><i class="bi bi-shield-check"></i><div><strong>Approval & Transaksi</strong><small>Pembayaran dan approval kas</small></div><span>→</span></a><% if(isAdmin){ %>
         <a href="/payments/reconciliation" data-keywords="rekonsiliasi setoran cash staff"><i class="bi bi-arrow-repeat"></i><div><strong>Rekonsiliasi Cash</strong><small>Cek uang yang masih di staff</small></div><span>→</span></a><% } %><% } %>
         <% if(can('support')){ %><a href="/server-duty" data-keywords="piket server jadwal shift"><i class="bi bi-shield-check"></i><div><strong>Piket Server</strong><small>Jadwal piket mingguan</small></div><span>→</span></a>
         <a href="/tickets" data-keywords="tiket gangguan teknisi"><i class="bi bi-life-preserver"></i><div><strong>Ticketing</strong><small>Keluhan & pekerjaan teknisi</small></div><span>→</span></a>

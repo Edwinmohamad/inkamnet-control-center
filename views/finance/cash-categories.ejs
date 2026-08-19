@@ -31,7 +31,7 @@
             <td><span class="cell-main"><%= Number(c.usage_count||0) %></span><span class="cell-sub">transaksi</span></td>
             <td><span class="status-badge <%= c.is_active?'green':'gray' %>"><%= c.is_active?'aktif':'nonaktif' %></span></td>
             <td class="text-end">
-              <% if(user.role==='admin'){ %>
+              <% if(isAdmin){ %>
                 <form method="post" action="/cash/categories/<%= c.id %>/delete" class="d-inline" onsubmit="return confirm('Hapus kategori ini? Kategori yang sudah dipakai transaksi tidak dapat dihapus.')">
                   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                   <button class="btn-tech danger compact" type="submit"><i class="bi bi-trash3"></i>Hapus</button>

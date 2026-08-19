@@ -3,7 +3,7 @@
 <section>
   <div class="module-head">
     <div><div class="module-kicker">CUSTOMER EXPERIENCE</div><h1>Manajemen Pelanggan</h1><p>Kelola pelanggan, paket, site, status billing, dan kondisi jaringan dari satu layar.</p></div>
-    <div class="module-actions customer-actions"><a class="btn-tech" href="/customers/template.xlsx"><i class="bi bi-file-earmark-spreadsheet"></i>Template XLSX</a><% if(user?.role==='admin'){ %><button class="btn-tech" type="button" data-bs-toggle="modal" data-bs-target="#customerImportModal"><i class="bi bi-cloud-arrow-up-fill"></i>Import XLSX</button><% } %><a class="btn-tech" href="/customers/export.xlsx?<%= customerFilterQuery %>"><i class="bi bi-download"></i>Export XLSX</a><a class="btn-tech primary" href="/customers/new"><i class="bi bi-person-plus-fill"></i>Tambah Pelanggan</a></div>
+    <div class="module-actions customer-actions"><a class="btn-tech" href="/customers/template.xlsx"><i class="bi bi-file-earmark-spreadsheet"></i>Template XLSX</a><% if(isAdmin){ %><button class="btn-tech" type="button" data-bs-toggle="modal" data-bs-target="#customerImportModal"><i class="bi bi-cloud-arrow-up-fill"></i>Import XLSX</button><% } %><a class="btn-tech" href="/customers/export.xlsx?<%= customerFilterQuery %>"><i class="bi bi-download"></i>Export XLSX</a><a class="btn-tech primary" href="/customers/new"><i class="bi bi-person-plus-fill"></i>Tambah Pelanggan</a></div>
   </div>
 
   <!-- v1.20 — Section 4: Data Diarsip sub-menu. A pure tab toggle on top of the existing filters. -->
@@ -46,7 +46,7 @@
         <td class="text-center customer-action-cell">
           <div class="customer-row-buttons">
             <a class="btn-tech compact" href="/customers/<%= c.id %>/edit" title="Edit pelanggan"><i class="bi bi-pencil-square"></i></a>
-            <% if(user.role==='admin'){ %>
+            <% if(isAdmin){ %>
               <% if(archived){ %>
                 <form method="post" action="/customers/<%= c.id %>/restore" onsubmit="return confirm('Pulihkan pelanggan ini ke status Aktif?')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="btn-tech compact success" type="submit" title="Restore / Pulihkan"><i class="bi bi-arrow-counterclockwise"></i></button></form>
                 <% if(!Number(c.has_invoice_count||0)){ %><button class="btn-tech compact danger" type="button" data-hard-delete-danger="/customers/<%= c.id %>/hard-delete" data-entity-label="<%= c.name %> (<%= c.customer_code %>)" title="Hapus Permanen"><i class="bi bi-trash3-fill"></i></button><% } %>
@@ -68,7 +68,7 @@
               <a class="ink-action-item compact" href="/network/monitor"><i class="bi bi-router-fill"></i><span><b>Kelola di MikroTik NMS</b><small>Sinkron PPPoE dan monitoring dilakukan terpusat</small></span></a>
               <% if(wa.length>=9){ %><a class="ink-action-item compact success" href="https://wa.me/<%= wa %>" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp"></i><span><b>WhatsApp</b><small>Hubungi pelanggan</small></span></a><% } %>
               <div class="ink-action-separator"></div><div class="system-validation-note"><i class="bi bi-cpu-fill"></i><span><b>Validasi WhatsApp otomatis</b><small>Status dihitung sistem setiap nomor disimpan.</small></span></div>
-              <% if(user.role==='admin'){ %><div class="ink-action-separator"></div>
+              <% if(isAdmin){ %><div class="ink-action-separator"></div>
                 <% if(archived){ %><form method="post" action="/customers/<%= c.id %>/restore" onsubmit="return confirm('Pulihkan pelanggan ini ke status Aktif?')"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="ink-action-item compact success" type="submit"><i class="bi bi-arrow-counterclockwise"></i><span><b>Restore / Pulihkan</b><small>Kembalikan ke status aktif</small></span></button></form>
                   <% if(!Number(c.has_invoice_count||0)){ %><button class="ink-action-item compact danger" type="button" data-hard-delete-danger="/customers/<%= c.id %>/hard-delete" data-entity-label="<%= c.name %> (<%= c.customer_code %>)"><i class="bi bi-trash3-fill"></i><span><b>Hapus Permanen</b><small>Tindakan tidak dapat dibatalkan</small></span></button><% } %>
                 <% }else{ %><button class="ink-action-item compact danger" type="button" data-delete-choice data-archive-url="/customers/<%= c.id %>/delete" <% if(!Number(c.has_invoice_count||0)){ %>data-hard-delete-url="/customers/<%= c.id %>/hard-delete"<% } %> data-entity-label="<%= c.name %> (<%= c.customer_code %>)"><i class="bi bi-trash3"></i><span><b>Hapus</b><small>Pilih arsip atau hapus permanen</small></span></button><% } %>

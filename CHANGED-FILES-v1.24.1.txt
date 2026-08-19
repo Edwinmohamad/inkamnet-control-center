@@ -1,0 +1,69 @@
+INKAMNET CONTROL CENTER — PATCH v1.24.1
+==========================================
+Perbaikan bug: kolom Aksi/tombol Hapus tampil TERKUNCI (ikon gembok) padahal
+harusnya bisa diakses oleh Admin / Master Admin.
+
+APA PENYEBABNYA
+------------------
+Laporan: "di menu data kas kolom action di gembok".
+
+Setelah ditelusuri, kami temukan bug di banyak halaman: kode tampilan
+(view) memeriksa hak akses dengan membandingkan role akun secara mentah
+(`user.role==='admin'`), padahal cara yang benar dan sudah dipakai di
+tempat lain di aplikasi ini adalah memakai status yang sudah diproses
+sistem (`isAdmin`). Pada kondisi tertentu, perbandingan mentah ini bisa
+gagal cocok sehingga tombol Aksi/Hapus disembunyikan (ditampilkan sebagai
+ikon gembok) meskipun akun yang login sebenarnya berhak.
+
+Kami perbaiki dengan mengganti seluruh pemeriksaan itu ke `isAdmin` —
+status yang sama yang sudah dipakai dengan benar di halaman Faktur Tagihan
+(kolom Faktur Terkait) dan halaman Pengaturan → Config Akun, sehingga
+konsisten dan tidak lagi bergantung pada pencocokan teks mentah.
+
+HALAMAN YANG DIPERBAIKI
+--------------------------
+- Data Kas (/cash): checkbox pilih-banyak, tombol Hapus Semua, kolom Aksi
+  per transaksi (Perbarui Data / Hapus / Hapus Paksa), tombol Hapus Massal.
+- Kategori Kas (/cash/categories): tombol Hapus per kategori.
+- Pelanggan (/customers): tombol Import XLSX, tombol Hapus/Arsipkan &
+  Restore pelanggan (baris & popover aksi).
+- Tagihan (/invoices): tombol Jadikan Belum Lunas, Hapus/Batalkan Tagihan,
+  Hapus Tagihan.
+- Modal Input Pembayaran: pilihan "Cash Diterima Oleh" dan link daftarkan
+  bank di Pengaturan.
+- Jadwal Piket Server (/server-duty): tombol Generate Rotasi, Tambah
+  Piket, dan Hapus jadwal piket per baris.
+- Menu & Perintah Cepat: link "Rekonsiliasi" di sidebar dan command
+  palette (Ctrl+K).
+
+CATATAN PENTING
+------------------
+Kalau setelah pasang patch ini kolom Aksi di Data Kas MASIH menampilkan
+ikon gembok untuk SATU baris transaksi tertentu (bukan semua baris), itu
+sebenarnya BUKAN bug — itu transaksi otomatis dari pembayaran pelanggan
+(kolom "Sumber / Jasa" tertulis "AUTO BILLING"), yang MEMANG sengaja
+dikunci dari edit/hapus manual supaya jurnal kas otomatis tidak rusak.
+Transaksi manual (kolom "Sumber / Jasa" tertulis "MANUAL") seharusnya
+selalu menampilkan tombol Aksi setelah patch ini terpasang.
+
+FILE YANG DIUBAH
+-------------------
+- views/finance/cash.ejs
+- views/finance/cash-categories.ejs
+- views/customers/index.ejs
+- views/invoices/index.ejs
+- views/payments/_payment-modal.ejs
+- views/server-duty/index.ejs
+- views/partials/layout.ejs        (perbaikan + versi -> v1.24.1)
+- package.json                     (versi -> 1.24.1)
+- scripts/validate-v119.js         (assertion versi -> 1.24.1)
+
+CARA PASANG
+-----------
+1. Backup folder aplikasi seperti biasa (tidak ada perubahan database).
+2. Timpa (overwrite) 9 file di atas sesuai struktur folder pada patch ini.
+3. TIDAK perlu "npm install" (tidak ada dependency baru).
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R).
+6. Cek menu Data Kas → transaksi MANUAL sekarang harus menampilkan tombol
+   Aksi (bukan gembok).
