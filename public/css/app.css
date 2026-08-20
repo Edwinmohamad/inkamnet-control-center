@@ -691,9 +691,6 @@ html[data-theme="light"] input[type="date"],html[data-theme="light"] input[type=
 /* Final cascade for v1.20 layout adjustments. */
 .dashboard-v19-lower{grid-template-columns:minmax(300px,.65fr) minmax(0,1.35fr)}
 .dashboard-traffic-panel .command-chart{height:340px}
-.package-catalog-grid{grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
-.package-catalog-grid .plan-card{display:flex;flex-direction:column;min-height:330px}
-.package-catalog-grid .plan-bottom{margin-top:auto}
 
 /* v1.20 — Live Traffic Interface widget removed (see v1.20 note below); router cards render
    directly in .nms-site-grid without the old two-column router+traffic-panel split. */
@@ -711,7 +708,6 @@ html[data-theme="light"] input[type="date"],html[data-theme="light"] input[type=
 @keyframes hardWarningPulse{50%{box-shadow:0 1px 3px rgba(0,0,0,.06)}}
 @media(max-width:1199.98px){.dashboard-v19-grid,.dashboard-customer-watch-grid{grid-template-columns:1fr}.site-summary-list{grid-template-columns:1fr 1fr}}@media(max-width:767.98px){.dashboard-section-filter{width:100%;margin-left:0;overflow-x:auto}.psb-trend-content,.customer-state-columns{grid-template-columns:1fr}.site-summary-list{grid-template-columns:1fr}}.nms-remote-ip{display:inline-flex;align-items:center;gap:5px;color:#65c6ff;text-decoration:none;font-weight:750}
 @media(max-width:1199.98px){.dashboard-v19-lower{grid-template-columns:1fr}.dashboard-traffic-panel{grid-row:1}.dashboard-traffic-panel .command-chart{height:310px}.command-side-stack{grid-row:2}}
-@media(max-width:767.98px){.package-catalog-grid{grid-template-columns:1fr}}
 
 /* Dashboard billing intelligence, operational brief, PPPoE sync, and remote tools. */
 .command-telemetry-rail>a{display:grid;grid-template-columns:9px 1fr;grid-template-rows:auto auto;column-gap:7px;align-content:center;padding:4px 7px;border-right:1px solid var(--line);color:inherit;text-decoration:none;border-radius:8px;transition:.18s}.command-telemetry-rail>a:hover{background:rgba(var(--brand-rgb),.07);box-shadow:0 1px 3px rgba(0,0,0,.06)}
@@ -1002,9 +998,6 @@ form[data-auto-filter].is-auto-submitting{opacity:.7;pointer-events:none}.cash-c
 .customer-check-col{width:34px;text-align:center}
 .customer-archived-pill{margin-top:4px}
 .invoice-check-col{width:34px;text-align:center}
-.billing-due-range{display:flex;align-items:center;gap:6px}
-.billing-due-range input{min-width:0;flex:1}
-.billing-due-sep{color:var(--muted-2);font-size:.55rem;font-weight:700;white-space:nowrap}
 .customer-row-buttons{display:inline-flex;align-items:center;gap:5px}
 .customer-bulk-bar{position:sticky;bottom:14px;z-index:20;margin-top:14px;padding:11px 15px;border:1px solid rgba(var(--brand-rgb),.3);border-radius:14px;background:color-mix(in srgb,var(--panel) 92%,transparent);box-shadow:0 1px 3px rgba(0,0,0,.06);display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .customer-bulk-bar>span{color:var(--muted);font-size:.55rem}

@@ -1,5 +1,74 @@
 INKAMNET CONTROL CENTER — PATCH v1.25.5
 ==========================================
+[UPDATE KECIL SUSULAN #4] Menjawab laporan lanjutan untuk 3 menu sekaligus:
+
+MENU TAGIHAN (Daftar Tagihan)
+1. Filter STATUS di atas tabel dirapikan mengikuti pola 3-badge yang
+   sudah dipakai di kolom Status: sekarang hanya ada "Semua Status",
+   "Belum Lunas", "Menunggu Approval", dan "Lunas". Opsi lama yang
+   tumpang-tindih ("Belum Lunas (Semua)", "Sebagian", "Terlambat")
+   dihapus dari tampilan filter — secara logika ketiganya sudah
+   tercakup dalam opsi "Belum Lunas" yang baru (memakai query yang
+   sama persis dengan "Belum Lunas (Semua)" sebelumnya, hanya labelnya
+   yang disederhanakan). (views/invoices/index.ejs)
+2. Kolom tombol "Lunasi" yang sebelumnya tidak berjudul sekarang diberi
+   judul kolom "Bayar". (views/invoices/index.ejs)
+3. Filter JATUH TEMPO yang sebelumnya berupa dua kotak tanggal bebas
+   (dari — sampai) diganti dengan dropdown 2 opsi saja: "Jatuh Tempo
+   15" dan "Jatuh Tempo 30" — mengikuti pengelompokan tanggal jatuh
+   tempo yang sudah dipakai di menu Analitik (tanggal jatuh tempo
+   1–22 dianggap kelompok "15", sisanya kelompok "30"). Query di
+   belakang layar (routes/invoices.js) diperbarui untuk memfilter
+   berdasarkan kelompok ini, menggantikan filter rentang tanggal lama.
+   (views/invoices/index.ejs, routes/invoices.js)
+
+MENU DATA KAS
+4. Kolom "Kode Transaksi" dihapus dari tabel Data Kas (baik header
+   maupun tiap baris) sesuai permintaan — kode transaksi tetap
+   tersimpan di database dan tetap ditampilkan di tempat lain yang
+   relevan (judul menu Aksi per baris, dialog konfirmasi hapus, dsb),
+   hanya kolom tabelnya yang dihilangkan untuk merapikan tampilan.
+   Colspan baris kosong ("Belum ada data kas") disesuaikan menjadi
+   (isAdmin ? 11 : 10). (views/finance/cash.ejs)
+
+MENU PAKET INTERNET
+5. Kartu paket dirapikan: kode Site/POP sebelumnya diulang 3x di
+   kartu yang sama (di judul kecil "PAKET <SITE>", di badge Site/POP,
+   dan di baris bawah kartu) — sekarang hanya tampil SEKALI lewat
+   badge Site/POP yang sudah jelas, judul kecil disederhanakan jadi
+   "PAKET INTERNET" dan baris bawah kartu hanya berisi tombol aksi
+   (Edit/Aktif-Nonaktif/Hapus), kini rata kanan supaya lebih rapi.
+   Aturan CSS .package-catalog-grid yang sebelumnya tertulis dobel di
+   dua tempat berbeda (tanpa perbedaan nilai) juga dirapikan menjadi
+   satu tempat saja. (views/packages/index.ejs, public/css/app.css)
+
+===========================================================
+PENGUJIAN UPDATE SUSULAN #4
+===========================================================
+- Render test terprogram (server Express sungguhan + fetch HTTP) untuk
+  views/invoices/index.ejs, views/finance/cash.ejs, dan
+  views/packages/index.ejs — 22 pemeriksaan, semua PASS. Memverifikasi:
+  filter STATUS persis 4 opsi dengan value yang benar, filter JATUH
+  TEMPO berbentuk dropdown due15/due30 (bukan lagi input tanggal), kolom
+  Bayar berjudul "Bayar", badge status tetap konsisten 3-state (regresi
+  round sebelumnya), header/sel Kode Transaksi sudah tidak ada di Data
+  Kas, dan kartu Paket Internet tidak lagi mengulang kode site 3x.
+- Unit test terpisah (tanpa database sungguhan, database ditiru lewat
+  mock module) khusus untuk fungsi queryInvoiceList di routes/invoices.js
+  — 9 pemeriksaan, semua PASS. Memastikan secara konkret: due_bucket=
+  due15 menghasilkan klausa SQL "DAY(i.due_date)<=22", due_bucket=due30
+  menghasilkan "DAY(i.due_date)>22", nilai due_bucket yang tidak valid
+  diabaikan (tidak ada klausa DAY() sama sekali), dan filter status
+  open/pending_approval/paid tetap menghasilkan klausa WHERE yang benar
+  (regresi terhadap logika filter status yang sudah ada sejak v1.25.4).
+- npm run validate:v119 (validasi statis + kontrak versi/fitur + tes
+  proxy infrastruktur + tes approval kas + tes CSS responsif): SEMUA
+  LULUS, tidak ada regresi.
+(routes/invoices.js, views/invoices/index.ejs, views/finance/cash.ejs,
+ views/packages/index.ejs, public/css/app.css)
+
+===========================================================
+
 [UPDATE KECIL SETELAH RILIS AWAL] Kolom Tindakan di Daftar Tagihan
 sebelumnya tidak rata: tombol titik-tiga bergeser posisi tergantung ada
 atau tidaknya tombol "Lunasi" di baris yang sama, karena keduanya berbagi
