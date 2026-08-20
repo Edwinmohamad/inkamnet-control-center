@@ -1,5 +1,36 @@
 INKAMNET CONTROL CENTER — PATCH v1.25.5
 ==========================================
+[UPDATE KECIL SUSULAN #8] MENU PAKET INTERNET — jarak widget Distribusi Paket
+
+Feedback: "distribusi paket nya jgn nempel dengan list paket,, buat
+rapih" — widget "Distribusi Paket" (kartu persentase pelanggan per
+paket) sebelumnya tidak punya jarak bawah sendiri, jadi langsung
+menempel dengan baris kartu paket di bawahnya begitu redesign kartu
+(Susulan #6-#7) memadatkan tampilan halaman ini.
+
+Ditambahkan margin-bottom 14px pada kartu ".package-distribution-card",
+menyamai jarak antar-blok yang sudah dipakai di halaman ini juga (mis.
+".metric-grid" dan ".filter-card" sama-sama 14px) supaya konsisten
+dengan konvensi spasi yang ada, tidak dikarang baru. Tidak ada
+perubahan struktur/konten widget maupun kartu paket — murni penambahan
+jarak. (public/css/app.css)
+
+===========================================================
+PENGUJIAN UPDATE SUSULAN #8
+===========================================================
+- Verifikasi brace CSS balance (app.css tetap seimbang, depth akhir 0).
+- npm run validate:v119: SEMUA LULUS (static validation, infrastructure
+  proxy, cash approval, responsive CSS, v1.19 contract — 9 grup), tidak
+  ada regresi.
+- Render test terprogram (server Express sungguhan + fetch HTTP) untuk
+  views/packages/index.ejs: halaman berhasil di-render, widget
+  "package-distribution-card" tetap tampil dan tetap berada tepat di
+  atas grid kartu paket "package-catalog-grid" seperti sebelumnya —
+  hanya jaraknya yang berubah lewat CSS.
+(public/css/app.css)
+
+===========================================================
+
 [UPDATE KECIL SUSULAN #7] MENU PAKET INTERNET — kartu paket diperkecil
 
 Menjawab feedback lanjutan atas redesign sebelumnya: "kotaknya terlalu
