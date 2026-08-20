@@ -1,5 +1,14 @@
 INKAMNET CONTROL CENTER — PATCH v1.25.5
 ==========================================
+[UPDATE KECIL SETELAH RILIS AWAL] Kolom Tindakan di Daftar Tagihan
+sebelumnya tidak rata: tombol titik-tiga bergeser posisi tergantung ada
+atau tidaknya tombol "Lunasi" di baris yang sama (karena grup tombol
+di-tengah-kan sebagai satu blok, bukan dikunci ke tepi kolom). Sekarang
+grup tombol memakai flex penuh lebar kolom dengan perataan ke kanan
+(justify-content:flex-end), sehingga tombol titik-tiga SELALU berada di
+posisi yang sama persis di setiap baris, baik ada tombol Lunasi maupun
+tidak. (public/css/app.css — class .invoice-inline-actions)
+
 Patch ini menjawab 5 bagian revisi UI/UX yang diminta sekaligus dalam satu
 putaran (MENU PELANGGAN, MENU TAGIHAN, MENU APPROVAL, MENU GUDANG, dan
 TAMBAHAN — penyeragaman checkbox & nomor urut di SELURUH menu berbasis
