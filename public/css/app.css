@@ -1069,6 +1069,7 @@ form[data-auto-filter].is-auto-submitting{opacity:.7;pointer-events:none}.cash-c
    quickly scrolled once a site had more than ~5 packages. Reflowed into a responsive 2-column grid with
    a subtle divider between rows so more packages are visible at once without scrolling, and the layout
    reads as a tidy table rather than a stacked list. */
+.package-distribution-card{margin-bottom:14px}
 .package-distribution-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 22px;max-height:260px;overflow-y:auto}
 .package-distribution-row{display:grid;grid-template-columns:1fr 64px 32px 26px;align-items:center;gap:8px;padding:9px 6px;border-radius:9px;border-bottom:1px solid var(--line);text-decoration:none;transition:.15s}
 .package-distribution-row:hover{background:var(--panel-2)}
