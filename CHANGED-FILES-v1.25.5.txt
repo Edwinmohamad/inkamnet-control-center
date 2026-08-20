@@ -1,5 +1,103 @@
 INKAMNET CONTROL CENTER — PATCH v1.25.5
 ==========================================
+[UPDATE KECIL SUSULAN #6] Menjawab permintaan lanjutan untuk 3 menu:
+
+MENU REKONSILIASI
+1. Checkbox ditambahkan di tabel "Cash Belum Disetor" (checkbox header
+   "pilih semua" + checkbox per baris, pola yang sama dengan Menu
+   Pelanggan/Tagihan), dilengkapi bar aksi massal baru di bagian bawah:
+   "Konfirmasi Setoran Massal". Bar ini memakai dialog konfirmasi varian
+   "sukses" (bukan gaya hapus) — kicker "KONFIRMASI SETORAN", tombol
+   hijau "Ya, Konfirmasi". Endpoint baru POST /payments/bulk-settle
+   ditambahkan di backend, memakai guard per-baris yang PERSIS SAMA
+   dengan tombol "Konfirmasi Setoran" satu-per-satu (hanya setoran cash
+   yang masih tertahan di staff yang dikonfirmasi; setoran yang sudah
+   disetor atau ternyata bukan cash otomatis dilewati, tidak membatalkan
+   seluruh proses batch). (routes/payments.js, views/payments/reconciliation.ejs)
+2. Kolom "Invoice" pada tabel dihapus — nomor faktur TIDAK hilang,
+   dipindahkan menjadi keterangan kecil di bawah nama pelanggan (persis
+   pola yang sudah dipakai di Menu Tagihan), supaya informasinya tetap
+   ada tanpa perlu kolom terpisah. (views/payments/reconciliation.ejs)
+3. Semua widget di halaman ini sekarang bisa diklik: 4 kartu ringkasan
+   di atas ("Cash Masih di Tim" → lompat ke tabel, "Setoran Cash Hari
+   Ini"/"Transfer Hari Ini" → buka Data Kas dengan pencarian yang sudah
+   difilter, "Collector Aktif" → lompat ke daftar collector), dan setiap
+   kartu collector individual sekarang juga bisa diklik untuk memfilter
+   tabel di bawah khusus collector tersebut (query pencarian otomatis
+   terisi nama collector). (views/payments/reconciliation.ejs, public/css/app.css)
+
+MENU DATA KAS
+4. Tulisan penjelasan "Baris ini dibuat otomatis dari pembayaran
+   Faktur..." di menu Aksi (popover titik tiga) sebelumnya memakai class
+   yang sebenarnya ditujukan untuk sel tabel lebar (310px) dan tidak
+   mengatur ukuran font sendiri — di dalam popover yang sempit (278px)
+   teksnya jadi tampil di ukuran font ambient/bawaan browser, jauh lebih
+   besar dari teks tombol aksi kecil di sekitarnya, sehingga terasa
+   mengganggu/tidak rapi. Sekarang dibungkus kotak info kecil (ikon +
+   ukuran font kompak, konsisten dengan komponen lain di popover yang
+   sama) tanpa mengubah isi tulisannya. Catatan serupa untuk transaksi
+   yang sudah APPROVED (khusus non-Master Admin) ikut dirapikan dengan
+   pola yang sama. (views/finance/cash.ejs, public/css/app.css)
+5. Kolom "Bukti" untuk transaksi PEMASUKAN (yang memang tidak wajib
+   melampirkan bukti) sebelumnya hanya menampilkan tanda strip "—" polos
+   tanpa keterangan — sekarang menampilkan label kecil "Tidak wajib
+   (pemasukan)" dengan ikon, supaya jelas ini BUKAN data yang hilang/
+   kosong secara tidak sengaja, melainkan memang tidak diwajibkan.
+   Kolom Bukti untuk PENGELUARAN yang belum ada buktinya TIDAK berubah
+   (tetap tampil peringatan "Belum ada bukti" seperti sebelumnya, karena
+   itu memang wajib). (views/finance/cash.ejs, public/css/app.css)
+
+MENU PAKET INTERNET
+6. Kartu paket dirombak ulang secara menyeluruh ("full redesign, lebih
+   clean dan user friendly"). Desain lama menumpuk 5 blok visual yang
+   masing-masing bergaya berbeda (kicker+judul, badge site berbentuk
+   kotak tersendiri, blok Bandwidth, blok Harga dengan garis pembatas,
+   dan grid 2 kolom untuk Profile/Subscriber) sehingga mata harus
+   berpindah antar banyak kotak kecil hanya untuk membaca satu paket.
+   Desain baru: chip site kecil menyatu inline dengan judul paket
+   (bukan lagi kotak banner terpisah), SATU baris "hero" yang menyatukan
+   Bandwidth dan Harga berdampingan dengan bobot visual yang sama besar
+   (sebelumnya dua blok terpisah dengan gaya berbeda), dan satu strip
+   ringkas untuk Profile PPPoE + jumlah pelanggan. Checkbox, status
+   aktif/nonaktif, dan tombol aksi (Edit/Aktif-Nonaktif/Hapus) tidak
+   berubah fungsinya sama sekali — hanya penataan visualnya yang
+   dirapikan. CSS lama yang sudah tidak dipakai (.package-site-badge,
+   sisa aturan .plan-top/.plan-bottom versi lama) ikut dibersihkan.
+   (views/packages/index.ejs, public/css/app.css)
+
+===========================================================
+PENGUJIAN UPDATE SUSULAN #6
+===========================================================
+- Render test terprogram (server Express sungguhan + fetch HTTP) untuk
+  views/payments/reconciliation.ejs, views/finance/cash.ejs, dan
+  views/packages/index.ejs — 23 pemeriksaan, semua PASS. Memverifikasi:
+  checkbox pilih-semua & per-baris ada di tabel Rekonsiliasi dan
+  terhubung ke bar aksi massal baru, bar tersebut memakai varian
+  konfirmasi "sukses" (bukan gaya hapus), kolom Invoice sudah tidak ada
+  di header tabel namun nomor fakturnya tetap tampil sebagai sub-label,
+  kartu ringkasan & kartu collector sudah menjadi elemen <a> yang bisa
+  diklik, catatan AUTO BILLING di popover Data Kas sudah memakai kotak
+  kompak (bukan gaya lama), kolom Bukti untuk transaksi pemasukan
+  menampilkan label "Tidak wajib" (dan transaksi pengeluaran tanpa bukti
+  tetap menampilkan peringatan seperti sebelumnya — tidak ada regresi),
+  serta kartu Paket Internet menampilkan struktur hero/chip/strip baru
+  dan sudah tidak memuat markup lama .package-site-badge.
+- Unit test terpisah (tanpa database sungguhan, database ditiru lewat
+  mock module) khusus untuk route baru POST /payments/bulk-settle — 5
+  pemeriksaan, semua PASS. Memastikan secara konkret: pembayaran cash
+  yang masih berstatus held_by_staff berhasil disetor, pembayaran yang
+  sudah disetor sebelumnya dilewati, pembayaran non-cash (transfer)
+  dilewati, dan dari 3 pembayaran yang dikirim hanya 1 yang benar-benar
+  diproses — persis semantik guard yang sama dengan endpoint /:id/settle
+  satu-per-satu, tidak ada penyimpangan pada aksi massal.
+- Diverifikasi manual: brace CSS balance (kurung kurawal app.css tetap
+  seimbang setelah penghapusan aturan lama) dan npm run validate:v119:
+  SEMUA LULUS, tidak ada regresi.
+(routes/payments.js, views/payments/reconciliation.ejs,
+ views/finance/cash.ejs, views/packages/index.ejs, public/css/app.css)
+
+===========================================================
+
 [PERBAIKAN BUG SUSULAN #5] Menjawab 2 laporan bug:
 
 BUG 1 — MENU APPROVAL & TRANSAKSI: dialog "Approve Massal" salah tampil

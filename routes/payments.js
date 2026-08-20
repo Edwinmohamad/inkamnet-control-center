@@ -350,4 +350,36 @@ router.post('/:id/settle',requireAdmin,async(req,res)=>{
   res.redirect('/payments/reconciliation');
 });
 
+// v1.25.5 (update) — "Konfirmasi Setoran Massal": same idea as Approve Massal on Menu Approval &
+// Transaksi. Loops the EXACT same per-row guard/locking as the single /:id/settle route above (one
+// `SELECT ... FOR UPDATE` transaction per payment), so a batch can never settle something the single-row
+// action would have refused. Rows that are no longer held-by-staff cash (already settled, or turned out
+// not to be cash) are skipped rather than aborting the whole batch.
+router.post('/bulk-settle',requireAdmin,async(req,res)=>{
+  const returnTo=localReturn(req.body.return_to,'/payments/reconciliation');
+  const ids=selectedPaymentIds(req.body);
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu setoran terlebih dahulu.'};return res.redirect(returnTo);}
+  if(ids.length>200){req.session.flash={type:'danger',message:'Maksimal 200 setoran per konfirmasi massal.'};return res.redirect(returnTo);}
+  const done=[];const skipped=[];
+  for(const id of ids){
+    const conn=await db.getConnection();
+    try{
+      await conn.beginTransaction();
+      const [rows]=await conn.execute(`SELECT * FROM payments WHERE id=? FOR UPDATE`,[id]);
+      const p=rows[0];
+      if(!p||p.method!=='cash'||p.settlement_status!=='held_by_staff'){await conn.rollback();skipped.push(p||{id});continue;}
+      await conn.execute(`UPDATE payments SET settlement_status='settled',settled_by=?,settled_at=NOW() WHERE id=?`,[req.session.user.id,p.id]);
+      await postCashTransaction(conn,{paymentId:p.id,invoiceId:p.invoice_id,amount:p.amount,reference:p.reference,categoryName:'Setoran Cash Pelanggan',prefix:'Setoran Cash',actorUserId:req.session.user.id});
+      await conn.commit();
+      done.push(p);
+    }catch(e){await conn.rollback();skipped.push({id});}finally{conn.release();}
+  }
+  if(done.length){
+    await audit({userId:req.session.user.id,action:'bulk_settle',entityType:'payment',entityId:null,description:`Konfirmasi setoran massal ${done.length} pembayaran cash: ${done.map(p=>p.reference||`#${p.id}`).slice(0,20).join(', ')}${done.length>20?', ...':''}${skipped.length?` (${skipped.length} dilewati karena sudah disetor atau bukan lagi cash tertahan di staff)`:''}`,ip:req.ip});
+  }
+  if(!done.length){req.session.flash={type:'danger',message:'Semua setoran terpilih sudah disetor sebelumnya, atau bukan lagi cash yang tertahan di staff.'};return res.redirect(returnTo);}
+  req.session.flash={type:'success',message:`${done.length} setoran cash dikonfirmasi dan masuk ke kas perusahaan.${skipped.length?` ${skipped.length} dilewati karena sudah disetor sebelumnya.`:''}`};
+  res.redirect(returnTo);
+});
+
 module.exports=router;

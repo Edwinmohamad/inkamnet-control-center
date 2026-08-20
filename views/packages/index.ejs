@@ -28,17 +28,41 @@
   </article>
   <% } %>
 
-  <!-- v1.21.0 — Section 3: checkbox + bulk delete for Paket Internet, same [data-bulk-scope] mechanism
-       used by Pelanggan (public/js/app.js handles select-all + the floating bulk bar generically). -->
+  <!-- v1.25.5 (update) — full redesign of the package card per user feedback ("rombak full desainnya,
+       buat lebih clean dan user friendly"). The old card stacked FIVE separate visual blocks (kicker+
+       title, a boxed site badge, a speed block, a price block, a 2-col meta grid) each with different
+       borders/spacing, so the eye had to hop between five differently-styled containers just to read one
+       plan. New layout: one slim site chip inline with the title (was a whole boxed banner), then ONE
+       unified "hero" row putting Bandwidth and Harga side-by-side at equal visual weight (previously two
+       separately-styled blocks stacked with a hard border between them), then a single meta strip for
+       Profile/Subscriber. Checkbox + bulk delete mechanism unchanged ([data-bulk-scope] from Pelanggan). -->
   <div class="plan-grid package-catalog-grid" data-bulk-scope="packagesBulkBar">
     <% packages.forEach((p,index)=>{ %>
       <article class="plan-card reveal-item <%= p.is_active?'':'inactive' %>" style="--enter-delay:<%= Math.min(index*35,250) %>ms">
-        <div class="plan-top"><div class="d-flex align-items-center gap-2"><input class="form-check-input package-row-check" type="checkbox" data-row-check value="<%= p.id %>" aria-label="Pilih paket <%= p.name %>"><span class="plan-index"><%= String(index+1).padStart(2,'0') %></span><div><small>PAKET INTERNET</small><h3><%= p.name %></h3></div></div><span class="status-badge <%= p.is_active?'green':'gray' %>"><%= p.is_active?'AKTIF':'NONAKTIF' %></span></div>
-        <div class="package-site-badge"><i class="bi bi-geo-alt-fill"></i><strong><%= p.site_code||'GLOBAL' %></strong><span><%= p.site_name||'Paket lama / semua site' %></span></div>
-        <div class="plan-speed"><i class="bi bi-lightning-charge-fill"></i><strong><%= p.speed_label||'-' %></strong><small>Bandwidth Plan</small></div>
-        <div class="plan-price"><strong><%= formatRupiah(p.price) %></strong><span>/ bulan</span></div>
-        <div class="plan-meta"><div><span>PPPoE Profile</span><code><%= p.mikrotik_profile||'-' %></code></div><div><span>Subscriber</span><b><%= p.customer_count||0 %></b></div></div>
-        <div class="plan-bottom"><div class="d-flex gap-1 ms-auto"><button class="action-pill" type="button" title="Edit Paket" data-bs-toggle="modal" data-bs-target="#editPackage<%= p.id %>"><i class="bi bi-pencil-square"></i></button><form method="post" action="/packages/<%= p.id %>/toggle"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="action-pill" title="Aktif/Nonaktif"><i class="bi bi-power"></i></button></form><button class="action-pill danger" type="button" title="Hapus Paket" data-simple-delete="/packages/<%= p.id %>/delete" data-entity-label="Paket <%= p.name %> (<%= p.site_code||'GLOBAL' %>)" data-simple-delete-title="Hapus paket ini?" data-simple-delete-warning="Paket akan dihapus permanen. Jika masih dipakai pelanggan, sistem akan menolak dan menyarankan Aktif/Nonaktif."><i class="bi bi-trash3-fill"></i></button></div></div>
+        <div class="plan-card-top">
+          <label class="plan-check"><input class="form-check-input package-row-check" type="checkbox" data-row-check value="<%= p.id %>" aria-label="Pilih paket <%= p.name %>"></label>
+          <span class="plan-index"><%= String(index+1).padStart(2,'0') %></span>
+          <span class="status-badge plan-status <%= p.is_active?'green':'gray' %>"><%= p.is_active?'AKTIF':'NONAKTIF' %></span>
+        </div>
+        <div class="plan-identity">
+          <span class="plan-site-chip"><i class="bi bi-geo-alt-fill"></i><%= p.site_code||'GLOBAL' %></span>
+          <h3><%= p.name %></h3>
+          <small><%= p.site_name||'Paket lama / semua site' %></small>
+        </div>
+        <div class="plan-hero">
+          <div class="plan-hero-item"><i class="bi bi-lightning-charge-fill"></i><div><strong><%= p.speed_label||'-' %></strong><small>Bandwidth</small></div></div>
+          <div class="plan-hero-sep"></div>
+          <div class="plan-hero-item price"><i class="bi bi-cash-coin"></i><div><strong><%= formatRupiah(p.price) %></strong><small>per bulan</small></div></div>
+        </div>
+        <div class="plan-meta-strip">
+          <span><i class="bi bi-hdd-network"></i>Profile <b><%= p.mikrotik_profile||'-' %></b></span>
+          <span><i class="bi bi-people-fill"></i><b><%= p.customer_count||0 %></b> pelanggan</span>
+        </div>
+        <div class="plan-footer">
+          <button class="action-pill" type="button" title="Edit Paket" data-bs-toggle="modal" data-bs-target="#editPackage<%= p.id %>"><i class="bi bi-pencil-square"></i></button>
+          <form method="post" action="/packages/<%= p.id %>/toggle"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="action-pill" title="Aktif/Nonaktif"><i class="bi bi-power"></i></button></form>
+          <button class="action-pill danger" type="button" title="Hapus Paket" data-simple-delete="/packages/<%= p.id %>/delete" data-entity-label="Paket <%= p.name %> (<%= p.site_code||'GLOBAL' %>)" data-simple-delete-title="Hapus paket ini?" data-simple-delete-warning="Paket akan dihapus permanen. Jika masih dipakai pelanggan, sistem akan menolak dan menyarankan Aktif/Nonaktif."><i class="bi bi-trash3-fill"></i></button>
+        </div>
       </article>
     <% }) %>
     <% if(!packages.length){ %><div class="empty-state large"><i class="bi bi-speedometer2"></i><strong>Belum ada paket</strong><small>Tambahkan paket untuk Site / POP yang dipilih.</small></div><% } %>
