@@ -112,7 +112,7 @@
        Both post to the same /invoices/bulk endpoint (differing only by data-bulk-action-value); the server
        re-checks the same per-invoice financial guard as the single-row actions and skips/report anything
        ineligible, so it's always safe regardless of which rows happen to be checked. -->
-  <% if(isAdmin){ %><div class="customer-bulk-bar" id="invoiceDeleteBulkBar" hidden><span><b data-bulk-count>0</b> tagihan terpilih</span><div class="customer-bulk-buttons"><button type="button" data-bulk-clear class="ghost"><i class="bi bi-x-lg"></i>Batal</button><button type="button" data-simple-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="cancel" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-simple-delete-title="Batalkan tagihan terpilih?" data-simple-delete-warning="Tagihan yang masih memiliki pembayaran aktif akan otomatis dilewati. Histori transaksi tetap disimpan untuk audit."><i class="bi bi-x-octagon"></i>Batalkan Massal</button><button type="button" class="danger" data-simple-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="delete" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-simple-delete-title="Hapus permanen tagihan terpilih?" data-simple-delete-warning="Hanya tagihan yang belum pernah memiliki pembayaran yang akan dihapus permanen — sisanya otomatis dilewati."><i class="bi bi-trash3-fill"></i>Hapus Massal</button><% if(isMasterAdmin){ %><button type="button" class="danger" data-force-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="force_delete" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-force-delete-match="HAPUS PAKSA" data-force-delete-warning="Hapus Paksa akan menghapus SEMUA tagihan terpilih beserta SELURUH riwayat pembayarannya secara permanen, termasuk yang sudah LUNAS — dan TIDAK dapat dibatalkan."><i class="bi bi-exclamation-octagon-fill"></i>Hapus Paksa Massal</button><% } %></div></div><% } %>
+  <% if(isAdmin){ %><div class="customer-bulk-bar" id="invoiceDeleteBulkBar" hidden><span><b data-bulk-count>0</b> tagihan terpilih</span><div class="customer-bulk-buttons"><button type="button" data-bulk-clear class="ghost"><i class="bi bi-x-lg"></i>Batal</button><button type="button" class="success" id="bulkPaySelectedInvoices"><i class="bi bi-wallet2"></i>Lunasi Massal</button><button type="button" data-simple-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="cancel" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-simple-delete-title="Batalkan tagihan terpilih?" data-simple-delete-warning="Tagihan yang masih memiliki pembayaran aktif akan otomatis dilewati. Histori transaksi tetap disimpan untuk audit."><i class="bi bi-x-octagon"></i>Batalkan Massal</button><button type="button" class="danger" data-simple-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="delete" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-simple-delete-title="Hapus permanen tagihan terpilih?" data-simple-delete-warning="Hanya tagihan yang belum pernah memiliki pembayaran yang akan dihapus permanen — sisanya otomatis dilewati."><i class="bi bi-trash3-fill"></i>Hapus Massal</button><% if(isMasterAdmin){ %><button type="button" class="danger" data-force-delete-bulk data-bulk-scope-id="invoiceDeleteBulkBar" data-bulk-url="/invoices/bulk" data-bulk-action-field="action" data-bulk-action-value="force_delete" data-bulk-id-field="invoice_ids[]" data-entity-label-plural="tagihan" data-force-delete-match="HAPUS PAKSA" data-force-delete-warning="Hapus Paksa akan menghapus SEMUA tagihan terpilih beserta SELURUH riwayat pembayarannya secara permanen, termasuk yang sudah LUNAS — dan TIDAK dapat dibatalkan."><i class="bi bi-exclamation-octagon-fill"></i>Hapus Paksa Massal</button><% } %></div></div><% } %>
 </section>
 
 <div class="modal fade" id="generateInvoiceModal" tabindex="-1">
@@ -235,6 +235,7 @@
   // still be included in Batalkan/Hapus Massal).
   const invoiceTable=document.querySelector('.invoice-table');
   const paySelected=document.getElementById('paySelectedInvoices');
+  const bulkPaySelected=document.getElementById('bulkPaySelectedInvoices');
   const selectedCount=document.getElementById('invoiceTableSelectedCount');
   const refreshSelection=()=>{
     const payableIds=[...document.querySelectorAll('[data-row-check]')].filter(x=>x.checked&&x.dataset.canPay==='1').map(x=>String(x.value));
@@ -244,7 +245,21 @@
   };
   invoiceTable?.addEventListener('change',event=>{if(event.target.matches('[data-row-check],[data-select-all]'))refreshSelection();});
   document.getElementById('invoiceDeleteBulkBar')?.querySelector('[data-bulk-clear]')?.addEventListener('click',()=>setTimeout(refreshSelection,0));
-  paySelected?.addEventListener('click',()=>{const ids=refreshSelection();if(!ids.length)return;const paymentModal=document.getElementById('paymentModal');if(!paymentModal)return;paymentModal.querySelectorAll('.payment-invoice-check').forEach(ch=>{ch.checked=ids.includes(String(ch.value));ch.dispatchEvent(new Event('change',{bubbles:true}));});bootstrap.Modal.getOrCreateInstance(paymentModal).show();});
+  // Opens the payment modal pre-checking the given invoice IDs — shared by "Bayar Dipilih" (top of the
+  // table) and "Lunasi Massal" (bottom floating bulk bar, added after user feedback that the bulk bar's
+  // Batalkan/Hapus buttons had no bulk-pay option next to them).
+  const openPaymentModalFor=ids=>{
+    const paymentModal=document.getElementById('paymentModal');
+    if(!paymentModal)return;
+    paymentModal.querySelectorAll('.payment-invoice-check').forEach(ch=>{ch.checked=ids.includes(String(ch.value));ch.dispatchEvent(new Event('change',{bubbles:true}));});
+    bootstrap.Modal.getOrCreateInstance(paymentModal).show();
+  };
+  paySelected?.addEventListener('click',()=>{const ids=refreshSelection();if(!ids.length)return;openPaymentModalFor(ids);});
+  bulkPaySelected?.addEventListener('click',()=>{
+    const ids=refreshSelection();
+    if(!ids.length){alert('Tidak ada tagihan terpilih yang bisa langsung dibayar (mungkin sudah lunas atau sedang menunggu approval). Centang tagihan berstatus Belum Lunas terlebih dahulu.');return;}
+    openPaymentModalFor(ids);
+  });
   const editModal=document.getElementById('invoiceEditModal');
   editModal?.addEventListener('show.bs.modal',event=>{const b=event.relatedTarget;if(!b)return;document.getElementById('invoiceEditForm').action=`/invoices/${b.dataset.invoiceEditId}/update-meta`;document.getElementById('invoiceEditIdentity').textContent=`${b.dataset.invoiceEditNumber} · ${b.dataset.invoiceEditCustomer}`;document.getElementById('invoiceEditDate').value=b.dataset.invoiceEditDate||'';document.getElementById('invoiceEditDue').value=b.dataset.invoiceEditDue||'';document.getElementById('invoiceEditProrata').value=b.dataset.invoiceEditProrata||'0';});
   const discountModal=document.getElementById('invoiceDiscountModal');

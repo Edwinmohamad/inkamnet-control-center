@@ -253,9 +253,34 @@
   const simpleDeleteModal=simpleDeleteModalEl&&window.bootstrap?bootstrap.Modal.getOrCreateInstance(simpleDeleteModalEl):null;
   const simpleDeleteForm=document.getElementById('simpleDeleteForm');
   const simpleDeleteConfirmBtn=document.getElementById('simpleDeleteConfirmBtn');
+  const simpleDeleteKickerEl=document.getElementById('simpleDeleteKicker');
   const simpleDeleteTitleEl=document.getElementById('simpleDeleteTitle');
   const simpleDeleteWarningEl=document.getElementById('simpleDeleteWarning');
+  const simpleDeleteConfirmIconEl=document.getElementById('simpleDeleteConfirmIcon');
+  const simpleDeleteConfirmLabelEl=document.getElementById('simpleDeleteConfirmLabel');
   let simpleDeleteBulkHandler=null;
+  // v1.25.5 (update) — this modal was originally built ONLY for destructive delete/cancel actions
+  // (hence the hardcoded "HAPUS DATA" kicker + red "Ya, Hapus" button), but it's also reused by
+  // non-destructive confirmations like "Approve Massal" on Menu Approval & Transaksi. Reusing the
+  // hardcoded delete styling there was a bug (approve looked/read exactly like a delete). This helper
+  // makes the whole modal chrome (kicker text/color, warning alert color, confirm button color/icon/
+  // label) swap based on optional data-simple-delete-* attributes on the trigger — defaulting to the
+  // exact same danger/"Ya, Hapus" look as before when a trigger doesn't set them, so every existing
+  // delete/cancel button across the app is unaffected.
+  function applySimpleDeleteVariant(source){
+    const variant=source.dataset.simpleDeleteVariant==='success'?'success':'danger';
+    const isSuccess=variant==='success';
+    const kickerText=source.dataset.simpleDeleteKicker||(isSuccess?'KONFIRMASI':'HAPUS DATA');
+    const confirmLabel=source.dataset.simpleDeleteConfirmLabel||(isSuccess?'Ya, Lanjutkan':'Ya, Hapus');
+    const confirmIcon=source.dataset.simpleDeleteConfirmIcon||(isSuccess?'bi-check2-circle':'bi-trash3-fill');
+    const warningIcon=isSuccess?'bi-info-circle-fill':'bi-exclamation-triangle-fill';
+    if(simpleDeleteKickerEl){simpleDeleteKickerEl.textContent=kickerText;simpleDeleteKickerEl.classList.toggle('text-danger',!isSuccess);simpleDeleteKickerEl.classList.toggle('text-success',isSuccess);}
+    if(simpleDeleteWarningEl){simpleDeleteWarningEl.classList.toggle('alert-danger',!isSuccess);simpleDeleteWarningEl.classList.toggle('alert-success',isSuccess);}
+    if(simpleDeleteConfirmBtn){simpleDeleteConfirmBtn.classList.toggle('danger',!isSuccess);simpleDeleteConfirmBtn.classList.toggle('success',isSuccess);}
+    if(simpleDeleteConfirmIconEl)simpleDeleteConfirmIconEl.className=`bi ${confirmIcon}`;
+    if(simpleDeleteConfirmLabelEl)simpleDeleteConfirmLabelEl.textContent=confirmLabel;
+    return warningIcon;
+  }
   document.addEventListener('click',event=>{
     const trigger=event.target.closest('[data-simple-delete]');
     if(!trigger||!simpleDeleteModal)return;
@@ -266,9 +291,10 @@
     const label=trigger.dataset.entityLabel||'data ini';
     const title=trigger.dataset.simpleDeleteTitle||'Hapus data ini?';
     const warning=trigger.dataset.simpleDeleteWarning||'Tindakan ini tidak dapat dibatalkan.';
+    const warningIcon=applySimpleDeleteVariant(trigger);
     const targetEl=document.getElementById('simpleDeleteTarget');if(targetEl)targetEl.textContent=label;
     if(simpleDeleteTitleEl)simpleDeleteTitleEl.textContent=title;
-    if(simpleDeleteWarningEl)simpleDeleteWarningEl.innerHTML=`<i class="bi bi-exclamation-triangle-fill me-2"></i>${escapeHtml(warning)}`;
+    if(simpleDeleteWarningEl)simpleDeleteWarningEl.innerHTML=`<i class="bi ${warningIcon} me-2"></i>${escapeHtml(warning)}`;
     if(simpleDeleteForm)simpleDeleteForm.action=url||'#';
     simpleDeleteModal.show();
   });
@@ -367,9 +393,10 @@
       const actionValue=btn.dataset.bulkActionValue||'delete';
       const url=btn.dataset.bulkUrl;
       const label=btn.dataset.entityLabelPlural?`${ids.length} ${btn.dataset.entityLabelPlural} terpilih`:`${ids.length} data terpilih`;
+      const warningIcon=applySimpleDeleteVariant(btn);
       const targetEl=document.getElementById('simpleDeleteTarget');if(targetEl)targetEl.textContent=label;
       if(simpleDeleteTitleEl)simpleDeleteTitleEl.textContent=btn.dataset.simpleDeleteTitle||'Hapus data terpilih?';
-      if(simpleDeleteWarningEl)simpleDeleteWarningEl.innerHTML=`<i class="bi bi-exclamation-triangle-fill me-2"></i>${escapeHtml(btn.dataset.simpleDeleteWarning||'Tindakan ini tidak dapat dibatalkan. Data yang masih terikat/dipakai akan otomatis dilewati oleh sistem.')}`;
+      if(simpleDeleteWarningEl)simpleDeleteWarningEl.innerHTML=`<i class="bi ${warningIcon} me-2"></i>${escapeHtml(btn.dataset.simpleDeleteWarning||'Tindakan ini tidak dapat dibatalkan. Data yang masih terikat/dipakai akan otomatis dilewati oleh sistem.')}`;
       simpleDeleteBulkHandler=()=>submitBulkForm(url,{[actionField]:actionValue,[idField]:ids});
       simpleDeleteModal.show();
     });

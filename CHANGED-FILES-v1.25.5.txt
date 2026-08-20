@@ -1,5 +1,78 @@
 INKAMNET CONTROL CENTER — PATCH v1.25.5
 ==========================================
+[PERBAIKAN BUG SUSULAN #5] Menjawab 2 laporan bug:
+
+BUG 1 — MENU APPROVAL & TRANSAKSI: dialog "Approve Massal" salah tampil
+sebagai dialog HAPUS
+Saat memilih beberapa pembayaran lalu klik "Approve Massal", dialog
+konfirmasi yang muncul judulnya "HAPUS DATA" dan tombolnya "Ya, Hapus"
+(merah, ikon tempat sampah) — padahal aksi yang dilakukan adalah APPROVE,
+bukan hapus. Penyebabnya: dialog konfirmasi generik yang sama dipakai
+untuk SEMUA aksi massal (Hapus Massal di banyak menu, Batalkan Massal,
+DAN Approve Massal), tapi judul/tombolnya selama ini di-hardcode text
+"HAPUS DATA"/"Ya, Hapus" berwarna merah — cocok untuk aksi hapus, tapi
+salah total untuk aksi approve yang sifatnya positif/aman.
+Perbaikan: dialog konfirmasi tersebut sekarang bisa "berganti wajah"
+sesuai jenis aksinya — judul kicker, warna judul, warna kotak peringatan,
+warna tombol, ikon tombol, dan teks tombol semuanya bisa disesuaikan.
+Tombol "Approve Massal" sekarang memakai varian "sukses": kicker
+"KONFIRMASI APPROVAL" (bukan "HAPUS DATA"), tombol hijau "Ya, Approve"
+dengan ikon centang (bukan tombol merah "Ya, Hapus" dengan ikon tempat
+sampah). SEMUA tombol Hapus Massal/Batalkan Massal/Hapus Paksa Massal di
+menu lain (Pelanggan, Tagihan, Data Kas, Router, Site, Paket, Inventaris,
+Ticket, dll) TIDAK berubah tampilannya sama sekali — dialog tetap
+memakai tampilan merah "HAPUS DATA"/"Ya, Hapus" seperti sebelumnya
+karena itu tetap jadi tampilan bawaan (default) jika sebuah tombol tidak
+secara eksplisit meminta varian lain.
+(views/partials/layout.ejs, public/js/app.js, views/payments/index.ejs)
+
+BUG 2 — MENU TAGIHAN: tidak ada opsi "Lunasi Massal" di bar aksi bawah
+Setelah mencentang beberapa tagihan Belum Lunas, bar aksi massal yang
+muncul di bagian bawah tabel (berisi Batal/Batalkan Massal/Hapus Massal/
+Hapus Paksa Massal) tidak punya opsi untuk langsung membayar/melunaskan
+tagihan yang dicentang — hanya ada opsi-opsi terkait Batalkan/Hapus.
+Fitur "Bayar Dipilih" sebenarnya sudah ada, tapi hanya berupa tombol
+kecil terpisah di pojok atas tabel (mudah tidak disadari saat mata
+tertuju ke bar aksi di bawah). Perbaikan: tombol baru "Lunasi Massal"
+ditambahkan sebagai tombol PERTAMA di bar aksi massal bagian bawah
+(setelah tombol Batal), memakai logika yang sama persis dengan "Bayar
+Dipilih" di atas — tagihan yang dicentang disaring otomatis ke yang
+memang bisa langsung dibayar (bukan yang sudah lunas/sedang menunggu
+approval), lalu modal Pembayaran terbuka dengan faktur-faktur tersebut
+sudah otomatis tercentang. Jika tidak ada satupun tagihan tercentang
+yang bisa dibayar langsung, muncul pesan penjelasan alih-alih diam saja.
+Tombol "Bayar Dipilih" di pojok atas tabel TETAP ada (tidak dihapus)
+supaya kedua kebiasaan pengguna sama-sama terlayani.
+(views/invoices/index.ejs)
+
+===========================================================
+PENGUJIAN PERBAIKAN BUG SUSULAN #5
+===========================================================
+- Unit test terpisah (tanpa DOM sungguhan) khusus untuk fungsi
+  applySimpleDeleteVariant di public/js/app.js — 17 pemeriksaan, semua
+  PASS. Memastikan: (a) saat tidak ada data-attribute varian sama sekali
+  (kondisi SEMUA tombol Hapus Massal yang sudah ada), tampilan modal
+  identik byte-per-byte dengan tampilan lama (kicker "HAPUS DATA", tombol
+  merah "Ya, Hapus", ikon tempat sampah) — jadi tidak ada regresi visual
+  di menu manapun yang sudah ada; (b) saat varian "success" dipakai
+  dengan override kustom (persis seperti dipakai Approve Massal), semua
+  elemen (kicker/warna/ikon/label) berubah sesuai override; (c) saat
+  varian "success" dipakai TANPA override kustom, nilai default untuk
+  varian sukses dipakai (bukan malah jatuh ke default varian hapus).
+- Render test terprogram (server Express sungguhan + fetch HTTP) untuk
+  views/payments/index.ejs dan views/invoices/index.ejs — 13 pemeriksaan,
+  semua PASS. Memverifikasi: tombol Approve Massal membawa
+  data-simple-delete-variant="success" beserta kicker/label kustomnya,
+  markup modal di partials/layout.ejs memiliki id yang dibutuhkan JS
+  untuk mengganti varian, tombol "Lunasi Massal" baru ada di dalam bar
+  aksi massal bawah Daftar Tagihan, dan fungsi JS openPaymentModalFor
+  serta event handler-nya benar-benar ter-render di halaman.
+- npm run validate:v119: SEMUA LULUS, tidak ada regresi.
+(public/js/app.js, views/partials/layout.ejs, views/payments/index.ejs,
+ views/invoices/index.ejs)
+
+===========================================================
+
 [UPDATE KECIL SUSULAN #4] Menjawab laporan lanjutan untuk 3 menu sekaligus:
 
 MENU TAGIHAN (Daftar Tagihan)
