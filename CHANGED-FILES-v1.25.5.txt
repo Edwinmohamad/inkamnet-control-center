@@ -2,12 +2,24 @@ INKAMNET CONTROL CENTER — PATCH v1.25.5
 ==========================================
 [UPDATE KECIL SETELAH RILIS AWAL] Kolom Tindakan di Daftar Tagihan
 sebelumnya tidak rata: tombol titik-tiga bergeser posisi tergantung ada
-atau tidaknya tombol "Lunasi" di baris yang sama (karena grup tombol
-di-tengah-kan sebagai satu blok, bukan dikunci ke tepi kolom). Sekarang
-grup tombol memakai flex penuh lebar kolom dengan perataan ke kanan
-(justify-content:flex-end), sehingga tombol titik-tiga SELALU berada di
-posisi yang sama persis di setiap baris, baik ada tombol Lunasi maupun
-tidak. (public/css/app.css — class .invoice-inline-actions)
+atau tidaknya tombol "Lunasi" di baris yang sama, karena keduanya berbagi
+SATU kolom/sel yang sama. Percobaan pertama memakai perataan flex
+(justify-content:flex-end) supaya titik-tiga selalu di tepi kanan sel —
+tapi solusi yang lebih rapi dan lebih mudah dipelihara adalah memisahkan
+keduanya menjadi DUA KOLOM independen, sehingga posisi masing-masing
+tombol tidak pernah saling memengaruhi. Sekarang:
+- Kolom baru (tanpa judul, lebar tetap 112px, rata tengah) khusus untuk
+  tombol "Lunasi" — kosong jika tagihan tidak bisa dibayar langsung
+  (misalnya sedang menunggu approval atau sudah lunas).
+- Kolom "Tindakan" hanya berisi tombol titik-tiga (menu popover), dan
+  sekarang SELALU berada di posisi yang sama persis di setiap baris,
+  tidak lagi bergantung pada ada/tidaknya tombol Lunasi.
+Kolom baru ini HANYA muncul untuk Admin/Master Admin (sama seperti
+sebelumnya, tombol Lunasi memang hanya untuk admin) — colspan baris
+kosong ("Tidak ada tagihan...") disesuaikan mengikuti penambahan kolom
+ini (isAdmin ? 10 : 8). (views/invoices/index.ejs, public/css/app.css —
+class .invoice-pay-cell/.invoice-pay-head baru, .invoice-action-cell
+dikembalikan ke lebar semula karena kini hanya berisi satu tombol)
 
 Patch ini menjawab 5 bagian revisi UI/UX yang diminta sekaligus dalam satu
 putaran (MENU PELANGGAN, MENU TAGIHAN, MENU APPROVAL, MENU GUDANG, dan
