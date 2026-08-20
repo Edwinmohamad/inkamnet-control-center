@@ -1,5 +1,46 @@
 INKAMNET CONTROL CENTER — PATCH v1.25.5
 ==========================================
+[UPDATE KECIL SUSULAN #7] MENU PAKET INTERNET — kartu paket diperkecil
+
+Menjawab feedback lanjutan atas redesign sebelumnya: "kotaknya terlalu
+besar, rubah desain". Redesign #1 (Susulan #6) sudah lebih rapi secara
+struktur, tapi kartunya masih tinggi: padding 18px, dua kotak ikon 34x34
+untuk Bandwidth & Harga, dan dua garis pembatas — total 4 blok bertumpuk
+untuk menampilkan 4 fakta kecil.
+
+Kartu sekarang dipadatkan jadi 3 baris saja:
+1. Baris identitas: checkbox + nama paket (tebal) + site/kode di
+   bawahnya (kecil, satu baris) + badge status AKTIF/NONAKTIF di kanan.
+2. SATU baris chip kecil berisi Bandwidth, Harga, Profile PPPoE, dan
+   Jumlah Pelanggan sekaligus (tanpa kotak ikon besar seperti
+   sebelumnya) — otomatis membungkus ke baris berikutnya jika kartu
+   sempit.
+3. Baris tombol aksi (Edit/Aktif-Nonaktif/Hapus) yang ramping, dipisah
+   garis tipis saja (bukan blok terpisah).
+Kepadatan grid juga dinaikkan (lebar kolom minimum diturunkan dari 270px
+menjadi 210px) supaya lebih banyak kartu muat sebaris di layar lebar.
+Checkbox, badge status, dan seluruh tombol aksi tidak berubah
+fungsinya — murni penataan ulang visual supaya kartu terasa jauh lebih
+ringkas/tidak makan tempat.
+(views/packages/index.ejs, public/css/app.css)
+
+===========================================================
+PENGUJIAN UPDATE SUSULAN #7
+===========================================================
+- Render test terprogram (server Express sungguhan + fetch HTTP) untuk
+  views/packages/index.ejs — 13 pemeriksaan, semua PASS. Memverifikasi:
+  struktur baru (plan-row-top/plan-stats/plan-row-actions) ter-render,
+  markup lama yang lebih besar (plan-hero/plan-meta-strip/plan-footer/
+  plan-identity/plan-site-chip) sudah tidak ada lagi, seluruh fakta
+  (bandwidth/harga/profile/jumlah pelanggan) tetap tampil sebagai chip,
+  fallback "GLOBAL" untuk paket tanpa site tetap berfungsi, checkbox dan
+  tombol aksi (Edit/Aktif-Nonaktif/Hapus) tetap ada dan tidak berkurang.
+- Diverifikasi manual: brace CSS balance (app.css tetap seimbang) dan
+  npm run validate:v119: SEMUA LULUS, tidak ada regresi.
+(views/packages/index.ejs, public/css/app.css)
+
+===========================================================
+
 [UPDATE KECIL SUSULAN #6] Menjawab permintaan lanjutan untuk 3 menu:
 
 MENU REKONSILIASI
