@@ -67,16 +67,17 @@
              kolom "Jatuh Tempo" yang lebih relevan untuk follow-up penagihan. Kolom "No." dan checkbox
              pilih-massal (Master Admin) ditambahkan di paling kiri. -->
         <thead><tr>
-          <% if(isMasterAdmin){ %><th><input type="checkbox" data-select-all aria-label="Pilih semua pembayaran menunggu approval"></th><% } %>
-          <th>No.</th><th>Pelanggan</th><th>Site / Cluster</th><th>Nominal</th><th>Metode</th><th>Bukti Pembayaran</th><th>Diterima Oleh</th><th>Approval</th><th>Jatuh Tempo</th><th>Aksi</th>
+          <% if(isMasterAdmin){ %><th class="app-check-col"><input type="checkbox" class="form-check-input" data-select-all aria-label="Pilih semua pembayaran menunggu approval"></th><% } %>
+          <th>No.</th><th>Pelanggan</th><th>Site / Cluster</th><th>Jatuh Tempo</th><th>Nominal</th><th>Metode</th><th>Bukti Pembayaran</th><th>Diterima Oleh</th><th>Approval</th><th>Aksi</th>
         </tr></thead>
         <tbody>
           <% payments.forEach((p,idx)=>{ %>
           <tr>
-            <% if(isMasterAdmin){ %><td><input type="checkbox" data-row-check value="<%= p.id %>" <%= p.status==='pending'?'':'disabled' %> aria-label="Pilih pembayaran <%= p.reference||p.id %> untuk approve massal"></td><% } %>
+            <% if(isMasterAdmin){ %><td class="app-check-col"><input type="checkbox" class="form-check-input" data-row-check value="<%= p.id %>" <%= p.status==='pending'?'':'disabled' %> aria-label="Pilih pembayaran <%= p.reference||p.id %> untuk approve massal"></td><% } %>
             <td><span class="cell-main"><%= idx+1 %></span></td>
-            <td><span class="cell-main"><%= p.customer_name %></span><span class="cell-sub"><%= p.customer_code %></span><a class="invoice-number-link standalone" href="/invoices/<%= p.invoice_id %>/pdf" target="_blank"><i class="bi bi-file-earmark-pdf"></i><%= p.invoice_number %></a></td>
+            <td><span class="cell-main"><%= p.customer_name %></span><span class="cell-sub"><%= p.customer_code %></span></td>
             <td><span class="cell-main"><%= p.site_code %></span><span class="cell-sub">Cluster <%= p.cluster_name||'-' %></span></td>
+            <td><%= formatDate(p.due_date) %></td>
             <td class="money"><%= formatRupiah(p.amount) %><span class="cell-sub"><%= p.reference||'-' %></span></td>
             <td><span class="payment-method <%= p.method %>"><i class="bi <%= p.method==='cash'?'bi-cash-coin':p.method==='transfer'?'bi-bank':'bi-wallet2' %>"></i><%= statusLabel(p.method).toUpperCase() %></span></td>
             <td>
@@ -93,7 +94,6 @@
               <% } else if(p.method==='cash'&&p.settlement_status==='settled'){ %><span class="status-badge green">sudah disetor</span>
               <% } else { %><span class="status-badge green"><i class="bi bi-shield-check"></i> disetujui <%= p.verifier_name||'Master Admin' %></span><% } %>
             </td>
-            <td><%= formatDate(p.due_date) %></td>
             <td><div class="payment-actions"><% if(isAdmin||Number(p.received_by)===Number(user.id)||Number(p.collector_user_id)===Number(user.id)){ %><button type="button" class="action-pill proof-upload-btn" title="<%= p.proof_path?'Ganti bukti':'Upload bukti pembayaran' %>" data-bs-toggle="modal" data-bs-target="#proofUploadModal" data-payment-id="<%= p.id %>" data-customer="<%= p.customer_name %>" data-invoice="<%= p.invoice_number %>"><i class="bi bi-cloud-arrow-up"></i></button><% } %><% if(p.proof_path){ %><a class="action-pill" href="/payments/<%= p.id %>/proof" target="_blank" rel="noopener" title="Buka bukti"><i class="bi bi-box-arrow-up-right"></i></a><% } %></div></td>
           </tr>
           <% }) %>

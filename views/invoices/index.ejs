@@ -7,6 +7,7 @@
     </div>
     <div class="module-actions">
       <a class="btn-tech" href="/reports?view=invoice"><i class="bi bi-file-earmark-text"></i>Faktur</a><a class="btn-tech" href="/payments"><i class="bi bi-wallet2"></i>Pembayaran</a>
+      <% if(isAdmin){ %><button class="btn-tech" type="button" data-bs-toggle="modal" data-bs-target="#invoiceImportModal"><i class="bi bi-cloud-arrow-up-fill"></i>Import XLSX</button><% } %>
       <a class="btn-tech" href="/invoices/export.xlsx?<%= periodQueryString %>"><i class="bi bi-download"></i>Export XLSX</a>
       <button class="btn-tech primary" type="button" data-bs-toggle="modal" data-bs-target="#generateInvoiceModal"><i class="bi bi-arrow-repeat"></i>Refresh / Generate Tagihan</button>
     </div>
@@ -64,7 +65,7 @@
         <!-- v1.24.6 — kolom "Kirim Pengingat" dihapus (UI/UX audit): tombolnya sudah ada juga di popover
              Tindakan setiap baris, jadi tidak perlu kolom tersendiri yang isinya cuma satu tombol/teks
              "Tidak diperlukan" di sebagian besar baris. -->
-        <thead><tr><% if(isAdmin){ %><th class="invoice-check-col"><input type="checkbox" class="form-check-input" data-select-all aria-label="Pilih semua tagihan"></th><% } %><th>No.</th><th>Pelanggan</th><th>Periode</th><th>Status</th><th>Tagihan</th><th>Terbayar</th><th>Site</th><th>Jatuh Tempo</th><th class="invoice-action-head">Tindakan</th></tr></thead>
+        <thead><tr><% if(isAdmin){ %><th class="invoice-check-col"><input type="checkbox" class="form-check-input" data-select-all aria-label="Pilih semua tagihan"></th><% } %><th>No.</th><th>Pelanggan</th><th>Site</th><th>Periode</th><th>Jatuh Tempo</th><th>Tagihan</th><th>Status</th><th class="invoice-action-head">Tindakan</th></tr></thead>
         <tbody>
           <% invoices.forEach((i,index)=>{ const wa=String(i.phone||'').replace(/\D/g,'').replace(/^0/,'62').replace(/^8/,'628'); const waValid=/^628[1-9]\d{7,11}$/.test(wa); const reminder=`Halo ${i.customer_name}, kami mengingatkan tagihan INKAMNET periode ${monthNames[i.period_month-1]} ${i.period_year} sebesar ${formatRupiah(i.outstanding)}. No. faktur ${i.invoice_number}. Terima kasih.`; const hasPending=Number(i.pending_payment_count||0)>0; const canPay=Number(i.outstanding)>0 && !hasPending && !['paid','cancelled','refunded'].includes(i.status); %>
           <tr>
@@ -73,12 +74,11 @@
             <td>
               <div><span class="cell-main"><%= i.customer_name %></span><span class="cell-sub"><%= i.customer_code %></span><% if(i.customer_archived_at){ %><span class="status-badge gray customer-archived-pill" title="Pelanggan ini sudah diarsipkan — riwayat tagihan tetap ditampilkan untuk audit."><i class="bi bi-archive-fill"></i>Diarsipkan</span><% } %></div>
             </td>
-            <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
-            <td><% if(hasPending){ %><span class="status-badge orange"><i class="bi bi-hourglass-split"></i> Menunggu Approval</span><% }else{ %><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span><% } %></td>
-            <td class="money"><%= formatRupiah(i.total) %><span class="cell-sub"><%= i.package_name %></span></td>
-            <td class="money text-success-soft"><%= formatRupiah(i.paid_amount) %></td>
             <td><span class="cell-main"><%= i.site_code %></span><span class="cell-sub">Cluster <%= i.cluster_name||'-' %></span></td>
+            <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
             <td><%= formatDate(i.due_date) %></td>
+            <td class="money"><%= formatRupiah(i.total) %><span class="cell-sub"><%= i.package_name %></span></td>
+            <td><% if(hasPending){ %><span class="status-badge orange"><i class="bi bi-hourglass-split"></i> Menunggu Approval</span><% }else{ %><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span><% } %></td>
             <td class="invoice-action-cell">
               <div class="invoice-inline-actions">
                 <% if(canPay&&isAdmin){ %><button type="button" class="invoice-pay-button" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>" title="Input pembayaran penuh untuk approval"><i class="bi bi-check2-circle"></i><span>Lunasi</span></button><% } %>
@@ -103,7 +103,7 @@
             </td>
           </tr>
           <% }) %>
-          <% if(!invoices.length){ %><tr><td colspan="<%= isAdmin?10:9 %>"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Refresh / Generate Tagihan.</small></div></td></tr><% } %>
+          <% if(!invoices.length){ %><tr><td colspan="<%= isAdmin?9:8 %>"><div class="empty-state"><i class="bi bi-receipt"></i><strong>Tidak ada tagihan pada filter ini</strong><small>Ubah periode/filter atau gunakan Refresh / Generate Tagihan.</small></div></td></tr><% } %>
         </tbody>
       </table>
     </div>
@@ -134,6 +134,59 @@
     </form>
   </div>
 </div>
+
+<% if(isAdmin){ %>
+<div class="modal fade" id="invoiceImportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <form class="modal-content customer-import-modal" method="post" action="/invoices/import" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="modal-header">
+        <div><div class="module-kicker">IMPORT TAGIHAN</div><h5 class="modal-title">Import Tagihan dari Excel</h5><small class="text-secondary">Bisa membuat tagihan baru maupun memperbarui tagihan yang sudah ada.</small></div>
+        <button class="btn-close" type="button" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="customer-import-console">
+          <div class="customer-import-topbar">
+            <label class="customer-import-file">
+              <i class="bi bi-file-earmark-spreadsheet-fill"></i>
+              <input type="file" name="invoice_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+              <span><b>Pilih file .xlsx</b><small data-file-label>Belum ada file dipilih</small></span>
+            </label>
+            <button class="btn-tech primary" type="submit"><i class="bi bi-cloud-arrow-up-fill"></i>Import</button>
+            <a class="btn-tech customer-template-download" href="/invoices/template.xlsx"><i class="bi bi-file-earmark-arrow-down"></i>Download Format Import</a>
+          </div>
+          <div class="customer-import-warning">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <div>
+              <strong>Sebelum melakukan import</strong>
+              <ul>
+                <li>Kosongkan kolom <b>No. Faktur</b> untuk membuat tagihan baru; isi untuk memperbarui tagihan yang sudah ada.</li>
+                <li>Kode Pelanggan harus sudah terdaftar di <a href="/customers" target="_blank">Menu Pelanggan</a>.</li>
+                <li>Tagihan berstatus LUNAS/DIBATALKAN/REFUND tidak akan diubah nominalnya.</li>
+                <li>Kolom <b>Sudah Dibayar</b> TIDAK langsung melunaskan tagihan — sistem membuat catatan pembayaran berstatus Menunggu Approval yang tetap perlu di-approve dari <a href="/payments" target="_blank">Menu Approval</a>.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="customer-import-required">
+            <div class="customer-import-required-head"><span>KOLOM WAJIB</span><small>Jika salah satu kosong, import seluruh file dibatalkan.</small></div>
+            <div class="customer-import-chip-grid">
+              <% ['Kode Pelanggan','Bulan','Tahun','Tanggal Faktur','Jatuh Tempo','Nominal Tagihan (tagihan baru)'].forEach(x=>{ %><span><i class="bi bi-asterisk"></i><%= x %></span><% }) %>
+            </div>
+          </div>
+          <div class="customer-import-rules">
+            <div><i class="bi bi-arrow-repeat"></i><span><b>Insert + Update (upsert)</b><small>Cocok lewat No. Faktur, atau Kode Pelanggan + Bulan + Tahun jika No. Faktur dikosongkan.</small></span></div>
+            <div><i class="bi bi-shield-check"></i><span><b>Validasi atomik</b><small>Semua baris diperiksa dulu. Satu error = tidak ada data setengah masuk.</small></span></div>
+            <div><i class="bi bi-hourglass-split"></i><span><b>Pembayaran tetap lewat approval</b><small>Kolom Sudah Dibayar membuat catatan Menunggu Approval, bukan langsung Lunas.</small></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="customer-import-footer-note"><i class="bi bi-info-circle"></i>Format yang disarankan: template terbaru dari tombol Download Format Import.</span>
+      </div>
+    </form>
+  </div>
+</div>
+<% } %>
 
 <div class="modal fade" id="invoiceEditModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">

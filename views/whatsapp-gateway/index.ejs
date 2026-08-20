@@ -53,10 +53,11 @@
     <div class="data-card-head"><div><h3>Log Pengiriman Terbaru</h3><small>50 pesan terakhir (manual, blast, dan auto-reminder)</small></div></div>
     <div class="table-responsive">
       <table class="app-table">
-        <thead><tr><th>Waktu</th><th>Pelanggan</th><th>No. Faktur</th><th>Tipe</th><th>Nomor</th><th>Status</th><th>Pesan / Error</th></tr></thead>
+        <thead><tr><th class="app-seq-col">No.</th><th>Waktu</th><th>Pelanggan</th><th>No. Faktur</th><th>Tipe</th><th>Nomor</th><th>Status</th><th>Pesan / Error</th></tr></thead>
         <tbody id="waMessageLogBody">
-          <% messages.forEach(m=>{ %>
+          <% messages.forEach((m,index)=>{ %>
           <tr>
+            <td><span class="cell-main"><%= index+1 %></span></td>
             <td><%= formatDate(m.created_at) %></td>
             <td><%= m.customer_name||'-' %><% if(m.customer_code){ %><span class="cell-sub"><%= m.customer_code %></span><% } %></td>
             <td><%= m.invoice_number||'-' %></td>
@@ -66,7 +67,7 @@
             <td><span class="cash-note"><%= m.status==='failed'?(m.error_message||'-'):m.message %></span></td>
           </tr>
           <% }) %>
-          <% if(!messages.length){ %><tr><td colspan="7"><div class="empty-state"><i class="bi bi-whatsapp"></i><strong>Belum ada pesan terkirim</strong><small>Hubungkan WA Gateway lalu kirim pengingat dari menu Tagihan/Pelanggan.</small></div></td></tr><% } %>
+          <% if(!messages.length){ %><tr><td colspan="8"><div class="empty-state"><i class="bi bi-whatsapp"></i><strong>Belum ada pesan terkirim</strong><small>Hubungkan WA Gateway lalu kirim pengingat dari menu Tagihan/Pelanggan.</small></div></td></tr><% } %>
         </tbody>
       </table>
     </div>

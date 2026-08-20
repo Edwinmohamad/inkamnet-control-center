@@ -3,7 +3,7 @@ const fs=require('fs');
 const path=require('path');
 const ExcelJS=require('exceljs');
 const db=require('../config/db');
-const { generateMonthlyInvoices, applyInvoiceDiscount }=require('../services/invoiceService');
+const { generateMonthlyInvoices, applyInvoiceDiscount, refreshInvoiceStatus, nextInvoiceNumber }=require('../services/invoiceService');
 const { requireAdmin, requireMasterAdmin, isMasterAdminRole }=require('../middleware/auth');
 const { createCorporateInvoicePdf }=require('../services/reportPdf');
 const { audit }=require('../services/auditService');
@@ -32,6 +32,75 @@ function periodQuery(filters){
   return p.toString();
 }
 const STATUS_LABELS={paid:'LUNAS',overdue:'TERLAMBAT',partial:'SEBAGIAN',cancelled:'DIBATALKAN',refunded:'REFUND',unpaid:'BELUM LUNAS'};
+
+// v1.25.5 — Import Tagihan (Excel), mengikuti pola import Pelanggan (routes/customers.js): pencocokan
+// header lewat alias, validasi SELURUH baris dulu (all-or-nothing) baru commit. Bisa MEMBUAT tagihan baru
+// (insert) maupun MEMPERBARUI tagihan yang sudah ada (upsert), dicocokkan lewat No. Faktur (jika diisi)
+// atau kombinasi Kode Pelanggan+Bulan+Tahun (jika kosong). Tagihan berstatus LUNAS/DIBATALKAN/REFUND
+// tidak pernah disentuh nominalnya oleh import. Kolom "Sudah Dibayar" TIDAK langsung melunaskan tagihan —
+// sistem membuat catatan pembayaran berstatus MENUNGGU APPROVAL (identik dengan alur pembayaran manual
+// biasa), supaya Arus Kas/Laporan tetap konsisten dan tetap lewat approval Master Admin seperti biasa.
+const INVOICE_IMPORT_ALIASES={
+  invoice_number:['no. faktur','nomor faktur','no faktur','invoice_number'],
+  customer_code:['kode pelanggan','customer_code','id pelanggan'],
+  month:['bulan','month'],
+  year:['tahun','year'],
+  invoice_date:['tanggal faktur','invoice_date'],
+  due_date:['jatuh tempo','due_date'],
+  billing_type:['tipe tagihan','billing_type','tipe'],
+  amount:['nominal tagihan','tagihan','amount'],
+  discount:['diskon','discount'],
+  paid_amount:['sudah dibayar','terbayar','paid_amount']
+};
+function plainInvoiceCell(cell){
+  const v=cell?.value;
+  if(v==null) return '';
+  if(v instanceof Date) return v;
+  if(typeof v==='object'){
+    if(v.text!=null) return String(v.text);
+    if(v.result!=null) return v.result;
+    if(Array.isArray(v.richText)) return v.richText.map(x=>x.text||'').join('');
+  }
+  return v;
+}
+function invoiceDateString(value){
+  if(!value) return null;
+  if(value instanceof Date) return value.toISOString().slice(0,10);
+  const s=String(value).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return null;
+}
+function normalizeInvoiceImportHeader(value){return String(value||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function findInvoiceImportHeaderRow(ws){
+  for(let r=1;r<=Math.min(ws.rowCount,30);r++){
+    const row=ws.getRow(r);
+    const values=[];
+    row.eachCell({includeEmpty:false},cell=>values.push(normalizeInvoiceImportHeader(plainInvoiceCell(cell))));
+    const hasCustomer=values.some(v=>INVOICE_IMPORT_ALIASES.customer_code.includes(v));
+    const hasMonth=values.some(v=>INVOICE_IMPORT_ALIASES.month.includes(v));
+    const hasYear=values.some(v=>INVOICE_IMPORT_ALIASES.year.includes(v));
+    const hasAmount=values.some(v=>INVOICE_IMPORT_ALIASES.amount.includes(v));
+    if(hasCustomer&&hasMonth&&hasYear&&hasAmount)return r;
+  }
+  return 0;
+}
+function mapInvoiceImportHeaders(row){
+  const headers={};
+  row.eachCell((cell,col)=>{
+    const raw=normalizeInvoiceImportHeader(plainInvoiceCell(cell));
+    for(const [key,aliases] of Object.entries(INVOICE_IMPORT_ALIASES)){
+      if(!headers[key]&&aliases.includes(raw))headers[key]=col;
+    }
+  });
+  return headers;
+}
+function invoicePaymentReference(paymentId,date=new Date()){
+  const d=new Date(date);
+  const stamp=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return `PAY-${stamp}-${String(paymentId).padStart(6,'0')}`;
+}
 
 // v1.25.4 — filter/query builder dipakai bersama oleh daftar tagihan (GET '/') dan export
 // (GET '/export.xlsx') supaya keduanya TIDAK PERNAH berbeda hasil (baris yang tampil di layar harus
@@ -196,6 +265,218 @@ router.get('/export.xlsx',requireAdmin,async(req,res)=>{
   res.setHeader('Content-Disposition',`attachment; filename="${filename}"`);
   await wb.xlsx.write(res);
   res.end();
+});
+
+router.get('/template.xlsx',requireAdmin,async(req,res)=>{
+  const [customers]=await db.query(`SELECT c.customer_code FROM customers c WHERE c.customer_status='active' ORDER BY c.customer_code LIMIT 2000`);
+  const wb=new ExcelJS.Workbook();wb.creator='INKAMNET Control Center';wb.created=new Date();
+  const ws=wb.addWorksheet('TAGIHAN',{views:[{state:'frozen',ySplit:11}]});
+  const widths=[4,20,16,10,10,16,16,14,16,14,16];
+  widths.forEach((w,i)=>ws.getColumn(i+1).width=w);
+
+  ws.getCell('A1').value='#';ws.getCell('B1').value='INKAMNET - TEMPLATE EXCEL IMPORT TAGIHAN';
+  ws.mergeCells('B1:K1');
+  ws.getCell('B1').font={bold:true,size:16,color:{argb:'FF6030E0'}};
+  ws.getCell('B1').alignment={vertical:'middle'};ws.getRow(1).height=28;
+
+  const instructions=[
+    'INSTRUKSI UNTUK IMPORT (HARAP DIBACA DULU)',
+    'Kosongkan "No. Faktur" untuk MEMBUAT tagihan baru. Isi "No. Faktur" untuk MEMPERBARUI tagihan yang sudah ada.',
+    'Jika No. Faktur dikosongkan, sistem mencocokkan otomatis lewat Kode Pelanggan + Bulan + Tahun.',
+    'Tagihan berstatus LUNAS/DIBATALKAN/REFUND tidak akan diubah nominalnya oleh import ini (baris dilewati).',
+    'Tagihan yang sudah punya riwayat pembayaran: Nominal/Diskon/Sudah Dibayar TIDAK diubah, hanya Tanggal Faktur/Jatuh Tempo/Tipe yang diperbarui.',
+    'Kolom "Sudah Dibayar" TIDAK langsung membuat tagihan lunas — sistem membuat catatan pembayaran berstatus MENUNGGU APPROVAL, approve manual dari Menu Approval agar Arus Kas tetap sinkron.',
+    'Format tanggal: DD/MM/YYYY atau YYYY-MM-DD.',
+    'Seluruh baris divalidasi dahulu. Jika ada satu baris error, seluruh import dibatalkan agar data tidak masuk setengah-setengah.'
+  ];
+  instructions.forEach((txt,i)=>{
+    const r=i+3;ws.getCell(`A${r}`).value='#';ws.getCell(`B${r}`).value=i===0?txt:`- ${txt}`;
+    ws.mergeCells(`B${r}:K${r}`);
+    ws.getCell(`B${r}`).font={bold:i===0,color:{argb:i===0?'FFF04030':'FF4B5563'}};
+  });
+
+  const requiredNotes=['#','Opsional (update)','*WAJIB','*WAJIB','*WAJIB','*WAJIB','*WAJIB','Opsional','*WAJIB (baru)','Opsional','Opsional'];
+  const headers=['#','No. Faktur','Kode Pelanggan','Bulan','Tahun','Tanggal Faktur','Jatuh Tempo','Tipe Tagihan','Nominal Tagihan','Diskon','Sudah Dibayar'];
+  ws.getRow(10).values=requiredNotes;
+  ws.getRow(11).values=headers;
+  ws.getRow(10).height=42;ws.getRow(11).height=24;
+  ws.getRow(10).eachCell((cell,col)=>{
+    cell.alignment={horizontal:'center',vertical:'middle',wrapText:true};
+    cell.font={bold:col>1&&String(cell.value).includes('WAJIB'),color:{argb:col>1&&String(cell.value).includes('WAJIB')?'FFF04030':'FF667085'},size:10};
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF8FAFC'}};
+    cell.border={top:{style:'thin',color:{argb:'FFD0D5DD'}},bottom:{style:'thin',color:{argb:'FFD0D5DD'}}};
+  });
+  ws.getRow(11).eachCell((cell,col)=>{
+    cell.font={bold:true,color:{argb:'FFFFFFFF'}};
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:col===1?'FF111827':'FF6030E0'}};
+    cell.alignment={vertical:'middle',horizontal:col===1?'center':'left'};
+    cell.border={bottom:{style:'medium',color:{argb:'FFF04030'}}};
+  });
+
+  const now=new Date();
+  const sampleCustomer=customers[0]?.customer_code||'KRW-15-001';
+  ws.getRow(12).values=['#','',sampleCustomer,now.getMonth()+1,now.getFullYear(),now.toISOString().slice(0,10),now.toISOString().slice(0,10),'BULANAN',150000,0,0];
+  ws.getRow(12).font={italic:true,color:{argb:'FF667085'}};
+
+  const helperCol='AA';
+  customers.forEach((c,i)=>ws.getCell(`${helperCol}${i+2}`).value=c.customer_code);
+  ws.getColumn(helperCol).hidden=true;
+  const typeHelperCol='AB';
+  ['BULANAN','PRORATA'].forEach((x,i)=>ws.getCell(`${typeHelperCol}${i+2}`).value=x);
+  ws.getColumn(typeHelperCol).hidden=true;
+
+  for(let row=13;row<=2012;row++){
+    if(customers.length)ws.getCell(`C${row}`).dataValidation={type:'list',allowBlank:false,formulae:[`$${helperCol}$2:$${helperCol}$${Math.max(2,customers.length+1)}`],showErrorMessage:true,errorTitle:'Kode Pelanggan',error:'Pilih Kode Pelanggan dari daftar pelanggan aktif, atau ketik manual jika pelanggan sudah diarsipkan.'};
+    ws.getCell(`D${row}`).dataValidation={type:'whole',operator:'between',allowBlank:false,formulae:[1,12],showErrorMessage:true,errorTitle:'Bulan',error:'Isi angka 1-12.'};
+    ws.getCell(`E${row}`).dataValidation={type:'whole',operator:'between',allowBlank:false,formulae:[2020,2100],showErrorMessage:true,errorTitle:'Tahun',error:'Isi tahun 2020-2100.'};
+    ws.getCell(`F${row}`).numFmt='dd/mm/yyyy';ws.getCell(`G${row}`).numFmt='dd/mm/yyyy';
+    ws.getCell(`H${row}`).dataValidation={type:'list',allowBlank:true,formulae:[`$${typeHelperCol}$2:$${typeHelperCol}$3`]};
+    ws.getCell(`I${row}`).numFmt='#,##0';ws.getCell(`J${row}`).numFmt='#,##0';ws.getCell(`K${row}`).numFmt='#,##0';
+  }
+  ws.autoFilter={from:'B11',to:'K11'};
+
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition','attachment; filename="template-import-tagihan-INKAMNET.xlsx"');
+  await wb.xlsx.write(res);res.end();
+});
+
+router.post('/import',requireAdmin,async(req,res)=>{
+  try{
+    if(!req.file) throw new Error('Pilih file Excel .xlsx terlebih dahulu.');
+    if(!req.file.buffer || req.file.buffer.length<4 || req.file.buffer.subarray(0,2).toString()!=='PK') throw new Error('Isi file bukan workbook XLSX yang valid.');
+    const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(req.file.buffer);
+    const ws=workbook.getWorksheet('TAGIHAN')||workbook.worksheets[0];if(!ws)throw new Error('Workbook tidak memiliki sheet tagihan.');
+    if(ws.rowCount>3001) throw new Error('Maksimal 3.000 baris tagihan per sekali import. Pecah file menjadi beberapa batch.');
+    const headerRow=findInvoiceImportHeaderRow(ws);if(!headerRow)throw new Error('Header tagihan tidak ditemukan. Gunakan template terbaru dari menu Download Format Import.');
+    const headers=mapInvoiceImportHeaders(ws.getRow(headerRow));
+    const required=['customer_code','month','year','invoice_date','due_date','amount'];
+    const missing=required.filter(h=>!headers[h]);
+    if(missing.length)throw new Error(`Kolom wajib tidak ada: ${missing.join(', ')}. Download template terbaru dan jangan ubah nama kolom wajib.`);
+
+    const [customers]=await db.query(`SELECT c.id,c.customer_code,c.archived_at,s.code site_code FROM customers c JOIN sites s ON s.id=c.site_id`);
+    const customerMap=new Map();for(const c of customers)customerMap.set(String(c.customer_code).trim().toUpperCase(),c);
+
+    const value=(row,key)=>headers[key]?plainInvoiceCell(row.getCell(headers[key])):'';
+    const parsed=[];const errors=[];const neededCustomerIds=new Set();
+    for(let n=headerRow+1;n<=ws.rowCount;n++){
+      const row=ws.getRow(n);
+      const marker=String(plainInvoiceCell(row.getCell(1))||'').trim();if(marker==='#')continue;
+      const customerCodeRaw=String(value(row,'customer_code')||'').trim();
+      if(!customerCodeRaw)continue;
+      const customer=customerMap.get(customerCodeRaw.toUpperCase());
+      if(!customer)errors.push(`Baris ${n}: Kode Pelanggan '${customerCodeRaw}' tidak ditemukan`);
+      const monthRaw=value(row,'month');const month=Number(monthRaw);
+      if(!Number.isInteger(month)||month<1||month>12)errors.push(`Baris ${n}: Bulan harus angka 1-12`);
+      const yearRaw=value(row,'year');const year=Number(yearRaw);
+      if(!Number.isInteger(year)||year<2020||year>2100)errors.push(`Baris ${n}: Tahun tidak valid`);
+      const invoiceDate=invoiceDateString(value(row,'invoice_date'));
+      if(!invoiceDate)errors.push(`Baris ${n}: Tanggal Faktur wajib diisi & valid`);
+      const dueDate=invoiceDateString(value(row,'due_date'));
+      if(!dueDate)errors.push(`Baris ${n}: Jatuh Tempo wajib diisi & valid`);
+      if(invoiceDate&&dueDate&&dueDate<invoiceDate)errors.push(`Baris ${n}: Jatuh Tempo tidak boleh sebelum Tanggal Faktur`);
+      const billingTypeRaw=(String(value(row,'billing_type')||'').trim().toUpperCase())||'BULANAN';
+      if(!['BULANAN','PRORATA'].includes(billingTypeRaw))errors.push(`Baris ${n}: Tipe Tagihan harus BULANAN atau PRORATA`);
+      const isProrata=billingTypeRaw==='PRORATA'?1:0;
+      const invoiceNumberRaw=String(value(row,'invoice_number')||'').trim();
+      const amountRaw=value(row,'amount');const amount=amountRaw===''?null:Number(amountRaw);
+      if(amount!==null&&(!Number.isFinite(amount)||amount<0))errors.push(`Baris ${n}: Nominal Tagihan tidak valid`);
+      const discountRaw=value(row,'discount');const discount=discountRaw===''?0:Number(discountRaw);
+      if(!Number.isFinite(discount)||discount<0)errors.push(`Baris ${n}: Diskon tidak valid`);
+      const paidRaw=value(row,'paid_amount');const paidAmount=paidRaw===''?0:Number(paidRaw);
+      if(!Number.isFinite(paidAmount)||paidAmount<0)errors.push(`Baris ${n}: Sudah Dibayar tidak valid`);
+      if(customer)neededCustomerIds.add(customer.id);
+      parsed.push({n,customer,month,year,invoiceDate,dueDate,isProrata,invoiceNumberRaw,amount,discount,paidAmount});
+    }
+    if(!parsed.length)throw new Error('Tidak ada data tagihan pada file.');
+    if(errors.length){req.session.flash={type:'danger',message:`Import dibatalkan. ${errors.slice(0,8).join(' | ')}${errors.length>8?` | +${errors.length-8} error lain`:''}`};return res.redirect('/invoices');}
+
+    const customerIds=[...neededCustomerIds];
+    let existingInvoices=[];
+    if(customerIds.length){
+      const placeholders=customerIds.map(()=>'?').join(',');
+      const [rows]=await db.query(`SELECT i.id,i.invoice_number,i.customer_id,i.period_year,i.period_month,i.status,i.total,(SELECT COUNT(*) FROM payments p WHERE p.invoice_id=i.id) payment_count FROM invoices i WHERE i.customer_id IN (${placeholders})`,customerIds);
+      existingInvoices=rows;
+    }
+    const invoiceByNumber=new Map();const invoiceByCustomerPeriod=new Map();
+    for(const inv of existingInvoices){
+      invoiceByNumber.set(String(inv.invoice_number).trim().toUpperCase(),inv);
+      invoiceByCustomerPeriod.set(`${inv.customer_id}-${inv.period_year}-${inv.period_month}`,inv);
+    }
+
+    const rowsToProcess=[];
+    for(const r of parsed){
+      if(!r.customer)continue;
+      let existing=null;
+      if(r.invoiceNumberRaw){
+        existing=invoiceByNumber.get(r.invoiceNumberRaw.toUpperCase())||null;
+        if(!existing){errors.push(`Baris ${r.n}: No. Faktur '${r.invoiceNumberRaw}' tidak ditemukan`);continue;}
+        if(existing.customer_id!==r.customer.id){errors.push(`Baris ${r.n}: No. Faktur '${r.invoiceNumberRaw}' bukan milik pelanggan ${r.customer.customer_code}`);continue;}
+        if(Number(existing.period_month)!==r.month||Number(existing.period_year)!==r.year){errors.push(`Baris ${r.n}: No. Faktur '${r.invoiceNumberRaw}' periodenya ${MONTH_NAMES[existing.period_month-1]} ${existing.period_year}, bukan ${MONTH_NAMES[r.month-1]||r.month} ${r.year}`);continue;}
+      }else{
+        existing=invoiceByCustomerPeriod.get(`${r.customer.id}-${r.year}-${r.month}`)||null;
+      }
+      const isInsert=!existing;
+      if(isInsert&&(r.amount===null||r.amount<=0)){errors.push(`Baris ${r.n}: Nominal Tagihan wajib diisi (>0) untuk tagihan baru`);continue;}
+      rowsToProcess.push({...r,existing,isInsert});
+    }
+    if(errors.length){req.session.flash={type:'danger',message:`Import dibatalkan. ${errors.slice(0,8).join(' | ')}${errors.length>8?` | +${errors.length-8} error lain`:''}`};return res.redirect('/invoices');}
+
+    const conn=await db.getConnection();
+    let created=0,updated=0,skippedSettled=0,financialSkipped=0,pendingPaymentsCreated=0;
+    try{
+      await conn.beginTransaction();
+      for(const r of rowsToProcess){
+        if(r.isInsert){
+          const subtotal=r.amount;
+          const discount=Math.max(0,Math.min(r.discount,subtotal));
+          const total=subtotal-discount;
+          const invoiceNumber=await nextInvoiceNumber(conn,r.customer.site_code,r.year,r.month-1);
+          const [ins]=await conn.execute(`INSERT INTO invoices (invoice_number,customer_id,period_year,period_month,invoice_date,due_date,subtotal,discount,total,outstanding,status,is_prorata,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,'unpaid',?,?)`,[invoiceNumber,r.customer.id,r.year,r.month,r.invoiceDate,r.dueDate,subtotal,discount,total,total,r.isProrata,req.session.user.id]);
+          const invoiceId=ins.insertId;created++;
+          if(r.paidAmount>0){
+            const applyAmount=Math.min(r.paidAmount,total);
+            const [pr]=await conn.execute(`INSERT INTO payments (invoice_id,amount,method,reference,notes,status,settlement_status,paid_at,received_by,collector_user_id) VALUES (?,?,?,?,?,?,?,?,?,?)`,[invoiceId,applyAmount,'cash',null,'Import Excel — data tagihan sudah masuk, menunggu approval','pending','not_applicable',r.invoiceDate,req.session.user.id,req.session.user.id]);
+            await conn.execute(`UPDATE payments SET reference=? WHERE id=?`,[invoicePaymentReference(pr.insertId),pr.insertId]);
+            pendingPaymentsCreated++;
+            await refreshInvoiceStatus(conn,invoiceId);
+          }
+        }else{
+          const existing=r.existing;
+          if(['paid','cancelled','refunded'].includes(existing.status)){skippedSettled++;continue;}
+          await conn.execute(`UPDATE invoices SET invoice_date=?,due_date=?,is_prorata=? WHERE id=?`,[r.invoiceDate,r.dueDate,r.isProrata,existing.id]);
+          const touchesFinancials=r.amount!==null||r.paidAmount>0;
+          if(Number(existing.payment_count)===0){
+            let total=Number(existing.total);
+            if(r.amount!==null){
+              const subtotal=r.amount;
+              const discount=Math.max(0,Math.min(r.discount,subtotal));
+              total=subtotal-discount;
+              await conn.execute(`UPDATE invoices SET subtotal=?,discount=?,total=?,outstanding=? WHERE id=?`,[subtotal,discount,total,total,existing.id]);
+            }
+            if(r.paidAmount>0){
+              const applyAmount=Math.min(r.paidAmount,total);
+              const [pr]=await conn.execute(`INSERT INTO payments (invoice_id,amount,method,reference,notes,status,settlement_status,paid_at,received_by,collector_user_id) VALUES (?,?,?,?,?,?,?,?,?,?)`,[existing.id,applyAmount,'cash',null,'Import Excel — data tagihan sudah masuk, menunggu approval','pending','not_applicable',r.invoiceDate,req.session.user.id,req.session.user.id]);
+              await conn.execute(`UPDATE payments SET reference=? WHERE id=?`,[invoicePaymentReference(pr.insertId),pr.insertId]);
+              pendingPaymentsCreated++;
+            }
+          }else if(touchesFinancials){
+            financialSkipped++;
+          }
+          await refreshInvoiceStatus(conn,existing.id);
+          updated++;
+        }
+      }
+      await conn.commit();
+    }catch(e){try{await conn.rollback();}catch(_){}throw e;}finally{conn.release();}
+
+    await audit({userId:req.session.user.id,action:'import',entityType:'invoice',entityId:null,description:`Excel import tagihan: ${created} baru, ${updated} diperbarui, ${skippedSettled} dilewati (sudah lunas/dibatalkan/refund), ${financialSkipped} nominal dilewati (sudah ada riwayat pembayaran), ${pendingPaymentsCreated} pembayaran baru menunggu approval`,ip:req.ip});
+    req.session.flash={type:'success',message:`Import Excel selesai: ${created} tagihan baru, ${updated} tagihan diperbarui${skippedSettled?`, ${skippedSettled} dilewati (sudah lunas/dibatalkan/refund)`:''}${financialSkipped?`, ${financialSkipped} nominal tidak diubah (tagihan sudah punya riwayat pembayaran)`:''}${pendingPaymentsCreated?`. ${pendingPaymentsCreated} pembayaran baru tercatat MENUNGGU APPROVAL — cek Menu Approval.`:'.'}`};
+    return res.redirect('/invoices');
+  }catch(err){
+    console.error('Invoice XLSX import gagal:',err.message);
+    req.session.flash={type:'danger',message:`Import Excel gagal: ${err.message}`};
+    return res.redirect('/invoices');
+  }
 });
 
 router.post('/generate',async(req,res)=>{

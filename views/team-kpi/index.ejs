@@ -15,10 +15,10 @@
 
   <div class="data-card">
     <div class="data-card-head"><div><h3>Penilaian <%= monthNames[month-1] %> <%= year %></h3><small>Skor dihitung dari aktivitas yang tercatat di sistem, bukan target manual.</small></div><span class="status-badge purple"><%= team.length %> orang</span></div>
-    <div class="table-responsive"><table class="app-table team-kpi-table role-aware"><thead><tr><th>#</th><th>Karyawan</th><th>Jobdesk & Role</th><th>Aktivitas Sesuai Jobdesk</th><th>Skor KPI</th></tr></thead><tbody>
+    <div class="table-responsive"><table class="app-table team-kpi-table role-aware"><thead><tr><th class="app-seq-col">No.</th><th>Karyawan</th><th>Jobdesk & Role</th><th>Aktivitas Sesuai Jobdesk</th><th>Skor KPI</th></tr></thead><tbody>
       <% team.forEach((x,idx)=>{ const tone=x.score>=85?'green':x.score>=70?'purple':x.score>=55?'orange':'red'; %>
       <tr>
-        <td><span class="kpi-rank"><%= idx+1 %></span></td>
+        <td><span class="cell-main"><%= idx+1 %></span></td>
         <td><span class="cell-main"><%= x.name %></span><span class="cell-sub"><%= x.employee_code %></span></td>
         <td><span class="cell-main"><%= x.position_name %></span><span class="cell-sub"><%= x.department_name %></span><span class="kpi-role-badge <%= x.effective_category %>"><i class="bi bi-person-badge-fill"></i><%= x.user_role||'tanpa akun' %> · <%= x.effective_category %></span></td>
         <td><div class="kpi-focus-metrics"><% x.focusMetrics.forEach(metric=>{ %><span><small><%= metric[0] %></small><b><%= metric[1] %></b></span><% }) %></div></td>

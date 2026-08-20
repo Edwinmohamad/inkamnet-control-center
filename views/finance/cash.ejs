@@ -61,11 +61,11 @@
     <div class="data-card-head"><div><h3>Data Kas · <%= monthNames[filters.month-1] %> <%= filters.year %></h3><small><%= transactions.length %> transaksi<%= filters.site?` · ${filters.site}`:'' %></small></div><div class="legend-inline"><span><i class="dot success"></i>Pemasukan</span><span><i class="dot warning"></i>Bukti tersedia</span></div></div>
     <div class="table-responsive">
       <table class="app-table cash-ledger-table" data-bulk-scope="cashBulkBar">
-        <thead><tr><% if(isAdmin){ %><th><input type="checkbox" data-select-all></th><% } %><th>No.</th><th>Kode Transaksi</th><th>Nama</th><th>Tanggal</th><th>Kategori</th><th>Site</th><th>Keterangan</th><th>Bukti</th><th>Status Approval</th><th>Nominal</th><th class="text-end">Aksi</th></tr></thead>
+        <thead><tr><% if(isAdmin){ %><th class="app-check-col"><input type="checkbox" class="form-check-input" data-select-all aria-label="Pilih semua transaksi kas"></th><% } %><th class="app-seq-col">No.</th><th>Kode Transaksi</th><th>Nama</th><th>Tanggal</th><th>Kategori</th><th>Site</th><th>Keterangan</th><th>Bukti</th><th>Status Approval</th><th>Nominal</th><th class="text-end">Aksi</th></tr></thead>
         <tbody>
           <% transactions.forEach((t,index)=>{ const editable=true;const td=new Date(t.transaction_date);const txDate=`${td.getFullYear()}-${String(td.getMonth()+1).padStart(2,'0')}-${String(td.getDate()).padStart(2,'0')}`; %>
           <tr>
-            <% if(isAdmin){ %><td><% if(editable){ %><input type="checkbox" data-row-check value="<%= t.id %>"><% } %></td><% } %>
+            <% if(isAdmin){ %><td class="app-check-col"><% if(editable){ %><input type="checkbox" class="form-check-input" data-row-check value="<%= t.id %>" aria-label="Pilih transaksi <%= t.transaction_code||t.id %>"><% } %></td><% } %>
             <td><span class="cell-main"><%= index+1 %></span></td>
             <td><code class="cash-tx-code"><%= t.transaction_code||'-' %></code><span class="cell-sub"><%= t.category_code||'' %></span></td>
             <td><span class="cell-main"><%= t.name %></span><span class="cell-sub"><%= t.source_type==='payment'?'AUTO BILLING':'MANUAL' %></span></td>

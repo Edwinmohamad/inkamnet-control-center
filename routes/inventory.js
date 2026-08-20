@@ -1,6 +1,7 @@
 const express=require('express');
 const db=require('../config/db');
 const { audit }=require('../services/auditService');
+const { requireAdmin }=require('../middleware/auth');
 const router=express.Router();
 
 router.get('/',async(req,res)=>{
@@ -34,6 +35,60 @@ router.get('/movements',async(req,res)=>{
   const [[today]]=await db.query(`SELECT COALESCE(SUM(CASE WHEN movement_type='in' THEN qty ELSE 0 END),0) stock_in,COALESCE(SUM(CASE WHEN movement_type='out' THEN qty ELSE 0 END),0) stock_out,COUNT(*) movements FROM inventory_movements WHERE DATE(created_at)=CURDATE()`);
   res.render('inventory/movements',{title:'Pergerakan Stock',movements,today:today||{}});
 });
+// v1.25.5 — "Hapus Entri" (koreksi): menghapus satu baris riwayat pergerakan stock MEMBALIK efek qty-nya
+// ke inventory_items (bukan cuma menghapus barisnya), supaya saldo stock tidak pernah nyangkut salah
+// gara-gara entri riwayat yang keliru dihapus tanpa dikoreksi baliknya. 'out' mengurangi stock ketika
+// dibuat (lihat POST /:id/adjust di atas — hanya 'out' yang mengurangi, 'in'/'adjustment' menambah), jadi
+// menghapusnya berarti mengembalikan qty; sebaliknya untuk 'in'/'adjustment'. Cara mengoreksi entri yang
+// salah adalah: hapus entri yang keliru (stock otomatis kembali), lalu catat ulang entri yang benar.
+router.post('/movements/:id/delete',requireAdmin,async(req,res)=>{
+  const conn=await db.getConnection();
+  let deleted=null,itemName=null;
+  try{
+    await conn.beginTransaction();
+    const [[m]]=await conn.execute(`SELECT id,item_id,movement_type,qty FROM inventory_movements WHERE id=? LIMIT 1 FOR UPDATE`,[req.params.id]);
+    if(!m){await conn.rollback();conn.release();req.session.flash={type:'warning',message:'Entri pergerakan stock tidak ditemukan.'};return res.redirect('/inventory/movements');}
+    const [[item]]=await conn.execute(`SELECT id,name FROM inventory_items WHERE id=? LIMIT 1 FOR UPDATE`,[m.item_id]);
+    if(item){
+      const revert=m.movement_type==='out'?Number(m.qty):-Number(m.qty);
+      await conn.execute(`UPDATE inventory_items SET qty=GREATEST(0,qty+?) WHERE id=?`,[revert,m.item_id]);
+    }
+    await conn.execute(`DELETE FROM inventory_movements WHERE id=?`,[req.params.id]);
+    await conn.commit();
+    deleted=m;itemName=item?.name||null;
+  }catch(e){
+    await conn.rollback();conn.release();
+    req.session.flash={type:'danger',message:`Gagal menghapus entri: ${e.message}`};
+    return res.redirect('/inventory/movements');
+  }
+  conn.release();
+  await audit({userId:req.session.user.id,action:'delete',entityType:'inventory_movement',entityId:req.params.id,description:`Hapus entri pergerakan stock #${req.params.id} (${deleted.movement_type} ${deleted.qty} · ${itemName||'item dihapus'}) — saldo stock otomatis dikoreksi balik`,ip:req.ip});
+  req.session.flash={type:'success',message:'Entri pergerakan stock dihapus dan saldo stock otomatis dikoreksi.'};
+  res.redirect('/inventory/movements');
+});
+router.post('/movements/bulk',requireAdmin,async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.movement_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu entri terlebih dahulu.'};return res.redirect('/inventory/movements');}
+  if(action!=='delete'){req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};return res.redirect('/inventory/movements');}
+  let done=0;
+  for(const id of ids){
+    const conn=await db.getConnection();
+    try{
+      await conn.beginTransaction();
+      const [[m]]=await conn.execute(`SELECT id,item_id,movement_type,qty FROM inventory_movements WHERE id=? LIMIT 1 FOR UPDATE`,[id]);
+      if(!m){await conn.rollback();conn.release();continue;}
+      const revert=m.movement_type==='out'?Number(m.qty):-Number(m.qty);
+      await conn.execute(`UPDATE inventory_items SET qty=GREATEST(0,qty+?) WHERE id=?`,[revert,m.item_id]);
+      await conn.execute(`DELETE FROM inventory_movements WHERE id=?`,[id]);
+      await conn.commit();
+      done++;
+    }catch(e){await conn.rollback();}finally{conn.release();}
+  }
+  if(done)await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'inventory_movement',entityId:null,description:`Hapus massal ${done} entri pergerakan stock — saldo stock otomatis dikoreksi balik`,ip:req.ip});
+  req.session.flash={type:done?'success':'warning',message:done?`${done} entri pergerakan stock dihapus, saldo stock otomatis dikoreksi.`:'Tidak ada entri yang berhasil dihapus.'};
+  res.redirect('/inventory/movements');
+});
 
 router.get('/usage',async(req,res)=>{
   const [usages]=await db.query(`SELECT mu.*,i.name item_name,i.unit,c.name customer_name,t.ticket_code,s.code site_code,u.name used_by_name FROM material_usages mu JOIN inventory_items i ON i.id=mu.item_id LEFT JOIN customers c ON c.id=mu.customer_id LEFT JOIN tickets t ON t.id=mu.ticket_id LEFT JOIN sites s ON s.id=mu.site_id LEFT JOIN users u ON u.id=mu.used_by ORDER BY mu.id DESC LIMIT 250`);
@@ -52,6 +107,54 @@ router.post('/usage',async(req,res)=>{
     await conn.execute(`INSERT INTO inventory_movements(item_id,movement_type,qty,reference,notes,user_id) VALUES(?,'out',?,?,?,?)`,[b.item_id,qty,b.reference||`USAGE-${r.insertId}`,b.notes||b.purpose||'Pemakaian material',req.session.user.id]);
     await conn.commit();await audit({userId:req.session.user.id,action:'use',entityType:'inventory',entityId:b.item_id,description:`Pemakaian material qty ${qty}`,ip:req.ip});req.session.flash={type:'success',message:'Pemakaian material dicatat dan stock otomatis berkurang.'};
   }catch(e){await conn.rollback();throw e;}finally{conn.release();}
+  res.redirect('/inventory/usage');
+});
+// v1.25.5 — "Hapus Entri" (koreksi) untuk Pemakaian Material: mengembalikan qty yang terpakai ke stock
+// lalu menghapus barisnya. Catatan: entri terkait di Pergerakan Stock (movement_type='out') dibuat lewat
+// referensi teks saja (tidak ada relasi/FK langsung ke material_usages), jadi TIDAK ikut terhapus otomatis
+// di sini — kalau perlu, hapus juga entrinya secara terpisah di menu Pergerakan Stock.
+router.post('/usage/:id/delete',requireAdmin,async(req,res)=>{
+  const conn=await db.getConnection();
+  let deleted=null,itemName=null;
+  try{
+    await conn.beginTransaction();
+    const [[u]]=await conn.execute(`SELECT id,item_id,qty FROM material_usages WHERE id=? LIMIT 1 FOR UPDATE`,[req.params.id]);
+    if(!u){await conn.rollback();conn.release();req.session.flash={type:'warning',message:'Entri pemakaian material tidak ditemukan.'};return res.redirect('/inventory/usage');}
+    const [[item]]=await conn.execute(`SELECT id,name FROM inventory_items WHERE id=? LIMIT 1 FOR UPDATE`,[u.item_id]);
+    if(item)await conn.execute(`UPDATE inventory_items SET qty=qty+? WHERE id=?`,[Number(u.qty),u.item_id]);
+    await conn.execute(`DELETE FROM material_usages WHERE id=?`,[req.params.id]);
+    await conn.commit();
+    deleted=u;itemName=item?.name||null;
+  }catch(e){
+    await conn.rollback();conn.release();
+    req.session.flash={type:'danger',message:`Gagal menghapus entri: ${e.message}`};
+    return res.redirect('/inventory/usage');
+  }
+  conn.release();
+  await audit({userId:req.session.user.id,action:'delete',entityType:'material_usage',entityId:req.params.id,description:`Hapus entri pemakaian material #${req.params.id} (qty ${deleted.qty} · ${itemName||'item dihapus'}) — stock otomatis dikembalikan`,ip:req.ip});
+  req.session.flash={type:'success',message:'Entri pemakaian material dihapus dan stock otomatis dikembalikan. Entri terkait di Pergerakan Stock (jika ada) tidak ikut terhapus otomatis.'};
+  res.redirect('/inventory/usage');
+});
+router.post('/usage/bulk',requireAdmin,async(req,res)=>{
+  const action=String(req.body.action||'').trim();
+  const ids=[...new Set([].concat(req.body.usage_ids||[]).map(x=>Number(x)).filter(Boolean))];
+  if(!ids.length){req.session.flash={type:'warning',message:'Pilih minimal satu entri terlebih dahulu.'};return res.redirect('/inventory/usage');}
+  if(action!=='delete'){req.session.flash={type:'danger',message:'Aksi massal tidak dikenali.'};return res.redirect('/inventory/usage');}
+  let done=0;
+  for(const id of ids){
+    const conn=await db.getConnection();
+    try{
+      await conn.beginTransaction();
+      const [[u]]=await conn.execute(`SELECT id,item_id,qty FROM material_usages WHERE id=? LIMIT 1 FOR UPDATE`,[id]);
+      if(!u){await conn.rollback();conn.release();continue;}
+      await conn.execute(`UPDATE inventory_items SET qty=qty+? WHERE id=?`,[Number(u.qty),u.item_id]);
+      await conn.execute(`DELETE FROM material_usages WHERE id=?`,[id]);
+      await conn.commit();
+      done++;
+    }catch(e){await conn.rollback();}finally{conn.release();}
+  }
+  if(done)await audit({userId:req.session.user.id,action:'bulk_delete',entityType:'material_usage',entityId:null,description:`Hapus massal ${done} entri pemakaian material — stock otomatis dikembalikan`,ip:req.ip});
+  req.session.flash={type:done?'success':'warning',message:done?`${done} entri pemakaian material dihapus, stock otomatis dikembalikan.`:'Tidak ada entri yang berhasil dihapus.'};
   res.redirect('/inventory/usage');
 });
 

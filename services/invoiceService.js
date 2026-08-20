@@ -248,4 +248,4 @@ async function applyInvoiceDiscount(conn, invoiceId, mode, rawValue) {
   return { subtotal, discount: discountAmount, total };
 }
 
-module.exports = { generateMonthlyInvoices, refreshInvoiceStatus, calcProrata, syncCustomerDiscountToOpenInvoices, applyInvoiceDiscount };
+module.exports = { generateMonthlyInvoices, refreshInvoiceStatus, calcProrata, syncCustomerDiscountToOpenInvoices, applyInvoiceDiscount, nextInvoiceNumber };

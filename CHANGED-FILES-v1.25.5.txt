@@ -1,0 +1,297 @@
+INKAMNET CONTROL CENTER — PATCH v1.25.5
+==========================================
+Patch ini menjawab 5 bagian revisi UI/UX yang diminta sekaligus dalam satu
+putaran (MENU PELANGGAN, MENU TAGIHAN, MENU APPROVAL, MENU GUDANG, dan
+TAMBAHAN — penyeragaman checkbox & nomor urut di SELURUH menu berbasis
+tabel di aplikasi), sesuai laporan:
+
+MENU PELANGGAN
+1. Desain nomor urutan disamakan dengan desain nomor urutan di Menu Tagihan.
+
+MENU TAGIHAN
+2. Kolom "Terbayar" dihapus dari tabel Daftar Tagihan.
+3. Kolom Site dipindah ke posisi setelah kolom Pelanggan; urutan kolom
+   sekarang: checkbox, No., Pelanggan, Site, Periode, Jatuh Tempo, Tagihan,
+   Status (di posisi akhir sebelum tombol Aksi).
+4. Fitur Import Excel ditambahkan (upsert: insert tagihan baru + update
+   tagihan yang sudah ada), lengkap dengan template XLSX siap pakai.
+
+MENU APPROVAL (Pembayaran)
+5. Desain checkbox disamakan dengan checkbox Menu Pelanggan.
+6. Tulisan nomor faktur (INV...) di bawah nama pelanggan dihapus.
+7. Urutan kolom dirapikan mengikuti pola Menu Tagihan (Jatuh Tempo
+   dipindah lebih dekat ke data pelanggan/site).
+
+MENU GUDANG (Stock, Pergerakan Stock, Pemakaian Material, Supplier)
+8. Checkbox + nomor urutan ditambahkan pada Pergerakan Stock & Pemakaian
+   Material (sebelumnya kedua sub-menu ini murni log tanpa interaksi).
+9. Menu Aksi (Tindakan) ditambahkan di semua 4 sub-menu Gudang, termasuk
+   aksi Hapus/Koreksi entri log yang secara otomatis mengoreksi balik
+   saldo stock.
+
+TAMBAHAN (Penyeragaman Aplikasi-Lebar)
+10. SEMUA menu yang sudah memiliki checkbox diseragamkan desainnya persis
+    dengan checkbox Menu Tagihan (class="form-check-input" + kolom lebar
+    tetap 34px).
+11. SEMUA menu yang sudah memiliki nomor urutan diseragamkan desainnya
+    persis dengan Menu Tagihan (teks polos, tanpa kotak/pill/badge).
+12. SEMUA menu tabel yang BELUM memiliki nomor urutan ditambahkan kolom
+    No., dengan desain yang sama.
+
+===========================================================
+1) MENU PELANGGAN — NOMOR URUTAN DISAMAKAN DENGAN TAGIHAN
+===========================================================
+Sebelumnya nomor urutan baris di Daftar Pelanggan memakai kotak/pill kecil
+bertepi (class .customer-row-number, 28x28px). Sekarang memakai teks polos
+(<span class="cell-main">1</span>) — persis gaya nomor urut Daftar Tagihan.
+Class .customer-row-number yang sudah tidak dipakai dihapus dari app.css.
+(views/customers/index.ejs, public/css/app.css)
+
+===========================================================
+2-4) MENU TAGIHAN
+===========================================================
+- Kolom "Terbayar" (menampilkan nominal yang sudah dibayar per baris) sudah
+  dihapus sepenuhnya dari tabel dan dari empty-state colspan. Nominal
+  terbayar tetap bisa dilihat lewat menu Tindakan setiap baris.
+- Urutan kolom sekarang: checkbox, No., Pelanggan, Site, Periode, Jatuh
+  Tempo, Tagihan, Status, Tindakan — kolom Site yang sebelumnya berada
+  jauh dari kolom Pelanggan sekarang tepat mengikutinya, dan kolom Status
+  diposisikan di akhir (sebelum tombol Aksi) sesuai permintaan.
+- Fitur Import Excel baru: tombol "Import XLSX" di halaman Daftar Tagihan
+  membuka modal upload, dengan link ke "Template XLSX" siap pakai
+  (GET /invoices/template.xlsx — berisi instruksi, kolom wajib/opsional,
+  contoh baris, dan validasi dropdown). Import mendukung UPSERT: baris
+  dengan No. Faktur yang sudah ada di sistem akan DIPERBARUI, baris baru
+  akan DIBUAT (nomor faktur baru dibuat otomatis mengikuti pola penomoran
+  yang sudah ada bila kolom No. Faktur dikosongkan). Validasi dilakukan
+  dua tahap sebelum data disimpan (all-or-nothing — jika ada baris error,
+  seluruh import dibatalkan dan menampilkan maksimal 8 error pertama).
+  PENTING (keamanan finansial): kolom "Sudah Dibayar" pada import HANYA
+  membuat catatan pembayaran berstatus PENDING (menunggu approval) — TIDAK
+  PERNAH langsung mengonfirmasi pembayaran secara otomatis. Ini sengaja
+  dirancang supaya setiap pembayaran hasil import tetap melalui alur
+  approval normal di Menu Approval, dan tidak melewati/merusak pencatatan
+  Data Kas (jurnal kas hanya tercatat saat pembayaran benar-benar disetujui
+  lewat approval, bukan saat pembayaran dibuat).
+(views/invoices/index.ejs, routes/invoices.js, services/invoiceService.js,
+ middleware/invoiceExcelUpload.js [baru], app.js)
+
+===========================================================
+5-7) MENU APPROVAL (PEMBAYARAN)
+===========================================================
+- Checkbox header & per-baris sekarang memakai class="form-check-input" +
+  kolom app-check-col, identik dengan Menu Pelanggan/Tagihan.
+- Tautan kecil nomor faktur (INV/...) yang sebelumnya tampil di bawah nama
+  pelanggan pada kolom Pelanggan sudah dihapus.
+- Urutan kolom dirapikan: checkbox, No., Pelanggan, Site/Cluster, Jatuh
+  Tempo, Nominal, Metode, Bukti Pembayaran, Diterima Oleh, Approval, Aksi
+  — kolom Jatuh Tempo dipindah lebih dekat ke data pelanggan/site (dahulu
+  posisinya di akhir dekat Nominal), sehingga alurnya lebih mudah dibaca
+  seperti Daftar Tagihan.
+(views/payments/index.ejs)
+
+===========================================================
+8-9) MENU GUDANG (STOCK, PERGERAKAN STOCK, PEMAKAIAN MATERIAL, SUPPLIER)
+===========================================================
+- Pergerakan Stock & Pemakaian Material: sebelumnya murni log tanpa
+  checkbox, nomor urut, atau aksi apa pun. Sekarang keduanya punya kolom
+  checkbox (untuk hapus massal), kolom No., dan kolom Tindakan berisi
+  "Hapus & Koreksi Stock" per baris.
+  * Menghapus entri Pergerakan Stock akan MENGOREKSI BALIK saldo stock
+    barang terkait secara otomatis: entri bertipe "out" akan menambah
+    kembali qty (karena saat dibuat "out" mengurangi stock), sedangkan
+    entri "in"/"adjustment" akan mengurangi qty (karena saat dibuat
+    keduanya menambah stock) — mengikuti persis logika penambahan/
+    pengurangan yang sudah ada di fitur Sesuaikan Stock.
+  * Menghapus entri Pemakaian Material akan mengembalikan qty yang
+    terpakai ke stock barang terkait. Karena entri Pergerakan Stock hasil
+    pemakaian material hanya terhubung lewat teks referensi (bukan relasi
+    database langsung), entri pasangannya di Pergerakan Stock TIDAK ikut
+    terhapus otomatis — ini didokumentasikan jelas di pesan konfirmasi
+    dan flash message, supaya admin bisa menghapusnya juga secara terpisah
+    bila memang diperlukan.
+  * Bulk delete (hapus banyak entri sekaligus) tersedia untuk kedua
+    sub-menu, dengan bar aksi massal mengambang di bawah tabel (pola yang
+    sama seperti Hapus Massal di Menu Tagihan/Pelanggan).
+  * Semua rute hapus/koreksi ini digerbangi khusus requireAdmin (di luar
+    permission "warehouse" yang sudah ada), karena tindakan ini mengubah
+    saldo stock secara langsung.
+- Stock Barang & Supplier: kolom No. ditambahkan, dan tombol aksi baris
+  (Edit/Sesuaikan Stock untuk Stock; Edit/Aktif-Nonaktifkan untuk
+  Supplier) yang sebelumnya berupa ikon terpisah kini dirapikan menjadi
+  satu menu Tindakan (ikon titik tiga → popover), konsisten dengan pola
+  menu Tindakan yang sudah dipakai di Tagihan/Pelanggan/Data Kas.
+(routes/inventory.js, views/inventory/movements.ejs,
+ views/inventory/usage.ejs, views/inventory/index.ejs,
+ views/inventory/suppliers.ejs)
+
+===========================================================
+10-12) TAMBAHAN — PENYERAGAMAN CHECKBOX & NOMOR URUT APLIKASI-LEBAR
+===========================================================
+Seluruh menu berbasis tabel di aplikasi (di luar Pelanggan/Tagihan/
+Approval/Gudang yang sudah dikerjakan di atas) diaudit dan diseragamkan:
+
+Checkbox diredesain (class="form-check-input" + kolom app-check-col) pada
+menu yang sudah punya checkbox sebelumnya:
+- Router MikroTik (views/routers/index.ejs)
+- Lokasi Server / Site (views/sites/index.ejs)
+- Ticketing (views/tickets/index.ejs)
+- Data Kas (views/finance/cash.ejs)
+
+Kolom nomor urut ditambahkan (sebelumnya belum ada sama sekali) pada:
+- Clustering / ODP (views/clusters/index.ejs)
+- Faktur Custom (views/custom-invoices/index.ejs)
+- Riwayat Tagihan pada halaman Detail Pelanggan (views/customers/detail.ejs)
+- Biaya Tambahan & Diskon (views/finance/charges.ejs, views/finance/discounts.ejs)
+- Analisa Collection Rate — tabel Sisa Belum Lunas (views/dashboard/collection.ejs)
+- Log Aktivitas — kedua sub-tabel: Aktivitas Pengguna & Automation (views/logs/index.ejs)
+- Rekonsiliasi Pembayaran (views/payments/reconciliation.ejs)
+- WA Gateway — Log Pengiriman (views/whatsapp-gateway/index.ejs)
+- Pengaturan — 6 sub-tabel: Karyawan, Config Akun, Departemen, Posisi,
+  Bank, Payment Gateway (views/settings/index.ejs)
+- Analitik — tabel Aging Piutang (views/analytics/index.ejs)
+- Ticketing, mendapat kolom No. terpisah dari kolom "No. Ticket" yang
+  sudah ada (No. = nomor urut baris, No. Ticket = kode tiket)
+  (views/tickets/index.ejs)
+
+Kolom nomor urut yang SUDAH ADA tapi memakai desain kotak/badge diganti
+ke desain polos Tagihan:
+- KPI Tim: kolom "#" berbentuk kotak (.kpi-rank) diganti menjadi teks
+  polos <span class="cell-main"> (views/team-kpi/index.ejs)
+
+Menu yang DIPERIKSA dan DIPASTIKAN SUDAH SESUAI (tidak perlu diubah):
+- Menu Kategori Kas, Laporan (Report Center), dan Paket Internet sudah
+  memakai pola nomor urut polos yang sama sejak patch sebelumnya.
+- Tabel PPPoE Secret di menu MikroTik NMS (views/network/monitor.ejs)
+  SENGAJA TIDAK diubah pada patch ini: tabel tersebut sepenuhnya dirender
+  ulang oleh JavaScript sisi klien (public/js/nms.js) setiap kali data
+  telemetry live dari router disegarkan (polling beberapa detik sekali),
+  bukan dirender sekali oleh server seperti tabel lain. Menambahkan nomor
+  urut di sana memerlukan perubahan pada logic rendering JS yang aktif
+  menangani sinkronisasi PPPoE real-time — risikonya tidak sepadan dengan
+  manfaat kosmetik semata, sehingga sengaja dilewati demi menjaga
+  stabilitas fitur NMS yang sudah berjalan.
+- Menu Paket Internet (card grid, bukan tabel) sudah memakai checkbox
+  dengan class="form-check-input" sejak sebelumnya; nomor urut di sana
+  berbentuk badge "01, 02, ..." yang menyatu dengan desain kartu (bukan
+  kolom tabel) sehingga sengaja dipertahankan apa adanya.
+
+Dua class CSS generik baru ditambahkan di app.css sejak awal putaran ini
+(dipakai berulang di seluruh perubahan di atas):
+- .app-check-col (lebar 34px, rata tengah) — pembungkus kolom checkbox.
+- .app-seq-col (lebar 50px, rata tengah) — pembungkus kolom No.
+(public/css/app.css)
+
+===========================================================
+FILE YANG DIUBAH (32 file, 1 di antaranya baru)
+===========================================================
+- public/css/app.css
+- views/customers/index.ejs
+- views/invoices/index.ejs
+- routes/invoices.js
+- services/invoiceService.js
+- middleware/invoiceExcelUpload.js (BARU)
+- app.js
+- views/payments/index.ejs
+- routes/inventory.js
+- views/inventory/movements.ejs
+- views/inventory/usage.ejs
+- views/inventory/index.ejs
+- views/inventory/suppliers.ejs
+- views/routers/index.ejs
+- views/sites/index.ejs
+- views/clusters/index.ejs
+- views/custom-invoices/index.ejs
+- views/tickets/index.ejs
+- views/customers/detail.ejs
+- views/finance/charges.ejs
+- views/finance/discounts.ejs
+- views/team-kpi/index.ejs
+- views/dashboard/collection.ejs
+- views/logs/index.ejs
+- views/finance/cash.ejs
+- views/payments/reconciliation.ejs
+- views/whatsapp-gateway/index.ejs
+- views/settings/index.ejs
+- views/analytics/index.ejs
+- package.json (versi -> 1.25.5)
+- views/partials/layout.ejs (versi -> v1.25.5)
+- scripts/validate-v119.js (assertion versi -> 1.25.5)
+
+===========================================================
+PENGUJIAN YANG SUDAH DILAKUKAN
+===========================================================
+- node --check pada seluruh file route/service/middleware aplikasi (npm
+  run check): OK, tidak ada error sintaks, termasuk middleware/
+  invoiceExcelUpload.js dan ke-4 rute baru di routes/inventory.js.
+- Seluruh file EJS aplikasi dikompilasi ulang (ejs.compile) satu per satu:
+  semua lulus tanpa error, termasuk 32 file yang diubah pada patch ini.
+- npm run validate:v119 (validasi statis + kontrak versi/fitur + tes proxy
+  infrastruktur + tes approval kas + tes CSS responsif): SEMUA LULUS,
+  dijalankan ulang setelah setiap tahap perubahan besar (Tagihan, Gudang,
+  sweep aplikasi-lebar, dan bump versi terakhir).
+- Tes fungsional Import Tagihan (server Express sungguhan + fetch HTTP +
+  database tiruan, mencakup skenario insert baru DAN update tagihan yang
+  sudah ada / upsert): 13 pemeriksaan, semua PASS — termasuk verifikasi
+  bahwa baris "Sudah Dibayar" pada import HANYA membuat pembayaran
+  berstatus pending, tidak pernah langsung LUNAS.
+- Tes fungsional 4 rute baru Gudang (hapus/koreksi Pergerakan Stock,
+  hapus/koreksi Pemakaian Material, keduanya single & bulk) memakai
+  database tiruan: 11 pemeriksaan, semua PASS — termasuk verifikasi
+  konkret bahwa entri "out" mengoreksi BALIK dengan menambah qty, entri
+  "in"/"adjustment" mengoreksi balik dengan mengurangi qty (persis
+  kebalikan dari logika Sesuaikan Stock), dan qty Pemakaian Material
+  dikembalikan penuh saat entrinya dihapus.
+- Render test Gudang (server Express + fetch HTTP, 4 view: Stock,
+  Pergerakan Stock, Pemakaian Material, Supplier): 30 pemeriksaan, semua
+  PASS — checkbox, nomor urut, menu Tindakan/popover, dan colspan
+  empty-state seluruhnya diverifikasi terprogram.
+- Render test sweep aplikasi-lebar (server Express + fetch HTTP, 18 view
+  yang diubah pada bagian TAMBAHAN, termasuk memakai buildDummyAnalytics()
+  yang sesungguhnya dari services/analyticsService.js untuk memastikan
+  halaman Analitik tetap kompatibel dengan data asli): 33 pemeriksaan,
+  semua PASS — mencakup class checkbox, header kolom No., nomor baris,
+  dan colspan empty-state di setiap file yang diubah.
+- Diperiksa manual: setiap file yang SUDAH memakai pola nomor urut polos
+  sebelum patch ini (Kategori Kas, Laporan, Paket Internet, dan Menu
+  Approval/Tagihan/Pelanggan hasil pekerjaan sebelumnya dalam putaran yang
+  sama) dipastikan TIDAK diubah lagi karena sudah sesuai — mencegah
+  perubahan yang tidak perlu.
+
+===========================================================
+CARA PASANG
+===========================================================
+1. Backup folder aplikasi terlebih dahulu. TIDAK ADA migrasi skema
+   database pada patch ini — seluruh perubahan bersifat tampilan (EJS/CSS)
+   dan penambahan rute baru yang memakai tabel yang sudah ada
+   (inventory_movements, material_usages, inventory_items).
+2. Timpa (overwrite) 32 file di atas sesuai struktur folder pada patch
+   ini. File middleware/invoiceExcelUpload.js adalah file BARU — pastikan
+   foldernya (middleware/) menerima file baru ini, bukan hanya menimpa
+   file yang sudah ada.
+3. TIDAK perlu "npm install" tambahan — seluruh dependency (exceljs,
+   multer) sudah dipakai/terpasang sejak patch Import Excel Pelanggan
+   sebelumnya.
+4. Restart aplikasi Node.js.
+5. Hard-refresh browser (Ctrl+Shift+R) di semua perangkat yang dipakai
+   admin, supaya app.css/app.js terbaru termuat (mengandung class
+   .app-check-col/.app-seq-col baru).
+6. Cek cepat per bagian:
+   a. MENU PELANGGAN — nomor urut sekarang teks polos, bukan kotak
+      bertepi (bandingkan dengan Menu Tagihan, harus identik).
+   b. MENU TAGIHAN — kolom Terbayar sudah tidak ada; urutan kolom
+      checkbox-No.-Pelanggan-Site-Periode-Jatuh Tempo-Tagihan-Status-Aksi;
+      klik "Import XLSX", unduh template, isi 1-2 baris uji coba (nomor
+      faktur kosong untuk insert baru, atau isi nomor faktur yang sudah
+      ada untuk uji update), lalu import dan pastikan hasilnya sesuai.
+   c. MENU APPROVAL — checkbox tampil identik dengan Menu Pelanggan;
+      tulisan INV di bawah nama pelanggan sudah hilang; kolom Jatuh Tempo
+      sudah pindah lebih dekat ke Site/Cluster.
+   d. MENU GUDANG — buka Pergerakan Stock & Pemakaian Material, pastikan
+      checkbox + No. + tombol Tindakan (titik tiga) muncul di setiap
+      baris; coba hapus 1 entri percobaan dan pastikan saldo stock barang
+      terkait ikut terkoreksi otomatis (naik/turun sesuai tipe entrinya).
+   e. TAMBAHAN — buka beberapa menu lain secara acak (Router, Site,
+      Cluster, Ticketing, Data Kas, Pengaturan, Analitik, dsb.) dan
+      pastikan checkbox (bila ada) & kolom No. tampil konsisten dengan
+      gaya Menu Tagihan di semua menu tersebut.

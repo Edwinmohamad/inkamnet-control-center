@@ -15,6 +15,7 @@ const commonLocals = require('./middleware/common');
 const paymentProofUpload = require('./middleware/paymentProofUpload');
 const customerExcelUpload = require('./middleware/customerExcelUpload');
 const clusterExcelUpload = require('./middleware/clusterExcelUpload');
+const invoiceExcelUpload = require('./middleware/invoiceExcelUpload');
 const profilePhotoUpload = require('./middleware/profilePhotoUpload');
 const cashProofUpload = require('./middleware/cashProofUpload');
 const ticketPhotoUpload = require('./middleware/ticketPhotoUpload');
@@ -89,6 +90,18 @@ app.use('/clusters/import', (req, res, next) => {
       if (err) {
         req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'File Excel maksimal 8 MB.' : err.message };
         return res.redirect('/clusters');
+      }
+      next();
+    });
+  }
+  next();
+});
+app.use('/invoices/import', (req, res, next) => {
+  if (req.method === 'POST' && req.is('multipart/form-data')) {
+    return invoiceExcelUpload(req, res, (err) => {
+      if (err) {
+        req.session.flash = { type: 'danger', message: err.code === 'LIMIT_FILE_SIZE' ? 'File Excel maksimal 8 MB.' : err.message };
+        return res.redirect('/invoices');
       }
       next();
     });
