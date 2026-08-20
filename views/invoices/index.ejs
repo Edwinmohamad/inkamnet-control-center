@@ -78,7 +78,7 @@
             <td><span class="cell-main"><%= monthNames[i.period_month-1] %> <%= i.period_year %></span><span class="cell-sub"><%= i.is_prorata?'PRORATA':'BULANAN' %></span></td>
             <td><%= formatDate(i.due_date) %></td>
             <td class="money"><%= formatRupiah(i.total) %><span class="cell-sub"><%= i.package_name %></span></td>
-            <td><% if(hasPending){ %><span class="status-badge orange"><i class="bi bi-hourglass-split"></i> Menunggu Approval</span><% }else{ %><span class="status-badge <%= i.status==='paid'?'green':i.status==='overdue'?'red':i.status==='partial'?'orange':'gray' %>"><%= i.status==='paid'?'LUNAS':i.status==='overdue'?'TERLAMBAT':i.status==='partial'?'SEBAGIAN':i.status==='cancelled'?'DIBATALKAN':'BELUM LUNAS' %></span><% } %></td>
+            <td><% if(hasPending){ %><span class="status-badge orange"><i class="bi bi-hourglass-split"></i> Menunggu Approval</span><% }else if(i.status==='paid'){ %><span class="status-badge green"><i class="bi bi-check2-circle"></i> Lunas</span><% }else{ %><span class="status-badge red"><i class="bi bi-exclamation-circle"></i> Belum Lunas</span><% } %></td>
             <% if(isAdmin){ %><td class="invoice-pay-cell"><% if(canPay){ %><button type="button" class="invoice-pay-button" data-bs-toggle="modal" data-bs-target="#paymentModal" data-payment-invoice-id="<%= i.id %>" title="Input pembayaran penuh untuk approval"><i class="bi bi-check2-circle"></i><span>Lunasi</span></button><% } %></td><% } %>
             <td class="invoice-action-cell">
               <div class="invoice-inline-actions">
